@@ -20,6 +20,12 @@ data/*
 !data/nocodb_metadata/**
 data/qdrant_storage/
 
+# Local knowledge library
+aqui cualquier catedra/
+
+# Local private/reference files
+No entrar a a esta carpeta/
+
 # OS and editor files
 .DS_Store
 .idea/

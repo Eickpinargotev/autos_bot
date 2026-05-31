@@ -5,7 +5,7 @@
                 "Hola!!!\n\nMi nombre es Enrique Guzmán y estaré pendiente de su proceso de obtención de licencia\n\nYa tiene cita agendada para la prueba de manejo???"
             ],
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nNo recibí tu respuesta\n\nYa tiene cita agendada para la prueba de manejo???"
                 ]
@@ -18,7 +18,7 @@
                 "Hola!!!\n\nOfrecemos el servicio de clases de manejo personalizadas. Las clases las ocupas en Liberia???"
             ],
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nDime en cual sede ocupas tus clases"
                 ]
@@ -31,7 +31,7 @@
             ],
             "reporte": "contestaron al mensaje de clases de manejo",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nPudo llenar el formulario para agendar su clase???"
                 ],
@@ -45,7 +45,7 @@
             ],
             "reporte": "contestaron al ultimo mensaje de clases de manejo",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nEnvíeme la foto del depósito para poder coordinarle la enseñanza de manejo"
                 ],
@@ -63,7 +63,7 @@
             ],
             "reporte": "contestaron al mensaje de dictamen de licencias",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌Hola!!!\n\nNo me envió el formulario con los datos y la información que ocupo para gestionar su dictamen"
                 ],
@@ -79,7 +79,7 @@
             ],
             "reporte": "contestaron al mensaje de dictamen de licencias",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌Hola!!!\n\nNo me envió el formulario con los datos y la información que ocupo para gestionar su dictamen"
                 ],
@@ -94,7 +94,7 @@
                 "Ya tiene el teórico ganado???"
             ],
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nNo recibí tu respuesta\n\nYa tiene el teórico ganado???"
                 ]
@@ -105,7 +105,7 @@
                 "Excelente. Muchas felicidades.\n\nYa tiene cita agendada para la prueba de manejo???"
             ],
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nNo recibí tu respuesta\n\nYa tiene cita agendada para la prueba de manejo???"
                 ]
@@ -116,7 +116,7 @@
                 "Nosotros ofrecemos el servicio de preparación y citas para el examen teórico.\n\nDonde vives???"
             ],
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nLe agradezco mucho que me indique en cual ciudad es que va a realizar su curso teórico"
                 ]
@@ -127,7 +127,7 @@
                 "Donde es su prueba de manejo???"
             ],
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nLe agradezco mucho si si me dice en cual sede es su prueba de manejo???"
                 ]
@@ -140,13 +140,13 @@
             ],
             "reporte": "contestaron al mensaje sobre formulario de solicitud de citas para prueba de manejo, revisar",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el formulario para agendar la cita???"
                 ],
                 "reporte": "contestaron el recordatorio para el formulario para agendar cita",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\n\nNo me dijo si pudo llenar el formulario para agendar su cita"
                     ],
@@ -172,13 +172,13 @@
             ],
             "reporte": "Contestaron mensaje sobre formulario de reservación",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en\nambos formularios???"
                 ],
                 "reporte": "Contestaron recordatorio por formulario de reservación",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos y el de la preparación"
                     ],
@@ -193,13 +193,13 @@
             ],
             "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
                 ],
                 "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos y el de la preparación"
                     ],
@@ -214,13 +214,13 @@
             ],
             "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
                 ],
                 "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos y el de la preparación"
                     ],
@@ -235,13 +235,13 @@
             ],
             "reporte": "contestaron mensaje sobre formulario de reservacion de camion",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
                 ],
                 "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -256,13 +256,13 @@
             ],
             "reporte": "contestaron mensaje sobre formulario de reservacion de B3",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
                 ],
                 "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -277,13 +277,13 @@
             ],
             "reporte": "contestaron mensaje sobre formulario de reservacion de B4 o trailer",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
                 ],
                 "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -298,13 +298,13 @@
             ],
             "reporte": "contestaron mensaje sobre formulario de reservacion de bus automático",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
                 ],
                 "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -319,13 +319,13 @@
             ],
             "reporte": " Contestaron mensaje de formulario para alquiler o reservacion de carro, automovil o B1",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
                 ],
                 "reporte": " Contestaron recordatorio de formulario para alquiler o reservacion de carro, automovil o B1",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -340,13 +340,13 @@
             ],
             "reporte": " Contestaron mensaje sobre formulario para reservación de moto, A1, A2 o A3 con snipe 60023618",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
                 ],
                 "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -361,13 +361,13 @@
             ],
             "reporte": " Contestaron mensaje sobre formulario para reservación de moto, A1, A2 o A3 con snipe 61103205",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
                 ],
                 "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -382,13 +382,13 @@
             ],
             "reporte": " Contestaron mensaje sobre formulario para reservación para B2 o camión",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
                 ],
                 "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -403,13 +403,13 @@
             ],
             "reporte": " Contestaron mensaje sobre formulario para reservación para camión automático o B3",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
                 ],
                 "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -424,13 +424,13 @@
             ],
             "reporte": " Contestaron mensaje sobre formulario para reservación para B4 (trailer)",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
                 ],
                 "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -445,13 +445,13 @@
             ],
             "reporte": " Contestaron mensaje sobre formulario para reservación de bus automático",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
                 ],
                 "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
                 "recordatorio": {
-                    "segundos": 13,
+                    "segundos": 23,
                     "mensajes": [
                         "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
                     ],
@@ -519,7 +519,7 @@
             ],
             "reporte": "El cliente tiene una queja y contestó al mensaje envíado por el agente",
             "recordatorio": {
-                "segundos": 13,
+                "segundos": 23,
                 "mensajes": [
                     "📌 Hola!!!\n\nDisculpe la insistencia pero le agradezco más detalles de lo ocurrido"
                 ],
