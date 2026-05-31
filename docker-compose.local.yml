@@ -1,0 +1,233 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mi_usuario_db}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mi_password_seguro}
+      POSTGRES_DB: ${POSTGRES_DB:-mi_base_de_datos}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_db
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  nocodb:
+    image: nocodb/nocodb:2026.05.0
+    container_name: nocodb_app
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/nocodb_metadata:/usr/app/data
+    restart: unless-stopped
+
+  evolution_go_db_init:
+    image: postgres:16-alpine
+    container_name: evolution_go_db_init
+    environment:
+      PGUSER: ${POSTGRES_USER:-mi_usuario_db}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-mi_password_seguro}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c '
+        psql -h postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '\''evogo_auth'\''" | grep -q 1 ||
+        psql -h postgres -d postgres -c "CREATE DATABASE evogo_auth";
+        psql -h postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '\''evogo_users'\''" | grep -q 1 ||
+        psql -h postgres -d postgres -c "CREATE DATABASE evogo_users";
+      '
+    restart: "no"
+
+  evolution_go:
+    image: ${EVOLUTION_GO_IMAGE:-evoapicloud/evolution-go:latest}
+    container_name: evolution_go
+    environment:
+      SERVER_PORT: 8080
+      CLIENT_NAME: evolution
+      GLOBAL_API_KEY: ${EVOLUTION_GO_API_KEY}
+      POSTGRES_AUTH_DB: postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/evogo_auth?sslmode=disable
+      POSTGRES_USERS_DB: postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/evogo_users?sslmode=disable
+      DATABASE_SAVE_MESSAGES: "false"
+      WEBHOOK_URL: http://whatsapp_webhook:8010/webhooks/evolution-go?token=${EVOLUTION_WEBHOOK_TOKEN}
+      WADEBUG: INFO
+      LOGTYPE: console
+    ports:
+      - "${EVOLUTION_GO_PORT:-4000}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      evolution_go_db_init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  bot_agent:
+    build:
+      context: ./services/bot_agent
+      dockerfile: Dockerfile
+    container_name: bot_agent_telegram
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-nano}
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
+      - NOCODB_URL=http://nocodb:8080
+      - NOCODB_API_KEY=${NOCODB_API_KEY}
+      - NOCODB_TABLE_LOGS=${NOCODB_TABLE_LOGS}
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - NOCODB_INVITACIONES_URL=${NOCODB_INVITACIONES_URL}
+      - NOCODB_REPORTES_URL=${NOCODB_REPORTES_URL}
+      - NOCODB_CONVERSATIONS_URL=${NOCODB_CONVERSATIONS_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5}
+      - NOCODB_KEYWORD_REGISTROS_URL=${NOCODB_KEYWORD_REGISTROS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz}
+      - NOCODB_RAG_CHUNKS_URL=${NOCODB_RAG_CHUNKS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61}
+      - NOCODB_UNANSWERED_QUESTIONS_URL=${NOCODB_UNANSWERED_QUESTIONS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n}
+      - NOCODB_RAG_WEBHOOK_TOKEN=${NOCODB_RAG_WEBHOOK_TOKEN:-}
+      - RAG_CONVERSATION_HISTORY_LIMIT=${RAG_CONVERSATION_HISTORY_LIMIT:-5}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
+      - RAG_SYNC_TTL_SECONDS=${RAG_SYNC_TTL_SECONDS:-300}
+      - NOCODB_TOKEN=${NOCODB_TOKEN}
+      - EVOLUTION_GO_URL=${EVOLUTION_GO_URL:-http://evolution_go:8080}
+      - EVOLUTION_GO_API_KEY=${EVOLUTION_GO_API_KEY}
+      - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME:-evolution}
+      - EVOLUTION_GO_IMAGE_ENDPOINT=${EVOLUTION_GO_IMAGE_ENDPOINT:-/send/image}
+      - EVOLUTION_WEBHOOK_TOKEN=${EVOLUTION_WEBHOOK_TOKEN}
+      - GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE=${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
+      - OUTBOUND_IMAGE_TIMEOUT_SECONDS=${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
+      - OUTBOUND_IMAGE_MAX_BYTES=${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
+      - PUB_DELAY_1_SEC=${PUB_DELAY_1_SEC}
+      - PUB_DELAY_2_SEC=${PUB_DELAY_2_SEC}
+      - PUB_DELAY_3_SEC=${PUB_DELAY_3_SEC}
+      - MSG_DELAY_MIN=${MSG_DELAY_MIN}
+      - MSG_DELAY_MAX=${MSG_DELAY_MAX}
+    volumes:
+      - ./services/bot_agent:/app
+      - ./mensajes.json:/mensajes.json:ro
+    depends_on:
+      - postgres
+      - redis
+      - nocodb
+      - qdrant
+    restart: unless-stopped
+
+  celery_worker:
+    build:
+      context: ./services/bot_agent
+      dockerfile: Dockerfile
+    container_name: bot_agent_worker
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-nano}
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - NOCODB_INVITACIONES_URL=${NOCODB_INVITACIONES_URL}
+      - NOCODB_REPORTES_URL=${NOCODB_REPORTES_URL}
+      - NOCODB_CONVERSATIONS_URL=${NOCODB_CONVERSATIONS_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5}
+      - NOCODB_KEYWORD_REGISTROS_URL=${NOCODB_KEYWORD_REGISTROS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz}
+      - NOCODB_RAG_CHUNKS_URL=${NOCODB_RAG_CHUNKS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61}
+      - NOCODB_UNANSWERED_QUESTIONS_URL=${NOCODB_UNANSWERED_QUESTIONS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n}
+      - NOCODB_RAG_WEBHOOK_TOKEN=${NOCODB_RAG_WEBHOOK_TOKEN:-}
+      - RAG_CONVERSATION_HISTORY_LIMIT=${RAG_CONVERSATION_HISTORY_LIMIT:-5}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
+      - RAG_SYNC_TTL_SECONDS=${RAG_SYNC_TTL_SECONDS:-300}
+      - NOCODB_TOKEN=${NOCODB_TOKEN}
+      - EVOLUTION_GO_URL=${EVOLUTION_GO_URL:-http://evolution_go:8080}
+      - EVOLUTION_GO_API_KEY=${EVOLUTION_GO_API_KEY}
+      - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME:-evolution}
+      - EVOLUTION_GO_IMAGE_ENDPOINT=${EVOLUTION_GO_IMAGE_ENDPOINT:-/send/image}
+      - EVOLUTION_WEBHOOK_TOKEN=${EVOLUTION_WEBHOOK_TOKEN}
+      - GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE=${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
+      - OUTBOUND_IMAGE_TIMEOUT_SECONDS=${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
+      - OUTBOUND_IMAGE_MAX_BYTES=${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
+      - PUB_DELAY_1_SEC=${PUB_DELAY_1_SEC}
+      - PUB_DELAY_2_SEC=${PUB_DELAY_2_SEC}
+      - PUB_DELAY_3_SEC=${PUB_DELAY_3_SEC}
+      - MSG_DELAY_MIN=${MSG_DELAY_MIN}
+      - MSG_DELAY_MAX=${MSG_DELAY_MAX}
+    volumes:
+      - ./services/bot_agent:/app
+      - ./mensajes.json:/mensajes.json:ro
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+    command: celery -A src.infrastructure.tasks.celery_app worker --loglevel=info
+    restart: unless-stopped
+
+  whatsapp_webhook:
+    build:
+      context: ./services/bot_agent
+      dockerfile: Dockerfile
+    container_name: whatsapp_webhook
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-nano}
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - NOCODB_INVITACIONES_URL=${NOCODB_INVITACIONES_URL}
+      - NOCODB_REPORTES_URL=${NOCODB_REPORTES_URL}
+      - NOCODB_CONVERSATIONS_URL=${NOCODB_CONVERSATIONS_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5}
+      - NOCODB_KEYWORD_REGISTROS_URL=${NOCODB_KEYWORD_REGISTROS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz}
+      - NOCODB_RAG_CHUNKS_URL=${NOCODB_RAG_CHUNKS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61}
+      - NOCODB_UNANSWERED_QUESTIONS_URL=${NOCODB_UNANSWERED_QUESTIONS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n}
+      - NOCODB_RAG_WEBHOOK_TOKEN=${NOCODB_RAG_WEBHOOK_TOKEN:-}
+      - RAG_CONVERSATION_HISTORY_LIMIT=${RAG_CONVERSATION_HISTORY_LIMIT:-5}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
+      - RAG_SYNC_TTL_SECONDS=${RAG_SYNC_TTL_SECONDS:-300}
+      - NOCODB_TOKEN=${NOCODB_TOKEN}
+      - EVOLUTION_GO_URL=${EVOLUTION_GO_URL:-http://evolution_go:8080}
+      - EVOLUTION_GO_API_KEY=${EVOLUTION_GO_API_KEY}
+      - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME:-evolution}
+      - EVOLUTION_GO_IMAGE_ENDPOINT=${EVOLUTION_GO_IMAGE_ENDPOINT:-/send/image}
+      - EVOLUTION_WEBHOOK_TOKEN=${EVOLUTION_WEBHOOK_TOKEN}
+      - GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE=${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
+      - OUTBOUND_IMAGE_TIMEOUT_SECONDS=${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
+      - OUTBOUND_IMAGE_MAX_BYTES=${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
+      - PUB_DELAY_1_SEC=${PUB_DELAY_1_SEC}
+      - PUB_DELAY_2_SEC=${PUB_DELAY_2_SEC}
+      - PUB_DELAY_3_SEC=${PUB_DELAY_3_SEC}
+      - MSG_DELAY_MIN=${MSG_DELAY_MIN}
+      - MSG_DELAY_MAX=${MSG_DELAY_MAX}
+    volumes:
+      - ./services/bot_agent:/app
+      - ./mensajes.json:/mensajes.json:ro
+    depends_on:
+      - postgres
+      - redis
+      - nocodb
+      - evolution_go
+      - qdrant
+    command: uvicorn src.infrastructure.webhooks.evolution_go_app:app --host 0.0.0.0 --port 8010
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

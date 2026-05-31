@@ -1,0 +1,16 @@
+langgraph
+langchain-openai==1.2.1
+langchain
+fastapi
+httpx
+psycopg2-binary
+uvicorn
+python-telegram-bot
+python-dotenv
+qdrant-client
+langgraph-checkpoint-postgres
+psycopg[binary]
+pydantic-settings
+pydantic
+redis
+celery

@@ -1,0 +1,40 @@
+import json
+from dataclasses import asdict, dataclass, field
+
+from src.application.buffer_service import redis_client, scoped_key
+from src.domain.entities import Channel
+
+
+@dataclass
+class ConversationState:
+    flow: str = "INICIO"
+    node: str = ""
+    last_question: str = ""
+    awaiting_reply: bool = False
+    pending_report: str = ""
+    reminder_task_ids: list[str] = field(default_factory=list)
+    last_messages: list[str] = field(default_factory=list)
+    user_name: str = "Desconocido"
+    reminder_level: int = 0
+    conversation_history: list[dict] = field(default_factory=list)
+
+
+class ConversationStateRepo:
+    @staticmethod
+    def get(channel: Channel | str, user_id: str) -> ConversationState:
+        raw = redis_client.get(scoped_key("conversation_state", channel, user_id))
+        if not raw:
+            return ConversationState()
+        try:
+            data = json.loads(raw)
+            return ConversationState(**data)
+        except Exception:
+            return ConversationState()
+
+    @staticmethod
+    def set(channel: Channel | str, user_id: str, state: ConversationState):
+        redis_client.set(scoped_key("conversation_state", channel, user_id), json.dumps(asdict(state), ensure_ascii=False))
+
+    @staticmethod
+    def clear(channel: Channel | str, user_id: str):
+        redis_client.delete(scoped_key("conversation_state", channel, user_id))

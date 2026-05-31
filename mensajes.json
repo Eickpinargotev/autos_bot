@@ -1,0 +1,546 @@
+{
+    "Alquiler": {
+        "A1": {
+            "mensajes": [
+                "Hola!!!\n\nMi nombre es Enrique Guzmán y estaré pendiente de su proceso de obtención de licencia\n\nYa tiene cita agendada para la prueba de manejo???"
+            ],
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nNo recibí tu respuesta\n\nYa tiene cita agendada para la prueba de manejo???"
+                ]
+            }
+        }
+    },
+    "CLASES": {
+        "C1": {
+            "mensajes": [
+                "Hola!!!\n\nOfrecemos el servicio de clases de manejo personalizadas. Las clases las ocupas en Liberia???"
+            ],
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nDime en cual sede ocupas tus clases"
+                ]
+            }
+        },
+        "C2": {
+            "mensajes": [
+                "Excelente!!!\n\nAcá le envío el precio de los paquetes disponibles y el\nenlace a nuestra agenda para reservar su espacio",
+                "💡💡💡 Contamos con 3 opciones para la contratación de clases de manejo.\n\n✒ Clase individual: la hora de clase de manejo vale 15 mil.\nSe paga la totalidad al inicio de la lección\n\n✒Paquete de 5 horas: el valor de este paquete es de 70 mil colones.\nSe paga la mitad (35 mil colones) al inicio de la primera lección y el restante (los otros 35 mil colones) al inicio de la tercera lección\n\n✒ Paquete de 10 horas: el valor de este paquete es de 130 mil colones.\nSe paga la mitad (65 mil colones) al inicio de la primera lección y el resto (los otros 65 mil colones) al inicio de la quinta lección.\n\nPor favor utilice este enlace para agendar su clase de\nmanejo en Liberia\n\nhttps://calendly.com/clasesdemanejo/clases"
+            ],
+            "reporte": "contestaron al mensaje de clases de manejo",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nPudo llenar el formulario para agendar su clase???"
+                ],
+                "reporte": "respondieron recordatorio sobre clase de manejo"
+            }
+        },
+        "C5": {
+            "mensajes": [
+                "🛡🛡🛡 Contamos con 3 opciones para la contratación de clases de manejo.\n\n✒ Clase individual: la hora de clase de manejo vale 15650.\n🎯 Se reserva con 5650 y el resto del dinero se paga en efectivo el día de la preparación\n🎯 Sinpe al 60023618\n\n✒Paquete de 5 horas: el valor de este paquete es de 72600 colones.\n🎯 Se reserva con 22600 colones\n🎯 Se paga 20 mil colones al inicio de la primera lección y el restante (los otros 30 mil colones) al inicio de la tercera lección.\n🎯 Sinpe al 60023618\n\n✒ Paquete de 10 horas: el valor de este paquete es de 133900 colones.\n🎯 Se reserva con 33900 colones\n🎯 Se paga 40 mil colones al inicio de la primera lección y el resto (los otros 60 mil colones) al inicio de la quinta lección.\n🎯 Sinpe al 60023618",
+                "Me envía la foto del depósito para coordinar la\natención"
+            ],
+            "reporte": "contestaron al ultimo mensaje de clases de manejo",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nEnvíeme la foto del depósito para poder coordinarle la enseñanza de manejo"
+                ],
+                "reporte": "respondieron recordatorio de clase de manejo"
+            }
+        }
+    },
+    "DICTAMEN": {
+        "D1": {
+            "mensajes": [
+                "EL DICTAMEN VALE 22600",
+                "SINPE AL 60023618",
+                "Me envía la foto del depósito, foto de la cita, foto de la cédula y el siguiente formulario lleno con sus datos",
+                "💡💡💡DICTAMEN DE LICENCIAS 💡💡💡\n\n🩸1) Nombre completo:\n\n🩸2) Cédula:\n\n🩸3) Edad:\n\n🩸4) Estado civil:\n\n🩸5) Ocupación:\n\n🩸6) Provincia, cantón, dirección:\n\n🩸7) Número de WhatsApp:\n\n🩸8) Correo:\n\n🩸9) Estatura:\n\n🩸10) Peso:\n\n🩸11) Mano dominante:\n\n🩸12) Toma algún medicamento?\n\n🩸13) Padece de alguna enfermedad ?\n\n🩸14) Desea el dictamen para licencia A o B o todas:?\n\n🩸15) Usa anteojos permanentes?:\n\n🩸16) Autoriza ser donador en caso de accidente (si o no):\n\n🩸17) Toma licor o fuma activamente:\n\n🩸18) Nacionalidad:\n\n🩸19) Tiene algún tipo de discapacidad auditiva ? Si la respuesta es SI, indicar en qué oído utiliza audífonos:\n\n🩸20) Presenta algún tipo de discapacidad ? Si la respuesta es SI indicar lo sucedido ? Y desde hace cuánto tiempo lo presenta?:\n\n🩸21) Lo necesita renovar, hacer prueba de manejo o para permiso de conducir?:\n\n👩 ⚕Asesor: ENRIQUE GUZMÁN 👩 ⚕"
+            ],
+            "reporte": "contestaron al mensaje de dictamen de licencias",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌Hola!!!\n\nNo me envió el formulario con los datos y la información que ocupo para gestionar su dictamen"
+                ],
+                "reporte": "respondieron recordatorio sobre dictamen"
+            }
+        },
+        "D1_1": {
+            "mensajes": [
+                "EL DICTAMEN VALE 22600",
+                "SINPE AL 61103205",
+                "Me envía la foto del depósito, foto de la cita, foto de la cédula y el siguiente formulario lleno con sus datos",
+                "💡💡💡DICTAMEN DE LICENCIAS 💡💡💡\n\n🩸1) Nombre completo:\n\n🩸2) Cédula:\n\n🩸3) Edad:\n\n🩸4) Estado civil:\n\n🩸5) Ocupación:\n\n🩸6) Provincia, cantón, dirección:\n\n🩸7) Número de WhatsApp:\n\n🩸8) Correo:\n\n🩸9) Estatura:\n\n🩸10) Peso:\n\n🩸11) Mano dominante:\n\n🩸12) Toma algún medicamento?\n\n🩸13) Padece de alguna enfermedad ?\n\n🩸14) Desea el dictamen para licencia A o B o todas:?\n\n🩸15) Usa anteojos permanentes?:\n\n🩸16) Autoriza ser donador en caso de accidente (si o no):\n\n🩸17) Toma licor o fuma activamente:\n\n🩸18) Nacionalidad:\n\n🩸19) Tiene algún tipo de discapacidad auditiva ? Si la respuesta es SI, indicar en qué oído utiliza audífonos:\n\n🩸20) Presenta algún tipo de discapacidad ? Si la respuesta es SI indicar lo sucedido ? Y desde hace cuánto tiempo lo presenta?:\n\n🩸21) Lo necesita renovar, hacer prueba de manejo o para permiso de conducir?:\n\n👩 ⚕Asesor: ENRIQUE GUZMÁN 👩 ⚕"
+            ],
+            "reporte": "contestaron al mensaje de dictamen de licencias",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌Hola!!!\n\nNo me envió el formulario con los datos y la información que ocupo para gestionar su dictamen"
+                ],
+                "reporte": "respondieron recordatorio sobre dictamen"
+            }
+        }
+    },
+    "GENERAL": {
+        "G1": {
+            "mensajes": [
+                "Hola!!!\n\nGracias por tu mensaje\n\nMi nombre es Enrique Guzmán y estaré pendiente de su proceso de obtención de licencias",
+                "Ya tiene el teórico ganado???"
+            ],
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nNo recibí tu respuesta\n\nYa tiene el teórico ganado???"
+                ]
+            }
+        },
+        "G3": {
+            "mensajes": [
+                "Excelente. Muchas felicidades.\n\nYa tiene cita agendada para la prueba de manejo???"
+            ],
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nNo recibí tu respuesta\n\nYa tiene cita agendada para la prueba de manejo???"
+                ]
+            }
+        },
+        "G4": {
+            "mensajes": [
+                "Nosotros ofrecemos el servicio de preparación y citas para el examen teórico.\n\nDonde vives???"
+            ],
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nLe agradezco mucho que me indique en cual ciudad es que va a realizar su curso teórico"
+                ]
+            }
+        },
+        "G35": {
+            "mensajes": [
+                "Donde es su prueba de manejo???"
+            ],
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nLe agradezco mucho si si me dice en cual sede es su prueba de manejo???"
+                ]
+            }
+        },
+        "G7": {
+            "mensajes": [
+                "No hay problema!!!\n\nYo le puedo ayudar con la cita",
+                "💡💡💡 Por favor llenar el formulario de solicitud de citas para prueba de manejo\n\nEn la pregunta que dice *\"\"INGRESO COSEVI\"\"* debe poner su clave de usuario\n\nhttps://forms.gle/kTgfYQhHKJ1Tfzkj7"
+            ],
+            "reporte": "contestaron al mensaje sobre formulario de solicitud de citas para prueba de manejo, revisar",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el formulario para agendar la cita???"
+                ],
+                "reporte": "contestaron el recordatorio para el formulario para agendar cita",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\n\nNo me dijo si pudo llenar el formulario para agendar su cita"
+                    ],
+                    "reporte": "contestaron el recordatorio para el formulario para agendar cita"
+                }
+            }
+        },
+        "G11": {
+            "mensajes": [
+                "La licencia que usted va a sacar es moto o carro???"
+            ]
+        },
+        "G12": {
+            "mensajes": [
+                "La licencia que usted va a sacar es moto o carro???"
+            ]
+        },
+        "G13": {
+            "mensajes": [
+                "💡💡💡Hola!!!\n\nTenemos el siguiente paquete para alquilar su vehículo para prueba de manejo. Si no tiene cita para prueba le ayudamos con la programación de manera gratuita.\n\n🎯 *PAQUETE VIP* 🎯\n\n*VALOR:* 40 mil colones\n\n*VEHÍCULO:* Smart eléctrico o Spark automático gasolina (Dependiendo de la disponibilidad)\n\nIncluye:\n\n*PREVIO:*\n\n🚙 Clase de preparación que es para practicar conos, reversa, salida del plantel, direccionales y la manera correcta de hacer el alto en la salida del plantel  \n🚙 Recorrido explicativo de la ruta oficial que hace el evaluador.\n\n🇨🇷 *Notas a considerar:* 🇨🇷  \n👉📒*A)* La duración de la preparación es de 50 minutos en total  \n👉📒*B)* La preparación de este paquete debe hacerse agendando vía formulario  \n👉📒*C)* En este paquete se incluye enseñanza de manejo en carro automático. En caso que el usuario no tenga experiencia en el manejo de vehículos automáticos.  \n👉📒*D)* Explicación de luces y simulación de la revisión del vehículo\n\n🖊 El dinero se cancela en efectivo.\n\nEnvíeme el pdf de su cita para hacer la reservación",
+                "💡💡💡 Hola!!!\n\nEl paquete que deseas incluye una preparación qué consiste en:\n\n🌺 Recorrido visual explicativo de la ruta  \n🌺 Revisión y aprendizaje del sistema de luces que hace el evaluador previo al inicio de la prueba  \n🌺 Práctica en plantel de conos  \n\nPor favor elije el día y hora de la preparación en el siguiente enlace  \n\n👇🟨👇🟨👇🟨👇🟨👇  \n\nhttps://calendly.com/clasesdemanejo/clases",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": "Contestaron mensaje sobre formulario de reservación",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en\nambos formularios???"
+                ],
+                "reporte": "Contestaron recordatorio por formulario de reservación",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos y el de la preparación"
+                    ],
+                    "reporte": "Contestaron recordatorio por formulario de reservación"
+                }
+            }
+        },
+        "G16": {
+            "mensajes": [
+                "*Tenemos un paquete para usted!!!*\n\n🖊 El alquiler de moto *A1* vale 30 mil colones.  \n(Se reserva con 10 mil colones)  \n\n🖊 El alquiler de moto *A2* vale 30 mil colones.  \n(Se reserva con 5 mil colones)  \n\n🖊 El alquiler de moto para A3 vale 40 mil colones.  \n(Se reserva con 10 mil colones)  \n\n*INCLUYE:*  \n\n🖊 Recorrido visual explicativo de la ruta oficial en la prueba de manejo  \n🖊 Realizar 5 veces el circuito de conos y paralelas en nuestro plantel de práctica.  \n🖊 Alquiler de moto A1-A2-A3.  \n\n🎯 Sinpe al 60023618",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
+                ],
+                "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos y el de la preparación"
+                    ],
+                    "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!"
+                }
+            }
+        },
+        "G16_1": {
+            "mensajes": [
+                "*Tenemos un paquete para usted!!!*\n\n🖊 El alquiler de moto *A1* vale 30 mil colones.  \n(Se reserva con 10 mil colones)  \n\n🖊 El alquiler de moto *A2* vale 30 mil colones.  \n(Se reserva con 5 mil colones)  \n\n🖊 El alquiler de moto para A3 vale 40 mil colones.  \n(Se reserva con 10 mil colones)  \n\n*INCLUYE:*  \n\n🖊 Recorrido visual explicativo de la ruta oficial en la prueba de manejo  \n🖊 Realizar 5 veces el circuito de conos y paralelas en nuestro plantel de práctica.  \n🖊 Alquiler de moto A1-A2-A3.  \n\n🎯 Sinpe al 61103205",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 61103205  \n\nhttps://forms.gle/cNMDTRVbLL8yDH2X9"
+            ],
+            "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
+                ],
+                "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos y el de la preparación"
+                    ],
+                    "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!"
+                }
+            }
+        },
+        "G19": {
+            "mensajes": [
+                "El alquiler de camión para b2 vale 55 mil colones",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": "contestaron mensaje sobre formulario de reservacion de camion",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
+                ],
+                "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": "Contestaron recordatorio por formulario de reservación"
+                }
+            }
+        },
+        "G20": {
+            "mensajes": [
+                "El alquiler de camión automático para B3 vale 75 mil\ncolones",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": "contestaron mensaje sobre formulario de reservacion de B3",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
+                ],
+                "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": "Contestaron recordatorio por formulario de reservación"
+                }
+            }
+        },
+        "G21": {
+            "mensajes": [
+                "El alquiler de camión para B4 (traíler) vale 130 mil\ncolones",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": "contestaron mensaje sobre formulario de reservacion de B4 o trailer",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
+                ],
+                "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": "Contestaron recordatorio por formulario de reservación"
+                }
+            }
+        },
+        "G22": {
+            "mensajes": [
+                "El alquiler de bus automático para prueba de manejo\nvale 85 mil colones",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": "contestaron mensaje sobre formulario de reservacion de bus automático",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
+                ],
+                "reporte": "Contestaron recordatorio sobre formulario de reservacion, revisar!",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": "Contestaron recordatorio por formulario de reservación"
+                }
+            }
+        },
+        "G25": {
+            "mensajes": [
+                "*Tenemos un paquete para usted!!!*  \n\nLe asesoramos y ayudamos obtener la cita de forma gratuita  \n\n🖊 El alquiler del vehículo para *B1* o moto *A1-A2* vale 30 mil colones.  \n\n🖊 El alquiler de moto para A3 vale 40 mil colones  \n\n*INCLUYE:*  \n\n🖊 Recorrido visual explicativo de la ruta oficial en la prueba de manejo  \n🖊 Realizar 5 veces el circuito de conos y reversa en nuestro plantel de práctica.  \n🖊 Alquiler de vehículo automático o moto A2.  \n\n*Se cancelan 10 mil colones vía sinpe móvil al número 60023618 al inicio para hacer la reservación del espacio y el resto del dinero debe cancelarse en efectivo el día de la prueba.*  \n\nSi usted no tiene cita agendada le podemos ayudar con la cita práctica normal sin costo adicional al pagar la reservación del vehículo  \n\nMe envia la foto del depósito para hacerle la reservación",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": " Contestaron mensaje de formulario para alquiler o reservacion de carro, automovil o B1",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
+                ],
+                "reporte": " Contestaron recordatorio de formulario para alquiler o reservacion de carro, automovil o B1",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": " Contestaron recordatorio de formulario para alquiler o reservacion de carro, automovil o B1"
+                }
+            }
+        },
+        "G28": {
+            "mensajes": [
+                "*Tenemos un paquete para usted!!!*  \n\n🖊 El alquiler de moto *A1* vale 30 mil colones.  \n(Se reserva con 10 mil colones)  \n\n🖊 El alquiler de moto *A2* vale 30 mil colones.  \n(Se reserva con 10 mil colones)  \n\n🖊 El alquiler de moto para A3 vale 40 mil colones.  \n(Se reserva con 10 mil colones)  \n\n*INCLUYE:*  \n\n🖊 Recorrido visual explicativo de la ruta oficial en la prueba de manejo  \n🖊 Realizar 5 veces el circuito de conos y paralelas en nuestro plantel de práctica.  \n🖊 Alquiler de moto A1-A2-A3.  \n\n🎯 Sinpe al 60023618",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": " Contestaron mensaje sobre formulario para reservación de moto, A1, A2 o A3 con snipe 60023618",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
+                ],
+                "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo"
+                }
+            }
+        },
+        "G28_1": {
+            "mensajes": [
+                "*Tenemos un paquete para usted!!!*  \n\n🖊 El alquiler de moto *A1* vale 30 mil colones.  \n(Se reserva con 10 mil colones)  \n\n🖊 El alquiler de moto *A2* vale 30 mil colones.  \n(Se reserva con 10 mil colones)  \n\n🖊 El alquiler de moto para A3 vale 40 mil colones.  \n(Se reserva con 10 mil colones)  \n\n*INCLUYE:*  \n\n🖊 Recorrido visual explicativo de la ruta oficial en la prueba de manejo  \n🖊 Realizar 5 veces el circuito de conos y paralelas en nuestro plantel de práctica.  \n🖊 Alquiler de moto A1-A2-A3.  \n\n🎯 Sinpe al 61103205",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\n\nEl sinpe móvil se hace al número 61103205\n\n\nhttps://forms.gle/cNMDTRVbLL8yDH2X9"
+            ],
+            "reporte": " Contestaron mensaje sobre formulario para reservación de moto, A1, A2 o A3 con snipe 61103205",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
+                ],
+                "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo"
+                }
+            }
+        },
+        "G29": {
+            "mensajes": [
+                "El alquiler de camión para B2 vale 55 mil colones",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": " Contestaron mensaje sobre formulario para reservación para B2 o camión",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
+                ],
+                "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo"
+                }
+            }
+        },
+        "G30": {
+            "mensajes": [
+                "El alquiler de camión automático para B3 vale 75 mil colones.",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": " Contestaron mensaje sobre formulario para reservación para camión automático o B3",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
+                ],
+                "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo"
+                }
+            }
+        },
+        "G31": {
+            "mensajes": [
+                "El alquiler de camión para B4 (traíler) vale 130 mil colones",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": " Contestaron mensaje sobre formulario para reservación para B4 (trailer)",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
+                ],
+                "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo"
+                }
+            }
+        },
+        "G32": {
+            "mensajes": [
+                "El alquiler de bus automático para prueba de manejo vale 85 mil colones.",
+                "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
+            ],
+            "reporte": " Contestaron mensaje sobre formulario para reservación de bus automático",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"
+                ],
+                "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo",
+                "recordatorio": {
+                    "segundos": 13,
+                    "mensajes": [
+                        "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
+                    ],
+                    "reporte": " Contestaron recordatorio sobre formulario para reservación de vehiculo"
+                }
+            }
+        }
+    },
+    "KEYWORD": {
+        "T1": {
+            "mensajes": [
+                "💡💡💡Hola!!!\n\nPara iniciar con el curso teórico solamente debes ingresar al siguiente enlace \n👇🏻👇🏻👇🏻👇🏻👇🏻\nDe inmediato comenzarás a recibir el estudio del curso teórico para licencias\n\nUsuario de estudio: (PONER CÉDULA)\nContraseña: (PONER TELÉFONO)\n\nMOTOCICLETA: https://app.escuelasdemanejocr.com/course/view.php?id=24\n\nAUTOMOVIL: https://app.escuelasdemanejocr.com/course/view.php?id=25\n\nBendiciones"
+            ]
+        },
+        "T2": {
+            "mensajes": [
+                "📌 Pudo ingresar a la página de estudio???"
+            ],
+            "reporte": "Contestaron recordatorio 1 día despues de palabra clave",
+            "segundos": 10800
+        },
+        "T3": {
+            "mensajes": [
+                "📌 Como va con su programa de estudio???"
+            ],
+            "reporte": "Contestaron recordatorio 3 días despues de palabra clave",
+            "segundos": 72000
+        },
+        "T4": {
+            "mensajes": [
+                "Recuerde que puede solicitar su cita teórica en el siguiente enlace\n\nEn la pregunta que dice \"INGRESO COSEVI\" debe poner la clave de su usuario \n\nSi llena el formulario con los datos incompletos o incorrectos será eliminado de la lista sin previo aviso. \n\nEs su responsabilidad velar por la veracidad de los datos suministrados\n\nhttps://forms.gle/AKn9QGgByCEbBDDx8"
+            ],
+            "reporte": "Contestaron recordatorio 1 semana despues de palabra clave",
+            "segundos": 82000
+        },
+        "H1": {
+            "mensajes": [
+                "💡💡💡Hola!!!\n\nPara iniciar con el curso teórico de transporte público solamente debes ingresar al siguiente enlace \n👇🏻👇🏻👇🏻👇🏻👇🏻\nhttps://app.escuelasdemanejocr.com/course/view.php?id=22\n\nDe inmediato comenzarás a recibir el estudio del curso teórico para transporte público \n\nUsuario de estudio: (PONER CÉDULA)\nContraseña: (PONER TELÉFONO)\n\nBendiciones"
+            ]
+        }
+    },
+    "PUBLICIDAD": {
+        "P0": {
+            "mensajes": [
+                "📲 Gracias por unirse a nuestro grupo del curso teórico!!!\n\nRecuerde:\n\n🎯 Por política de transparencia no cobramos nada antes del curso y pagas en efectivo hasta ese mismo día.\n\n🎯 Traer documento de identidad \n\n🎯 Traer material para tomar notas (Cuaderno y lapicero) \n\nPor favor presentarse unos 10 minutos antes para hacer la matrícula e iniciar de la mejor manera la obtención de su licencia.\n\nBendiciones"
+            ],
+            "reporte": "Contestaron al mensaje de Bievenida al grupo de whatsApp"
+        },
+        "P1": {
+            "mensajes": [
+                "📱 Gracias por permitirnos ser parte de tu trámite de licencias\n\nComo podemos ayudarte ?"
+            ]
+        },
+        "P2": {
+            "mensajes": [
+                "\"📌 Hola!!!\n\nNo recibí respuesta a nuestra conversación.\n\nPodemos continuar???\""
+            ],
+            "reporte": "Contestaron al recordatorio para unirse al grupo de whatsapp"
+        }
+    },
+    "QUEJA": {
+        "Q1": {
+            "mensajes": [
+                "📌 HOLA!!!\n\nMi nombre es Enrique Guzmán\n\nLe agradezco si me detalla toda la situación de lo ocurrido con lujo de detalles en un audio para entender bien y buscar la solución más favorable a este problema"
+            ],
+            "reporte": "El cliente tiene una queja y contestó al mensaje envíado por el agente",
+            "recordatorio": {
+                "segundos": 13,
+                "mensajes": [
+                    "📌 Hola!!!\n\nDisculpe la insistencia pero le agradezco más detalles de lo ocurrido"
+                ],
+                "reporte": "El cliente tiene una queja y contestó el recordatorio"
+            }
+        }
+    },
+    "WELCOME": {
+        "W": {
+            "mensajes": [
+                "📲 Gracias por unirse a nuestro grupo del curso teórico!!!\n\nRecuerde:\n\n🎯 Por política de transparencia no cobramos nada antes del curso y pagas en efectivo hasta ese mismo día.\n\n🎯 Traer documento de identidad \n\n🎯 Traer material para tomar notas (Cuaderno y lapicero) \n\nPor favor presentarse unos 10 minutos antes para hacer la matrícula e iniciar de la mejor manera la obtención de su licencia.\n\nBendiciones"
+            ],
+            "reporte": "Respondieron a mensaje de bienvenida al grupo"
+        }
+    },
+    "WIN": {
+        "W1": {
+            "mensajes": [
+                "💡💡💡Le agradezco si me ayuda con una buena calificación y recomendación en nuestra página. \n\nPara nosotros es demasiado importante\n\nhttps://www.facebook.com/share/1BmkkrNkuP/"
+            ],
+            "reporte": "Se detectó que el cliente envío un mensaje sobre que ganó la prueba y a contestado al mensaje envíado por el agente, revisar!"
+        }
+    }
+}

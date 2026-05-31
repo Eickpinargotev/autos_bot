@@ -1,0 +1,33 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Local service state
+data/*
+!data/nocodb_metadata/
+!data/nocodb_metadata/**
+data/qdrant_storage/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Logs and runtime files
+*.log
+*.pid
+
+# Docker/local overrides
+docker-compose.override.yml

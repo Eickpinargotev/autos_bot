@@ -1,0 +1,4 @@
+Utiliza solo python, en la consola es python3 para que uses el python en "/opt/homebrew/bin/python3" 
+- cualquier libreria que necesites quiero que la instales de forma local en el directorio de este proyecto, si no hay una carpeta para el archivo, creala usando python3 -m venv .venv
+  - Recuerda que para instalar librerias en ese entorno creado debes usar source .venv/bin/activate primero para entrar y luego si instalar cualquier cosa.
+Dicho esto, puede trabajar con python sin problemas.
