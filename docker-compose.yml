@@ -83,13 +83,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: >
-      sh -c '
-        psql -h postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '\''evogo_auth'\''" | grep -q 1 ||
-        psql -h postgres -d postgres -c "CREATE DATABASE evogo_auth";
-        psql -h postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '\''evogo_users'\''" | grep -q 1 ||
-        psql -h postgres -d postgres -c "CREATE DATABASE evogo_users";
-      '
+    command:
+      - sh
+      - -ec
+      - |
+        psql -v ON_ERROR_STOP=1 -h postgres -U "$${PGUSER}" -d postgres <<'SQL'
+        SELECT 'CREATE DATABASE evogo_auth'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'evogo_auth')\gexec
+        SELECT 'CREATE DATABASE evogo_users'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'evogo_users')\gexec
+        SQL
     restart: "no"
 
   evolution_go:
