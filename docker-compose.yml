@@ -89,12 +89,10 @@ services:
       - sh
       - -ec
       - |
-        psql -v ON_ERROR_STOP=1 <<'SQL'
-        SELECT 'CREATE DATABASE evogo_auth'
-        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'evogo_auth')\gexec
-        SELECT 'CREATE DATABASE evogo_users'
-        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'evogo_users')\gexec
-        SQL
+        createdb evogo_auth || true
+        createdb evogo_users || true
+        psql -v ON_ERROR_STOP=1 -d evogo_auth -c "SELECT 1;"
+        psql -v ON_ERROR_STOP=1 -d evogo_users -c "SELECT 1;"
     restart: "no"
 
   evolution_go:
