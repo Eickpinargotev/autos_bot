@@ -48,6 +48,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-mi_base_de_datos}
     volumes:
       - autos_postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init-evolution-go.sql:/docker-entrypoint-initdb.d/10-init-evolution-go.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -75,26 +76,6 @@ services:
       - ./data/nocodb_metadata:/usr/app/data
     restart: unless-stopped
 
-  evolution_go_db_init:
-    image: postgres:16-alpine
-    environment:
-      PGHOST: postgres
-      PGDATABASE: postgres
-      PGUSER: ${POSTGRES_USER:-mi_usuario_db}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-mi_password_seguro}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command:
-      - sh
-      - -ec
-      - |
-        createdb evogo_auth || true
-        createdb evogo_users || true
-        psql -v ON_ERROR_STOP=1 -d evogo_auth -c "SELECT 1;"
-        psql -v ON_ERROR_STOP=1 -d evogo_users -c "SELECT 1;"
-    restart: "no"
-
   evolution_go:
     image: ${EVOLUTION_GO_IMAGE:-evoapicloud/evolution-go:latest}
     environment:
@@ -112,8 +93,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      evolution_go_db_init:
-        condition: service_completed_successfully
     restart: unless-stopped
 
   bot_agent:
