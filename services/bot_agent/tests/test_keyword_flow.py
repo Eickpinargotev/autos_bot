@@ -34,9 +34,10 @@ class KeywordFlowTests(unittest.TestCase):
             "src.application.conversation_orchestrator.schedule_keyword_programmed_messages.apply_async"
         ) as schedule_mock, patch(
             "src.application.conversation_orchestrator.KeywordRegistryRepository.register_if_missing"
-        ) as registry_mock:
+        ) as registry_mock, patch("src.application.conversation_orchestrator.cancel_scheduled_tasks") as cancel_mock:
             actions = ConversationOrchestrator().handle(self._message("TaReAs"))
 
+        cancel_mock.assert_called_once_with(Channel.WHATSAPP.value, "50688888888")
         repo.block_user.assert_called_once_with(
             "50688888888",
             reason="Flujo keyword tareas",
@@ -57,7 +58,9 @@ class KeywordFlowTests(unittest.TestCase):
             "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
         ), patch("src.application.conversation_orchestrator.register_keyword_context"), patch(
             "src.application.conversation_orchestrator.schedule_keyword_programmed_messages.apply_async"
-        ), patch("src.application.conversation_orchestrator.KeywordRegistryRepository.register_if_missing"):
+        ), patch("src.application.conversation_orchestrator.KeywordRegistryRepository.register_if_missing"), patch(
+            "src.application.conversation_orchestrator.cancel_scheduled_tasks"
+        ):
             actions = ConversationOrchestrator().handle(self._message(" transporte "))
 
         repo.block_user.assert_called_once()
@@ -102,6 +105,8 @@ class KeywordFlowTests(unittest.TestCase):
                 ) as schedule_mock, patch(
                     "src.application.conversation_orchestrator.KeywordRegistryRepository.register_if_missing"
                 ) as registry_mock, patch(
+                    "src.application.conversation_orchestrator.cancel_scheduled_tasks"
+                ) as cancel_mock, patch(
                     "src.application.conversation_orchestrator.consume_keyword_report"
                 ) as consume_keyword_report_mock, patch(
                     "src.application.conversation_orchestrator.ReportRepository.create_report"
@@ -109,6 +114,7 @@ class KeywordFlowTests(unittest.TestCase):
                     actions = ConversationOrchestrator().handle(self._message(text))
 
                 keyword = text.strip().lower()
+                cancel_mock.assert_called_once_with(Channel.WHATSAPP.value, "50688888888")
                 repo.block_user.assert_called_once_with(
                     "50688888888",
                     reason=reason,
@@ -123,6 +129,28 @@ class KeywordFlowTests(unittest.TestCase):
                 self.assertIn(expected_text, actions[0].text)
                 if unexpected_text:
                     self.assertNotIn(unexpected_text, actions[0].text)
+
+    def test_new_keyword_cancels_previous_scheduled_keyword_reminders(self):
+        repo = MagicMock()
+        repo.is_blocked.return_value = True
+
+        with patch("src.application.conversation_orchestrator.PostgresUserRepo", return_value=repo), patch(
+            "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+        ), patch("src.application.conversation_orchestrator.register_keyword_context"), patch(
+            "src.application.conversation_orchestrator.schedule_keyword_programmed_messages.apply_async"
+        ) as schedule_mock, patch(
+            "src.application.conversation_orchestrator.KeywordRegistryRepository.register_if_missing"
+        ), patch("src.application.conversation_orchestrator.cancel_scheduled_tasks") as cancel_mock:
+            orchestrator = ConversationOrchestrator()
+            tareas_actions = orchestrator.handle(self._message("tareas"))
+            transporte_actions = orchestrator.handle(self._message("transporte"))
+
+        self.assertEqual(cancel_mock.call_count, 2)
+        cancel_mock.assert_called_with(Channel.WHATSAPP.value, "50688888888")
+        self.assertEqual(schedule_mock.call_count, 2)
+        self.assertIn("MOTOCICLETA", tareas_actions[0].text)
+        self.assertIn("transporte público", transporte_actions[0].text)
+        self.assertNotIn("MOTOCICLETA", transporte_actions[0].text)
 
     def test_blocked_keyword_user_generates_one_report_from_active_reminder(self):
         repo = MagicMock()

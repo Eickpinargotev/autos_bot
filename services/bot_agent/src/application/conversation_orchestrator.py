@@ -166,6 +166,7 @@ class ConversationOrchestrator:
         if not first_messages:
             return []
 
+        cancel_scheduled_tasks(message.channel.value, message.user_id)
         repo.block_user(message.user_id, reason=f"Flujo keyword {keyword}", channel=message.channel)
         KeywordRegistryRepository.register_if_missing(message.user_id, message.user_name, message.channel, keyword)
         register_keyword_context(message.channel, message.user_id)
