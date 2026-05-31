@@ -471,21 +471,21 @@
                 "📌 Pudo ingresar a la página de estudio???"
             ],
             "reporte": "Contestaron recordatorio 1 día despues de palabra clave",
-            "segundos": 10800
+            "segundos": 23
         },
         "T3": {
             "mensajes": [
                 "📌 Como va con su programa de estudio???"
             ],
             "reporte": "Contestaron recordatorio 3 días despues de palabra clave",
-            "segundos": 72000
+            "segundos": 33
         },
         "T4": {
             "mensajes": [
                 "Recuerde que puede solicitar su cita teórica en el siguiente enlace\n\nEn la pregunta que dice \"INGRESO COSEVI\" debe poner la clave de su usuario \n\nSi llena el formulario con los datos incompletos o incorrectos será eliminado de la lista sin previo aviso. \n\nEs su responsabilidad velar por la veracidad de los datos suministrados\n\nhttps://forms.gle/AKn9QGgByCEbBDDx8"
             ],
             "reporte": "Contestaron recordatorio 1 semana despues de palabra clave",
-            "segundos": 82000
+            "segundos": 43
         },
         "H1": {
             "mensajes": [

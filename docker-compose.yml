@@ -75,8 +75,18 @@ services:
     expose:
       - "8080"
     volumes:
-      - ./data/nocodb_metadata:/usr/app/data
+      - autos_nocodb_data:/usr/app/data
     restart: unless-stopped
+
+  nocodb_data_migrate:
+    image: alpine:3.20
+    profiles:
+      - migrate
+    command: sh -c "cp -a /seed/. /target/"
+    volumes:
+      - ./data/nocodb_metadata:/seed:ro
+      - autos_nocodb_data:/target
+    restart: "no"
 
   evolution_go:
     image: ${EVOLUTION_GO_IMAGE:-evoapicloud/evolution-go:latest}
@@ -144,3 +154,5 @@ volumes:
     name: autos_redis_data
   autos_qdrant_data:
     name: autos_qdrant_data
+  autos_nocodb_data:
+    name: autos_nocodb_data
