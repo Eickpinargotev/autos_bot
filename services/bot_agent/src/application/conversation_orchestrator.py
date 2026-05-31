@@ -80,13 +80,13 @@ class ConversationOrchestrator:
                 return []
             return self._handle_group_join(message)
 
-        if repo.is_blocked(message.user_id, channel=message.channel):
-            self._handle_blocked_text(message)
-            return []
-
         keyword = text.strip().lower()
         if keyword in {"tareas", "transporte"}:
             return self._handle_keyword_flow(message, keyword, repo)
+
+        if repo.is_blocked(message.user_id, channel=message.channel):
+            self._handle_blocked_text(message)
+            return []
 
         match_add = re.search(r'add\["(.*?)"\]', text, re.IGNORECASE)
         if match_add:

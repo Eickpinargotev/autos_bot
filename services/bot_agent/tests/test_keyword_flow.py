@@ -84,6 +84,46 @@ class KeywordFlowTests(unittest.TestCase):
         add_message.assert_called_once()
         self.assertEqual(actions, [])
 
+    def test_blocked_user_exact_keywords_start_keyword_flow(self):
+        cases = [
+            ("tareas", "Flujo keyword tareas", "curso teórico", "MOTOCICLETA"),
+            (" transporte ", "Flujo keyword transporte", "transporte público", None),
+        ]
+
+        for text, reason, expected_text, unexpected_text in cases:
+            with self.subTest(text=text):
+                repo = MagicMock()
+                repo.is_blocked.return_value = True
+
+                with patch("src.application.conversation_orchestrator.PostgresUserRepo", return_value=repo), patch(
+                    "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+                ), patch("src.application.conversation_orchestrator.register_keyword_context") as register_mock, patch(
+                    "src.application.conversation_orchestrator.schedule_keyword_programmed_messages.apply_async"
+                ) as schedule_mock, patch(
+                    "src.application.conversation_orchestrator.KeywordRegistryRepository.register_if_missing"
+                ) as registry_mock, patch(
+                    "src.application.conversation_orchestrator.consume_keyword_report"
+                ) as consume_keyword_report_mock, patch(
+                    "src.application.conversation_orchestrator.ReportRepository.create_report"
+                ) as report_mock:
+                    actions = ConversationOrchestrator().handle(self._message(text))
+
+                keyword = text.strip().lower()
+                repo.block_user.assert_called_once_with(
+                    "50688888888",
+                    reason=reason,
+                    channel=Channel.WHATSAPP,
+                )
+                registry_mock.assert_called_once_with("50688888888", "Cliente", Channel.WHATSAPP, keyword)
+                register_mock.assert_called_once_with(Channel.WHATSAPP, "50688888888")
+                schedule_mock.assert_called_once_with((Channel.WHATSAPP.value, "50688888888"))
+                consume_keyword_report_mock.assert_not_called()
+                report_mock.assert_not_called()
+                self.assertEqual(len(actions), 1)
+                self.assertIn(expected_text, actions[0].text)
+                if unexpected_text:
+                    self.assertNotIn(unexpected_text, actions[0].text)
+
     def test_blocked_keyword_user_generates_one_report_from_active_reminder(self):
         repo = MagicMock()
         repo.is_blocked.return_value = True
