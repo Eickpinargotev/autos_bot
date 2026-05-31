@@ -78,6 +78,8 @@ services:
   evolution_go_db_init:
     image: postgres:16-alpine
     environment:
+      PGHOST: postgres
+      PGDATABASE: postgres
       PGUSER: ${POSTGRES_USER:-mi_usuario_db}
       PGPASSWORD: ${POSTGRES_PASSWORD:-mi_password_seguro}
     depends_on:
@@ -87,7 +89,7 @@ services:
       - sh
       - -ec
       - |
-        psql -v ON_ERROR_STOP=1 -h postgres -U "$${PGUSER}" -d postgres <<'SQL'
+        psql -v ON_ERROR_STOP=1 <<'SQL'
         SELECT 'CREATE DATABASE evogo_auth'
         WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'evogo_auth')\gexec
         SELECT 'CREATE DATABASE evogo_users'
