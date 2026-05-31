@@ -80,8 +80,6 @@ services:
 
   nocodb_data_migrate:
     image: alpine:3.20
-    profiles:
-      - migrate
     command: sh -c "cp -a /seed/. /target/"
     volumes:
       - ./data/nocodb_metadata:/seed:ro
