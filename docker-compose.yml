@@ -42,7 +42,6 @@ x-bot-build: &bot-build
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: autos_postgresql
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mi_usuario_db}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mi_password_seguro}
@@ -58,31 +57,26 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: autos_redis
     volumes:
       - autos_redis_data:/data
     restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: autos_qdrant
     volumes:
       - autos_qdrant_data:/qdrant/storage
     restart: unless-stopped
 
   nocodb:
     image: nocodb/nocodb:2026.05.0
-    container_name: autos_nocodb
-    ports:
-      - target: 8080
-        protocol: tcp
+    expose:
+      - "8080"
     volumes:
       - ./data/nocodb_metadata:/usr/app/data
     restart: unless-stopped
 
   evolution_go_db_init:
     image: postgres:16-alpine
-    container_name: autos_evolution_go_db_init
     environment:
       PGUSER: ${POSTGRES_USER:-mi_usuario_db}
       PGPASSWORD: ${POSTGRES_PASSWORD:-mi_password_seguro}
@@ -100,7 +94,6 @@ services:
 
   evolution_go:
     image: ${EVOLUTION_GO_IMAGE:-evoapicloud/evolution-go:latest}
-    container_name: autos_evolution_go
     environment:
       SERVER_PORT: 8080
       CLIENT_NAME: evolution
@@ -111,9 +104,8 @@ services:
       WEBHOOK_URL: http://whatsapp_webhook:8010/webhooks/evolution-go?token=${EVOLUTION_WEBHOOK_TOKEN}
       WADEBUG: INFO
       LOGTYPE: console
-    ports:
-      - target: 8080
-        protocol: tcp
+    expose:
+      - "8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,7 +115,6 @@ services:
 
   bot_agent:
     build: *bot-build
-    container_name: autos_bot
     environment: *bot-environment
     volumes:
       - ./mensajes.json:/mensajes.json:ro
@@ -136,7 +127,6 @@ services:
 
   celery_worker:
     build: *bot-build
-    container_name: autos_worker
     environment: *bot-environment
     volumes:
       - ./mensajes.json:/mensajes.json:ro
@@ -149,8 +139,9 @@ services:
 
   whatsapp_webhook:
     build: *bot-build
-    container_name: autos_whatsapp_webhook
     environment: *bot-environment
+    expose:
+      - "8010"
     volumes:
       - ./mensajes.json:/mensajes.json:ro
     depends_on:
