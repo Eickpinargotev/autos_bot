@@ -146,6 +146,37 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "DICTAMEN")
         self.assertEqual(saved_state.node, "D1_1")
 
+    def test_general_moto_reply_uses_registered_variant_by_city(self):
+        cases = [
+            ("G11", True, "G16_1"),
+            ("G11", False, "G16"),
+            ("G12", True, "G28_1"),
+            ("G12", False, "G28"),
+        ]
+
+        for current_node, is_registered, expected_node in cases:
+            with self.subTest(current_node=current_node, is_registered=is_registered):
+                stored = ConversationState(
+                    flow="GENERAL",
+                    node=current_node,
+                    last_question="La licencia que usted va a sacar es moto o carro???",
+                    user_name="Cliente",
+                )
+                get_patch, set_patch, set_mock = self._repo_patches(stored)
+                report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+                with get_patch, set_patch, report_patch, block_patch, clear_patch, patch(
+                    "src.infrastructure.repositories.keyword_registry_repository.KeywordRegistryRepository.exists",
+                    return_value=is_registered,
+                ) as registry_mock:
+                    result = self.runner.run(Channel.WHATSAPP, "50688888888", "moto", "Cliente")
+
+                registry_mock.assert_called_once_with("50688888888", Channel.WHATSAPP.value)
+                self.assertTrue(result.replies)
+                saved_state = set_mock.call_args.args[2]
+                self.assertEqual(saved_state.flow, "GENERAL")
+                self.assertEqual(saved_state.node, expected_node)
+
     def test_initial_llm_fallback_maps_quejas_to_queja(self):
         classifier = ResponseClassifier()
         completion = MagicMock()
