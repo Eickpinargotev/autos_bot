@@ -37,3 +37,7 @@ No entrar a a esta carpeta/
 
 # Docker/local overrides
 docker-compose.override.yml
+
+# Documentation and generated files
+docs/
+scratch_generate_mermaid.py

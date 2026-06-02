@@ -158,7 +158,7 @@ class FlowGraphRunner:
             state["report_reason"] = self._human_help_report_reason(state["text"], stored)
             return state
 
-        next_flow, next_node = self.router.next_node(stored.flow, stored.node, classification)
+        next_flow, next_node = self.router.next_node(stored.flow, stored.node, classification, state["user_id"], state["channel"])
         if next_node:
             state["next_flow"] = next_flow
             state["next_node"] = next_node
