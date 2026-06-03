@@ -33,7 +33,7 @@ class FlowRouter:
             if intent == "negative":
                 return "GENERAL", "G7"
         if flow == "CLASES" and node == "C1":
-            if intent == "city" and value == "liberia":
+            if intent == "positive" or (intent == "city" and value == "liberia"):
                 return "CLASES", "C2"
             if intent in {"city", "negative"}:
                 return "CLASES", "C5"

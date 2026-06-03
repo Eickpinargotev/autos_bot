@@ -33,6 +33,7 @@ class FlowGraphState(TypedDict, total=False):
     legacy_state: UserState
     off_flow_answered: bool
     off_flow_question: str
+    intake_turn_type: str
 
 
 @dataclass
@@ -45,6 +46,8 @@ class FlowProcessingResult:
 class FlowGraphRunner:
     CITY_INVITATION_FLOW = "PUBLICIDAD"
     CITY_INVITATION_NODE = "CITY_INVITATION"
+    INTAKE_FLOW = "INTAKE"
+    INTAKE_NODE = "I1"
     COMPLAINT_HANDOFF_MESSAGE = "En un momento le escribirá un agente especializado para atender su caso."
 
     def __init__(self):
@@ -74,6 +77,7 @@ class FlowGraphRunner:
     def _build_graph(self):
         graph = StateGraph(FlowGraphState)
         graph.add_node("load_current_node", self._load_current_node)
+        graph.add_node("handle_intake", self._handle_intake)
         graph.add_node("classify_initial_intent", self._classify_initial_intent)
         graph.add_node("evaluate_reply", self._evaluate_reply)
         graph.add_node("answer_off_flow_question", self._answer_off_flow_question)
@@ -85,9 +89,19 @@ class FlowGraphRunner:
             "load_current_node",
             self._after_load,
             {
+                "intake": "handle_intake",
                 "initial": "classify_initial_intent",
                 "existing": "evaluate_reply",
                 "report": "create_report_and_block",
+            },
+        )
+        graph.add_conditional_edges(
+            "handle_intake",
+            self._after_intake,
+            {
+                "send": "send_node_messages",
+                "report": "create_report_and_block",
+                "end": END,
             },
         )
         graph.add_edge("classify_initial_intent", "send_node_messages")
@@ -129,8 +143,57 @@ class FlowGraphRunner:
 
     def _after_load(self, state: FlowGraphState) -> str:
         if not state.get("node"):
-            return "initial"
+            return "intake"
+        if state.get("flow") == self.INTAKE_FLOW and state.get("node") == self.INTAKE_NODE:
+            return "intake"
         return "existing"
+
+    def _handle_intake(self, state: FlowGraphState) -> FlowGraphState:
+        stored = state.get("stored", ConversationState())
+        rag_result = self._initial_rag_result(state["text"], stored)
+        decision = self.classifier.intake_decision(state["text"], stored.conversation_history, rag_result)
+        action = decision.action
+
+        if action == "start_flow":
+            flow = decision.flow if decision.flow in {"GENERAL", "Alquiler", "CLASES", "DICTAMEN", "QUEJA", "WIN"} else self._initial_flow(state["text"])
+            node = self.router.initial_node(flow, Channel(state["channel"]), state["user_id"])
+            state["next_flow"] = flow
+            state["next_node"] = node
+            state["legacy_state"] = self._legacy_state(flow)
+            return state
+
+        if action == "handoff":
+            state["should_report"] = True
+            state["replies"] = [self.COMPLAINT_HANDOFF_MESSAGE]
+            state["report_reason"] = decision.handoff_reason or f"Recepción derivó a asesor: {state['text'][:240]}"
+            return state
+
+        if action == "clarify":
+            replies = []
+            if decision.answer:
+                replies.append(decision.answer)
+            question = decision.clarifying_question or "¿Me cuenta un poquito más sobre lo que necesita?"
+            replies.append(question)
+            state["replies"] = replies
+            self._save_intake_state(state, stored, replies, "intake_clarify", last_question=question)
+            state["legacy_state"] = UserState.GENERAL
+            state["intake_turn_type"] = "intake_clarify"
+            return state
+
+        replies = [decision.answer] if decision.answer else [self._initial_rag_fallback(state["text"])]
+        state["replies"] = replies
+        if stored.flow == self.INTAKE_FLOW and stored.node == self.INTAKE_NODE:
+            self._save_intake_state(state, stored, replies, "intake_answer", last_question=stored.last_question)
+        state["legacy_state"] = UserState.GENERAL
+        state["intake_turn_type"] = "intake_answer"
+        return state
+
+    def _after_intake(self, state: FlowGraphState) -> str:
+        if state.get("should_report"):
+            return "report"
+        if state.get("next_node"):
+            return "send"
+        return "end"
 
     def _classify_initial_intent(self, state: FlowGraphState) -> FlowGraphState:
         flow = self._initial_flow(state["text"])
@@ -240,6 +303,50 @@ class FlowGraphRunner:
         if include_retake:
             replies.append(self._retake_message(stored))
         return replies, turn_type
+
+    def _initial_rag_result(self, question: str, stored: ConversationState) -> dict[str, Any]:
+        if not self.classifier.is_question(question):
+            return {"has_answer": False, "answer": ""}
+        cleaned = self.classifier._strip_accents(self.classifier._normalize(question))
+        if self.classifier.needs_manual_handoff(question) or self.classifier._mentions_money_without_service(cleaned):
+            return {"has_answer": False, "answer": ""}
+        answer = self.rag.answer_question(
+            question,
+            context=f"{stored.flow or self.INTAKE_FLOW}.{stored.node or self.INTAKE_NODE}",
+            last_question=stored.last_question,
+            conversation_history=stored.conversation_history,
+        )
+        return {"has_answer": answer.has_answer, "answer": answer.answer, "sources": answer.sources}
+
+    def _initial_rag_fallback(self, question: str) -> str:
+        UnansweredQuestionRepository.create(question)
+        return "Por ahora no tengo esa información disponible. Si gusta, puedo contactar a un asesor especializado para que le ayude con esa duda."
+
+    def _save_intake_state(
+        self,
+        state: FlowGraphState,
+        stored: ConversationState,
+        replies: list[str],
+        turn_type: str,
+        last_question: str,
+    ):
+        new_state = ConversationState(
+            flow=self.INTAKE_FLOW,
+            node=self.INTAKE_NODE,
+            last_question=last_question,
+            awaiting_reply=bool(last_question),
+            last_messages=replies,
+            user_name=state["user_name"],
+            conversation_history=self._append_history(
+                stored.conversation_history,
+                state["text"],
+                replies,
+                self.INTAKE_FLOW,
+                self.INTAKE_NODE,
+                turn_type,
+            ),
+        )
+        ConversationStateRepo.set(state["channel"], state["user_id"], new_state)
 
     def _after_off_flow(self, state: FlowGraphState) -> str:
         return "report" if state.get("should_report") else "end"

@@ -146,6 +146,117 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "DICTAMEN")
         self.assertEqual(saved_state.node, "D1_1")
 
+    def test_initial_ambiguous_helmet_question_clarifies_without_entering_flow(self):
+        get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+        report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "Para moto normalmente debe usar casco."),
+        ) as rag_mock:
+            result = self.runner.run(
+                Channel.WHATSAPP,
+                "50677777777",
+                "Hola, ustedes me prestan el casco o tengo que llevar uno?",
+                "Cliente",
+            )
+
+        self.assertEqual(
+            result.replies,
+            [
+                "Para moto normalmente debe usar casco.",
+                "¿Lo ocupa para una prueba de manejo, para clases, o para alquiler?",
+            ],
+        )
+        rag_mock.assert_called_once()
+        report_mock.assert_not_called()
+        block_repo.block_user.assert_not_called()
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "INTAKE")
+        self.assertEqual(saved_state.node, "I1")
+
+    def test_intake_followup_can_enter_alquiler_flow(self):
+        stored = ConversationState(
+            flow="INTAKE",
+            node="I1",
+            last_question="¿Lo ocupa para una prueba de manejo, para clases, o para alquiler?",
+            user_name="Cliente",
+            conversation_history=[
+                {
+                    "flow": "INTAKE",
+                    "node": "I1",
+                    "type": "intake_clarify",
+                    "user": "Ustedes me prestan el casco?",
+                    "bot": ["¿Lo ocupa para una prueba de manejo, para clases, o para alquiler?"],
+                }
+            ],
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch, block_patch, clear_patch:
+            result = self.runner.run(Channel.WHATSAPP, "50677777777", "Es para alquilar moto", "Cliente")
+
+        self.assertEqual(result.legacy_state, UserState.ALQUILER)
+        self.assertTrue(result.replies)
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "Alquiler")
+        self.assertEqual(saved_state.node, "A1")
+
+    def test_initial_deposit_question_clarifies_without_payment_instructions(self):
+        get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+        report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "SINPE AL 60023618"),
+        ) as rag_mock:
+            result = self.runner.run(Channel.WHATSAPP, "50612121212", "A qué dirección debo hacer el depósito?", "Cliente")
+
+        self.assertEqual(result.replies, ["¿Para cuál servicio necesita hacer el pago: dictamen, clases, alquiler o curso teórico?"])
+        rag_mock.assert_not_called()
+        report_mock.assert_not_called()
+        block_repo.block_user.assert_not_called()
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "INTAKE")
+        self.assertEqual(saved_state.node, "I1")
+
+    def test_initial_paid_deposit_is_handed_off(self):
+        get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+        report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+            result = self.runner.run(
+                Channel.WHATSAPP,
+                "50613131313",
+                "Hola Enrique, hace 6 meses hice el curso, hoy te deposité el dinero, puedes revisar?",
+                "Cliente",
+            )
+
+        self.assertEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
+        report_mock.assert_called_once()
+        block_repo.block_user.assert_called_once()
+        self.assertIn("revisión manual", report_mock.call_args.kwargs["problema"])
+        set_mock.assert_not_called()
+
+    def test_initial_question_with_clear_alquiler_enters_flow(self):
+        get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch, block_patch, clear_patch, patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "Tenemos alquiler según disponibilidad."),
+        ):
+            result = self.runner.run(Channel.WHATSAPP, "50614141414", "Tienen alquiler de carro?", "Cliente")
+
+        self.assertEqual(result.legacy_state, UserState.ALQUILER)
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "Alquiler")
+        self.assertEqual(saved_state.node, "A1")
+
     def test_general_moto_reply_uses_registered_variant_by_city(self):
         cases = [
             ("G11", True, "G16_1"),
