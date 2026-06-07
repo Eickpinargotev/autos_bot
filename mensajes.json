@@ -30,6 +30,7 @@
                 "💡💡💡 Contamos con 3 opciones para la contratación de clases de manejo.\n\n✒ Clase individual: la hora de clase de manejo vale 15 mil.\nSe paga la totalidad al inicio de la lección\n\n✒Paquete de 5 horas: el valor de este paquete es de 70 mil colones.\nSe paga la mitad (35 mil colones) al inicio de la primera lección y el restante (los otros 35 mil colones) al inicio de la tercera lección\n\n✒ Paquete de 10 horas: el valor de este paquete es de 130 mil colones.\nSe paga la mitad (65 mil colones) al inicio de la primera lección y el resto (los otros 65 mil colones) al inicio de la quinta lección.\n\nPor favor utilice este enlace para agendar su clase de\nmanejo en Liberia\n\nhttps://calendly.com/clasesdemanejo/clases"
             ],
             "reporte": "contestaron al mensaje de clases de manejo",
+            "retomar": "No olvide utilizar el enlace que le dejé arriba para agendar su clase de manejo.",
             "recordatorio": {
                 "segundos": 23,
                 "mensajes": [
@@ -139,6 +140,7 @@
                 "💡💡💡 Por favor llenar el formulario de solicitud de citas para prueba de manejo\n\nEn la pregunta que dice *\"\"INGRESO COSEVI\"\"* debe poner su clave de usuario\n\nhttps://forms.gle/kTgfYQhHKJ1Tfzkj7"
             ],
             "reporte": "contestaron al mensaje sobre formulario de solicitud de citas para prueba de manejo, revisar",
+            "retomar": "Cuando pueda, complete el formulario para solicitar la cita de prueba de manejo.",
             "recordatorio": {
                 "segundos": 23,
                 "mensajes": [
@@ -192,6 +194,7 @@
                 "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
             ],
             "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
+            "retomar": "No olvide llenar el formulario de reservación de vehículo que le dejé arriba.",
             "recordatorio": {
                 "segundos": 23,
                 "mensajes": [
@@ -213,6 +216,7 @@
                 "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 61103205  \n\nhttps://forms.gle/cNMDTRVbLL8yDH2X9"
             ],
             "reporte": "Contestaron mensaje sobre formulario de reservacion, revisar!",
+            "retomar": "No olvide llenar el formulario de reservación de vehículo que le dejé arriba.",
             "recordatorio": {
                 "segundos": 23,
                 "mensajes": [

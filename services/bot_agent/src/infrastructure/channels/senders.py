@@ -32,41 +32,20 @@ class TelegramSender(ChannelSender):
             response.raise_for_status()
 
 
-class WhatsAppEvolutionSender(ChannelSender):
+class WhatsAppPendingHttpSender(ChannelSender):
     channel = Channel.WHATSAPP
 
     def send_message_sync(self, user_id: str, text: str):
-        url = f"{settings.EVOLUTION_GO_URL.rstrip('/')}/send/text"
-        headers = {
-            "apikey": settings.EVOLUTION_GO_API_KEY,
-            "Content-Type": "application/json",
-        }
-        response = httpx.post(
-            url,
-            headers=headers,
-            json={"number": user_id, "text": text},
-            timeout=15.0,
-        )
-        response.raise_for_status()
+        raise NotImplementedError("WhatsApp HTTP sender pendiente de implementar")
 
     def send_image_sync(self, user_id: str, attachment: OutboundAttachment, caption: str = ""):
-        url = f"{settings.EVOLUTION_GO_URL.rstrip('/')}{settings.EVOLUTION_GO_IMAGE_ENDPOINT}"
-        headers = {"apikey": settings.EVOLUTION_GO_API_KEY}
-        with open(attachment.path, "rb") as image_file:
-            response = httpx.post(
-                url,
-                headers=headers,
-                data={"number": user_id, "caption": caption},
-                files={"image": (attachment.image_id, image_file, attachment.content_type)},
-                timeout=settings.OUTBOUND_IMAGE_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
+        raise NotImplementedError("WhatsApp HTTP sender pendiente de implementar")
 
 
 class ChannelSenderRegistry:
     _senders: dict[Channel, ChannelSender] = {
         Channel.TELEGRAM: TelegramSender(),
-        Channel.WHATSAPP: WhatsAppEvolutionSender(),
+        Channel.WHATSAPP: WhatsAppPendingHttpSender(),
     }
 
     @classmethod

@@ -18,6 +18,11 @@ from src.infrastructure.channels.senders import ChannelSenderRegistry
 from src.infrastructure.repositories.conversation_state_repo import ConversationStateRepo
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 from src.infrastructure.repositories.report_repository import ReportRepository
+from src.infrastructure.evals.conversation_shots import (
+    ConversationShotBuilder,
+    ConversationShotRepository,
+    ShotTraceCollector,
+)
 from src.application.fsm import process_fsm
 
 celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL)
@@ -30,9 +35,23 @@ def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desc
         return # Buffer was empty or cleared by a command
 
     ReminderService.cancel(channel_value, user_id)
+    state_before = ConversationStateRepo.get(channel_value, user_id)
     state = RedisStateRepo.get_state(user_id, channel_value)
-    result = process_fsm(user_id, state, text, channel=channel_value, user_name=user_name)
+    with ShotTraceCollector() as shot_collector:
+        result = process_fsm(user_id, state, text, channel=channel_value, user_name=user_name)
     RedisStateRepo.set_state(user_id, result.legacy_state, channel_value)
+    state_after = ConversationStateRepo.get(channel_value, user_id)
+
+    _save_conversation_shot(
+        channel=channel_value,
+        user_id=user_id,
+        user_name=user_name,
+        user_message=text,
+        bot_replies=result.replies,
+        state_before=state_before,
+        state_after=state_after,
+        trace_events=shot_collector.events,
+    )
 
     if result.replies:
         for msg in result.replies:
@@ -40,6 +59,35 @@ def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desc
 
     if result.reminder:
         schedule_flow_reminder_for_result(channel_value, user_id, result.reminder)
+
+
+def _save_conversation_shot(
+    *,
+    channel: Channel | str,
+    user_id: str,
+    user_name: str,
+    user_message: str,
+    bot_replies: list[str],
+    state_before,
+    state_after,
+    trace_events: list[dict],
+):
+    _, fecha_hora, shot = ConversationShotBuilder.build(
+        channel=channel,
+        user_id=user_id,
+        user_name=user_name,
+        user_message=user_message,
+        bot_replies=bot_replies,
+        state_before=state_before,
+        state_after=state_after,
+        trace_events=trace_events,
+    )
+    ConversationShotRepository.save(
+        fecha_hora=fecha_hora,
+        id_user=user_id,
+        chanel=channel,
+        shot=shot,
+    )
 
 import time
 import random

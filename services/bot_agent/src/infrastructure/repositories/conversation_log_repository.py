@@ -62,6 +62,42 @@ class ConversationLogRepository:
         )
 
     @staticmethod
+    def log_tool_event(
+        *,
+        client_id: str,
+        canal: Channel | str,
+        tool_name: str,
+        status: str,
+        input_data: dict[str, Any] | list[Any] | str | None = None,
+        output_data: dict[str, Any] | list[Any] | str | None = None,
+        error: str = "",
+        text: str = "",
+        duration_ms: int | None = None,
+        event_type: str = "tool_call",
+    ) -> bool:
+        return ConversationLogRepository.append_message(
+            client_id=client_id,
+            canal=canal,
+            message={
+                "id": str(uuid.uuid4()),
+                "direction": "internal",
+                "author": "tool",
+                "sender_id": tool_name,
+                "sender_name": ConversationLogRepository._tool_sender_name(tool_name),
+                "message_type": "tool_event",
+                "text": text or f"{tool_name}: {status}",
+                "event_type": event_type or "tool_call",
+                "tool_name": tool_name,
+                "status": status,
+                "input": input_data if input_data is not None else {},
+                "output": output_data if output_data is not None else {},
+                "error": error or "",
+                "duration_ms": duration_ms,
+                "created_at": ConversationLogRepository._now_iso(),
+            },
+        )
+
+    @staticmethod
     def append_message(client_id: str, canal: Channel | str, message: dict[str, Any]) -> bool:
         if not settings.NOCODB_CONVERSATIONS_URL:
             return False
@@ -251,6 +287,19 @@ class ConversationLogRepository:
     @staticmethod
     def _message_type_value(message_type: MessageType | str) -> str:
         return message_type.value if isinstance(message_type, MessageType) else str(message_type)
+
+    @staticmethod
+    def _tool_sender_name(tool_name: str) -> str:
+        prefix = str(tool_name or "tool").split(".", 1)[0]
+        names = {
+            "rag": "RAG",
+            "reception": "Recepción",
+            "classifier": "Clasificador",
+            "publicidad": "Publicidad",
+            "unanswered_question": "Preguntas sin respuesta",
+            "celery": "Celery",
+        }
+        return names.get(prefix, prefix.replace("_", " ").title())
 
     @staticmethod
     def _now_iso() -> str:

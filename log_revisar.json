@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "client_id": "1049838038",
+  "canal": "telegram",
+  "created_at": "2026-06-06T17:05:07+00:00",
+  "updated_at": "2026-06-06T17:05:41+00:00",
+  "messages": [
+    {
+      "id": "79315e86-1736-43d6-a38b-ed16ba454c2d",
+      "direction": "inbound",
+      "author": "cliente",
+      "sender_id": "1049838038",
+      "sender_name": "Erick",
+      "message_type": "text",
+      "text": "hola, si no tengo casco, ustedes me ayudan con eso ?",
+      "event_type": "message",
+      "created_at": "2026-06-06T17:05:07+00:00"
+    },
+    {
+      "id": "bb8cc9f5-1ef0-422f-a316-93b4366d60b3",
+      "direction": "internal",
+      "author": "tool",
+      "sender_id": "reception.decide",
+      "sender_name": "Recepción",
+      "message_type": "tool_event",
+      "text": "Recepción decidió: answer_and_start_flow",
+      "event_type": "tool_call",
+      "tool_name": "reception.decide",
+      "status": "success",
+      "input": {
+        "text": "hola, si no tengo casco, ustedes me ayudan con eso ?",
+        "history_turns": 0,
+        "uses_openai": true
+      },
+      "output": {
+        "action": "answer_and_start_flow",
+        "flow": "CLASES",
+        "has_question": true,
+        "question": "hola, si no tengo casco, ustedes me ayudan con eso ?",
+        "answer_source": "prompt_rules",
+        "has_answer": true,
+        "has_clarifying_question": false,
+        "handoff_reason": "",
+        "confidence": 1,
+        "source": "success"
+      },
+      "error": "",
+      "duration_ms": 3508,
+      "created_at": "2026-06-06T17:05:12+00:00"
+    },
+    {
+      "id": "6bf0f950-fd04-4b8a-a1c8-9471e92a2fa2",
+      "direction": "outbound",
+      "author": "ia",
+      "sender_id": "bot",
+      "sender_name": "IA",
+      "message_type": "text",
+      "text": "Sí, en nuestras clases prácticas podemos proporcionarte un casco para que puedas asistir sin inconvenientes.",
+      "event_type": "bot_reply",
+      "created_at": "2026-06-06T17:05:13+00:00"
+    },
+    {
+      "id": "229e87b9-b61b-4887-bdb7-bb48ce77fc9c",
+      "direction": "outbound",
+      "author": "ia",
+      "sender_id": "bot",
+      "sender_name": "IA",
+      "message_type": "text",
+      "text": "Hola!!!\n\nOfrecemos el servicio de clases de manejo personalizadas. Las clases las ocupas en Liberia???",
+      "event_type": "bot_reply",
+      "created_at": "2026-06-06T17:05:14+00:00"
+    },
+    {
+      "id": "34e6428d-f085-4201-9bbd-8142337299f5",
+      "direction": "outbound",
+      "author": "ia",
+      "sender_id": "bot",
+      "sender_name": "IA",
+      "message_type": "text",
+      "text": "📌 Hola!!!\n\nDime en cual sede ocupas tus clases",
+      "event_type": "bot_reply",
+      "created_at": "2026-06-06T17:05:37+00:00"
+    },
+    {
+      "id": "ef0d0696-c6c9-411d-a74a-bf963ad76c6b",
+      "direction": "inbound",
+      "author": "cliente",
+      "sender_id": "1049838038",
+      "sender_name": "Erick",
+      "message_type": "text",
+      "text": "No me hace falta la información gracias.",
+      "event_type": "message",
+      "created_at": "2026-06-06T17:05:37+00:00"
+    },
+    {
+      "id": "bf87a71f-0ba7-4815-a9db-82e8fbb44393",
+      "direction": "internal",
+      "author": "tool",
+      "sender_id": "classifier.classify_reply",
+      "sender_name": "Clasificador",
+      "message_type": "tool_event",
+      "text": "Clasificación de respuesta: negative",
+      "event_type": "tool_call",
+      "tool_name": "classifier.classify_reply",
+      "status": "success",
+      "input": {
+        "text": "No me hace falta la información gracias.",
+        "flow": "CLASES",
+        "node": "C1",
+        "last_question": "Ofrecemos el servicio de clases de manejo personalizadas. Las clases las ocupas en Liberia???"
+      },
+      "output": {
+        "intent": "negative",
+        "value": "other",
+        "has_off_flow_question": false,
+        "off_flow_question": ""
+      },
+      "error": "",
+      "duration_ms": 944,
+      "created_at": "2026-06-06T17:05:39+00:00"
+    },
+    {
+      "id": "5ed2ab99-d603-48fb-9fe7-298a7b4c41b4",
+      "direction": "outbound",
+      "author": "ia",
+      "sender_id": "bot",
+      "sender_name": "IA",
+      "message_type": "text",
+      "text": "🛡🛡🛡 Contamos con 3 opciones para la contratación de clases de manejo.\n\n✒ Clase individual: la hora de clase de manejo vale 15650.\n🎯 Se reserva con 5650 y el resto del dinero se paga en efectivo el día de la preparación\n🎯 Sinpe al 60023618\n\n✒Paquete de 5 horas: el valor de este paquete es de 72600 colones.\n🎯 Se reserva con 22600 colones\n🎯 Se paga 20 mil colones al inicio de la primera lección y el restante (los otros 30 mil colones) al inicio de la tercera lección.\n🎯 Sinpe al 60023618\n\n✒ Paquete de 10 horas: el valor de este paquete es de 133900 colones.\n🎯 Se reserva con 33900 colones\n🎯 Se paga 40 mil colones al inicio de la primera lección y el resto (los otros 60 mil colones) al inicio de la quinta lección.\n🎯 Sinpe al 60023618",
+      "event_type": "bot_reply",
+      "created_at": "2026-06-06T17:05:40+00:00"
+    },
+    {
+      "id": "9b8d0b36-1f89-4b0d-8189-353b02f27a9b",
+      "direction": "outbound",
+      "author": "ia",
+      "sender_id": "bot",
+      "sender_name": "IA",
+      "message_type": "text",
+      "text": "Me envía la foto del depósito para coordinar la\natención",
+      "event_type": "bot_reply",
+      "created_at": "2026-06-06T17:05:41+00:00"
+    }
+  ]
+}

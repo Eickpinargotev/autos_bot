@@ -9,13 +9,15 @@ import httpx
 from openai import OpenAI
 
 from src.core.config import settings
+from src.domain.entities import Channel
+from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 
 
 @dataclass
 class RagAnswer:
     has_answer: bool
     answer: str = ""
-    sources: list[str] = field(default_factory=list)
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -33,6 +35,7 @@ class RagService:
     chunks_table_id = "mlk30zxjzj4lfd8"
     vector_size = 1536
     score_threshold = 0.25
+    source_text_limit = 700
 
     def __init__(self):
         self.qdrant_url = settings.QDRANT_URL
@@ -53,17 +56,40 @@ class RagService:
         context: str = "",
         last_question: str = "",
         conversation_history: list[dict] | None = None,
+        client_id: str = "",
+        canal: Channel | str = "",
     ) -> RagAnswer:
         if not self.client or not self.openai:
             return RagAnswer(has_answer=False)
 
-        self.sync_if_needed()
-        chunks = self.search(question)
+        if client_id and canal:
+            ToolCallLogger.record(
+                client_id=client_id,
+                canal=canal,
+                tool_name="rag.sync_if_needed",
+                input_data={"collection": self.collection_name},
+                output_mapper=lambda result: {"completed": True},
+                text_mapper=lambda result: "Sincronización lazy RAG revisada",
+                call=self.sync_if_needed,
+            )
+            chunks = ToolCallLogger.record(
+                client_id=client_id,
+                canal=canal,
+                tool_name="rag.search",
+                input_data={"question": question, "limit": 3, "score_threshold": self.score_threshold},
+                output_mapper=self._search_log_output,
+                text_mapper=lambda result: f"RAG encontró chunks: {len(result)}",
+                call=lambda: self.search(question),
+            )
+        else:
+            self.sync_if_needed()
+            chunks = self.search(question)
         if not chunks:
             return RagAnswer(has_answer=False)
 
         prompt = self._answer_prompt(question, context, last_question, conversation_history or [], chunks)
         try:
+            started = time.monotonic()
             completion = self.openai.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 response_format={"type": "json_object"},
@@ -76,13 +102,44 @@ class RagService:
             has_answer = bool(data.get("has_answer"))
             answer = str(data.get("answer") or "").strip()
             if not has_answer or not answer:
+                self._log_answer_generation(
+                    client_id,
+                    canal,
+                    question,
+                    context,
+                    chunks,
+                    {"has_answer": False},
+                    started,
+                )
                 return RagAnswer(has_answer=False)
-            return RagAnswer(
+            result = RagAnswer(
                 has_answer=True,
                 answer=answer,
-                sources=[str(chunk.get("external_id") or "") for chunk in chunks],
+                sources=self._source_summaries(chunks),
             )
+            self._log_answer_generation(
+                client_id,
+                canal,
+                question,
+                context,
+                chunks,
+                result,
+                started,
+            )
+            return result
         except Exception as e:
+            if client_id and canal:
+                ToolCallLogger.error(
+                    client_id=client_id,
+                    canal=canal,
+                    tool_name="rag.generate_answer",
+                    input_data={
+                        "question": question,
+                        "context": context,
+                        "chunk_count": len(chunks),
+                    },
+                    error=e,
+                )
             print(f"Error generando respuesta RAG: {e}")
             return RagAnswer(has_answer=False)
 
@@ -240,7 +297,7 @@ class RagService:
                 result = self.client.query_points(
                     collection_name=self.collection_name,
                     query=vector,
-                    limit=5,
+                    limit=3,
                     with_payload=True,
                 )
                 points = result.points
@@ -248,7 +305,7 @@ class RagService:
                 points = self.client.search(
                     collection_name=self.collection_name,
                     query_vector=vector,
-                    limit=5,
+                    limit=3,
                     with_payload=True,
                 )
             chunks = []
@@ -352,9 +409,74 @@ Pregunta actual del cliente:
 Devuelve JSON estricto:
 {{
   "has_answer": true|false,
-  "answer": "respuesta breve, clara y útil para WhatsApp"
+  "answer": "respuesta clara para WhatsApp. Si hay una lista de requisitos o pasos, usa saltos de línea (\\n)    
+  para separarlos y hacerla fácil de leer"
 }}
 """
+
+    def _search_log_output(self, chunks: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "chunk_count": len(chunks),
+            "sources": self._source_summaries(chunks),
+            "scores": [round(float(chunk.get("score") or 0), 4) for chunk in chunks],
+        }
+
+    def _source_summaries(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        summaries = []
+        for chunk in chunks:
+            content = str(chunk.get("text") or "").strip()
+            if not content and isinstance(chunk.get("raw"), dict):
+                content = self.record_text(chunk["raw"])
+            summaries.append(
+                {
+                    "content": self._truncate_source_text(content),
+                    "score": round(float(chunk.get("score") or 0), 4),
+                    "source_id": str(chunk.get("external_id") or ""),
+                }
+            )
+        return summaries
+
+    def _truncate_source_text(self, text: str) -> str:
+        if len(text) <= self.source_text_limit:
+            return text
+        return f"{text[: self.source_text_limit]}...[truncated]"
+
+    def _log_answer_generation(
+        self,
+        client_id: str,
+        canal: Channel | str,
+        question: str,
+        context: str,
+        chunks: list[dict[str, Any]],
+        result: RagAnswer | dict[str, Any],
+        started: float,
+    ):
+        if not client_id or not canal:
+            return
+        if isinstance(result, RagAnswer):
+            output_data = {
+                "has_answer": result.has_answer,
+                "answer": result.answer,
+                "sources": result.sources,
+            }
+            has_answer = result.has_answer
+        else:
+            output_data = result
+            has_answer = bool(result.get("has_answer"))
+        ToolCallLogger.success(
+            client_id=client_id,
+            canal=canal,
+            tool_name="rag.generate_answer",
+            input_data={
+                "question": question,
+                "context": context,
+                "chunk_count": len(chunks),
+                "sources": self._source_summaries(chunks),
+            },
+            output_data=output_data,
+            text=f"RAG generó respuesta: {has_answer}",
+            duration_ms=ToolCallLogger._duration_ms(started),
+        )
 
     def _event_type(self, event: dict[str, Any]) -> str:
         return str(event.get("type") or event.get("event") or event.get("Event") or "").lower()

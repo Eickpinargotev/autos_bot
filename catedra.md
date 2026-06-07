@@ -95,11 +95,9 @@ Tu proyecto tiene varios servicios:
 - `redis`: cache y broker temporal.
 - `qdrant`: base vectorial.
 - `nocodb`: panel visual tipo Airtable sobre bases/tablas.
-- `evolution_go`: servicio de WhatsApp/Evolution.
 - `bot_agent`: tu bot/agente principal.
 - `celery_worker`: worker para tareas en segundo plano.
 - `whatsapp_webhook`: API que recibe eventos/webhooks.
-- `evolution_go_db_init`: contenedor temporal que crea bases necesarias para Evolution.
 
 Compose crea una red interna para estos servicios. Dentro de esa red, cada contenedor puede llamar a otro usando el nombre del servicio.
 
@@ -110,7 +108,6 @@ postgres:5432
 redis:6379
 qdrant:6333
 nocodb:8080
-evolution_go:8080
 whatsapp_webhook:8010
 ```
 
@@ -123,7 +120,6 @@ POSTGRES_URL=postgresql://usuario:password@postgres:5432/base
 NOCODB_URL=http://nocodb:8080
 REDIS_URL=redis://redis:6379/0
 QDRANT_URL=http://qdrant:6333
-EVOLUTION_GO_URL=http://evolution_go:8080
 ```
 
 Eso significa:
@@ -177,7 +173,6 @@ localhost:8080 -> contenedor nocodb:8080
 Otro ejemplo:
 
 ```yaml
-evolution_go:
   ports:
     - "4000:8080"
 ```
@@ -185,7 +180,6 @@ evolution_go:
 Significa:
 
 ```text
-localhost:4000 -> contenedor evolution_go:8080
 ```
 
 El servicio dentro del contenedor sigue escuchando en `8080`, pero desde fuera lo ves en `4000`.
@@ -312,7 +306,6 @@ Supongamos que tienes en el mismo servidor:
 
 ```text
 https://nocodb.tudominio.com
-https://evolution.tudominio.com
 https://webhook.tudominio.com
 https://otra-app.tudominio.com
 ```
@@ -338,7 +331,6 @@ Su trabajo es mirar la peticion entrante y decidir:
 
 ```text
 Si viene para nocodb.tudominio.com -> manda a nocodb:8080
-Si viene para evolution.tudominio.com -> manda a evolution_go:8080
 Si viene para webhook.tudominio.com -> manda a whatsapp_webhook:8010
 ```
 
@@ -510,7 +502,6 @@ No todos los servicios deben estar abiertos a internet.
 Servicios que normalmente **si pueden necesitar URL publica**:
 
 - `nocodb`, si quieres administrarlo desde tu navegador.
-- `evolution_go`, si necesitas entrar a su API/panel desde fuera.
 - `whatsapp_webhook`, si debe recibir webhooks desde servicios externos.
 
 Servicios que normalmente **no deberian exponerse publicamente**:
@@ -639,7 +630,6 @@ postgres       5432:5432
 qdrant         6333:6333
 qdrant grpc    6334:6334
 nocodb         8080:8080
-evolution_go   4000:8080
 redis          6379:6379
 ```
 
@@ -647,7 +637,6 @@ En local esto es comodo:
 
 ```text
 NocoDB:       http://localhost:8080
-Evolution:    http://localhost:4000
 Postgres:     localhost:5432
 Redis:        localhost:6379
 Qdrant:       http://localhost:6333
@@ -659,7 +648,6 @@ El modelo recomendado en servidor seria:
 
 ```text
 nocodb.tudominio.com      -> servicio nocodb, puerto interno 8080
-evolution.tudominio.com   -> servicio evolution_go, puerto interno 8080
 webhook.tudominio.com     -> servicio whatsapp_webhook, puerto interno 8010
 ```
 
@@ -758,7 +746,6 @@ services:
     expose:
       - "8080"
 
-  evolution_go:
     expose:
       - "8080"
 
@@ -825,11 +812,8 @@ Servicio: whatsapp_webhook
 Puerto interno: 8010
 ```
 
-Para Evolution:
 
 ```text
-Dominio: evolution.tudominio.com
-Servicio: evolution_go
 Puerto interno: 8080
 ```
 
@@ -838,12 +822,10 @@ Puerto interno: 8080
 Dentro de tu Compose tienes:
 
 ```yaml
-WEBHOOK_URL: http://whatsapp_webhook:8010/webhooks/evolution-go?token=${EVOLUTION_WEBHOOK_TOKEN}
 ```
 
 Eso es una URL interna de Docker.
 
-Si `evolution_go` llama al webhook desde dentro de la misma red Docker, esta bien:
 
 ```text
 http://whatsapp_webhook:8010
@@ -854,7 +836,6 @@ Pero si un servicio externo necesita llamar al webhook desde internet, no puede 
 Desde internet deberia usar algo como:
 
 ```text
-https://webhook.tudominio.com/webhooks/evolution-go?token=...
 ```
 
 La regla:
@@ -926,7 +907,6 @@ Ejemplos:
 OPENAI_API_KEY
 TELEGRAM_BOT_TOKEN
 POSTGRES_PASSWORD
-EVOLUTION_GO_API_KEY
 ```
 
 En produccion deberian configurarse como variables secretas en EasyPanel, no subirse alegremente a repositorios.
@@ -950,7 +930,6 @@ Para desarrollo local, mantener puertos es comodo:
 
 ```text
 NocoDB por localhost:8080
-Evolution por localhost:4000
 Postgres por localhost:5432 si usas cliente externo
 Qdrant por localhost:6333 si inspeccionas
 Redis por localhost:6379 si depuras
@@ -961,7 +940,6 @@ Para EasyPanel/produccion:
 - Exponer por dominio solo lo que necesites acceder desde fuera.
 - Usar dominio para `nocodb`.
 - Usar dominio para `whatsapp_webhook` si debe recibir llamadas externas.
-- Usar dominio para `evolution_go` si realmente necesitas acceso externo.
 - No publicar Postgres, Redis y Qdrant salvo que tengas una razon concreta.
 - No borrar volumenes al redeployar.
 - No reemplazar datos de produccion con carpetas locales viejas.

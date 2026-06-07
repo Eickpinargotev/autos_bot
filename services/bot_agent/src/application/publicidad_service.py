@@ -1,11 +1,13 @@
 import httpx
 import json
+import time
 from src.core.config import settings
 from src.core.prompts import EXTRACT_AD_INFO_PROMPT
 from src.domain.entities import Channel
 from src.application.runtime_context import clear_user_runtime_context, register_ad_context
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 from src.infrastructure.tasks.celery_app import send_delayed_message_sequence, schedule_ad_programmed_messages
+from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from openai import OpenAI
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY or "test")
@@ -18,7 +20,15 @@ class PublicidadService:
     @staticmethod
     def handle_invitation_by_city(user_id: str, city_text: str, user_name: str = "Desconocido", channel: Channel | str = Channel.TELEGRAM) -> bool:
         channel_value = channel.value if isinstance(channel, Channel) else channel
-        matched_record = PublicidadService._find_invitation_record(city_text)
+        matched_record = PublicidadService._log_record(
+            user_id,
+            channel_value,
+            "publicidad.find_invitation_record",
+            {"city_text": city_text},
+            lambda: PublicidadService._find_invitation_record(city_text),
+            lambda record: {"found": bool(record), "city": (record or {}).get("CIUDAD") or (record or {}).get("CIUDADES") or ""},
+            lambda record: f"Invitación por ciudad encontrada: {bool(record)}",
+        )
         if not matched_record:
             print(f"No se encontró la ciudad '{city_text}' en la base de datos de NocoDB.")
             return False
@@ -39,7 +49,15 @@ class PublicidadService:
         register_ad_context(channel_value, user_id)
 
         # 1. Enviar los mensajes de invitacion con delay de 4-6 seg
-        send_delayed_message_sequence.apply_async((channel_value, user_id, messages_to_send))
+        PublicidadService._log_record(
+            user_id,
+            channel_value,
+            "celery.send_delayed_message_sequence",
+            {"message_count": len(messages_to_send)},
+            lambda: send_delayed_message_sequence.apply_async((channel_value, user_id, messages_to_send)),
+            lambda task: {"scheduled": True, "task_id": getattr(task, "id", "")},
+            lambda task: "Secuencia de publicidad programada",
+        )
         
         # Validar CUARTO MENSAJE
         cuarto_mensaje = matched_record.get("CUARTO MENSAJE")
@@ -59,6 +77,7 @@ class PublicidadService:
         # 2. Extraer informacion con LLM para programar siguientes
         primer_mensaje = messages_to_send[0]
         try:
+            started = time.monotonic()
             completion = client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 response_format={ "type": "json_object" },
@@ -71,6 +90,15 @@ class PublicidadService:
             dia = extracted.get("dia")
             valor = extracted.get("valor")
             hora = extracted.get("hora")
+            ToolCallLogger.success(
+                client_id=user_id,
+                canal=channel_value,
+                tool_name="publicidad.extract_ad_info",
+                input_data={"message": primer_mensaje},
+                output_data={"dia": dia, "valor": valor, "hora": hora},
+                text="Datos de publicidad extraídos",
+                duration_ms=ToolCallLogger._duration_ms(started),
+            )
             
             if not dia or not valor or not hora or dia == "null" or valor == "null" or hora == "null":
                 # Faltan datos -> Bloquear y reportar
@@ -84,10 +112,25 @@ class PublicidadService:
             link_match = re.search(r'(https://chat\.whatsapp\.com/\S+)', str(cuarto_mensaje))
             enlace_whatsapp = link_match.group(1) if link_match else "[Enlace no encontrado]"
             
-            schedule_ad_programmed_messages.apply_async((channel_value, user_id, dia, valor, hora, enlace_whatsapp))
+            PublicidadService._log_record(
+                user_id,
+                channel_value,
+                "celery.schedule_ad_programmed_messages",
+                {"dia": dia, "valor": valor, "hora": hora, "has_link": bool(link_match)},
+                lambda: schedule_ad_programmed_messages.apply_async((channel_value, user_id, dia, valor, hora, enlace_whatsapp)),
+                lambda task: {"scheduled": True, "task_id": getattr(task, "id", "")},
+                lambda task: "Recordatorios de publicidad programados",
+            )
             return True
             
         except Exception as e:
+            ToolCallLogger.error(
+                client_id=user_id,
+                canal=channel_value,
+                tool_name="publicidad.extract_ad_info",
+                input_data={"message": primer_mensaje},
+                error=e,
+            )
             print(f"Error en extracción LLM: {e}")
             return True
 
@@ -130,3 +173,23 @@ class PublicidadService:
         except Exception as e:
             print(f"Error conectando a NocoDB: {e}")
             return []
+
+    @staticmethod
+    def _log_record(
+        user_id: str,
+        channel: Channel | str,
+        tool_name: str,
+        input_data: dict,
+        call,
+        output_mapper,
+        text_mapper,
+    ):
+        return ToolCallLogger.record(
+            client_id=user_id,
+            canal=channel,
+            tool_name=tool_name,
+            input_data=input_data,
+            output_mapper=output_mapper,
+            text_mapper=text_mapper,
+            call=call,
+        )
