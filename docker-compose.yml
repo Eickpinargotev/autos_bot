@@ -68,8 +68,8 @@ services:
     image: nocodb/nocodb:2026.05.0
     environment:
       HOST: 0.0.0.0
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     volumes:
       - autos_nocodb_data:/usr/app/data
     restart: unless-stopped
