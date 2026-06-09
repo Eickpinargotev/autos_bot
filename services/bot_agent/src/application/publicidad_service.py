@@ -137,17 +137,36 @@ class PublicidadService:
     @staticmethod
     def _find_invitation_record(text: str) -> dict | None:
         records = PublicidadService._fetch_invitation_records()
-        text_lower = text.lower()
+        import unicodedata
+        import difflib
+
+        def strip_accents(s):
+            return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+
+        text_clean = strip_accents(text.lower())
+        
+        # Primero intentar coincidencia exacta o subcadena (sin tildes)
         for record in records:
             record_data = record.get("fields", record)
-
             ciudad_field = record_data.get("CIUDAD") or record_data.get("CIUDADES") or ""
-            # NocoDB podría tener varias ciudades separadas por coma en la misma fila.
-            ciudades_list = [c.strip().lower() for c in str(ciudad_field).split(",") if c.strip()]
+            ciudades_list = [strip_accents(c.strip().lower()) for c in str(ciudad_field).split(",") if c.strip()]
 
             for ciudad in ciudades_list:
-                if ciudad and ciudad in text_lower:
+                if ciudad and ciudad in text_clean:
                     return record_data
+                    
+        # Si no se encuentra, intentar búsqueda difusa (fuzzy match) para errores tipográficos
+        for record in records:
+            record_data = record.get("fields", record)
+            ciudad_field = record_data.get("CIUDAD") or record_data.get("CIUDADES") or ""
+            ciudades_list = [strip_accents(c.strip().lower()) for c in str(ciudad_field).split(",") if c.strip()]
+            
+            for ciudad in ciudades_list:
+                if ciudad:
+                    matches = difflib.get_close_matches(text_clean, [ciudad], n=1, cutoff=0.7)
+                    if matches:
+                        return record_data
+        
         return None
 
     @staticmethod

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     POSTGRES_URL: str
     REDIS_URL: str = "redis://redis:6379/0"
     QDRANT_URL: str = "http://qdrant:6333"
-    MESSAGE_BUFFER_SECONDS: int = 1
+    MESSAGE_BUFFER_SECONDS: int = 15
     MAX_INFO_MESSAGES_PER_5_MIN: int = 2
     NOCODB_INVITACIONES_URL: str = ""
     NOCODB_REPORTES_URL: str = ""

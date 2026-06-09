@@ -557,16 +557,9 @@ class FlowGraphRunner:
         if sent:
             return state
 
-        state["replies"] = [self._retake_message(stored)]
-        stored.conversation_history = self._append_history(
-            stored.conversation_history,
-            state["text"],
-            state["replies"],
-            stored.flow,
-            stored.node,
-            "city_not_found",
-        )
-        ConversationStateRepo.set(state["channel"], state["user_id"], stored)
+        state["should_report"] = True
+        state["replies"] = [self.COMPLAINT_HANDOFF_MESSAGE]
+        state["report_reason"] = f"Ciudad '{state['text']}' no se encontró en la lista de invitaciones."
         return state
 
     def _after_send(self, state: FlowGraphState) -> str:
