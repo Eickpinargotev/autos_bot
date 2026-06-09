@@ -71,6 +71,9 @@ services:
       HOST: 0.0.0.0
     expose:
       - "8080"
+    networks:
+      - default
+      - easypanel
     volumes:
       - autos_nocodb_data:/usr/app/data
     restart: unless-stopped
@@ -133,3 +136,8 @@ volumes:
     name: autos_qdrant_data
   autos_nocodb_data:
     name: autos_nocodb_data
+
+networks:
+  default:
+  easypanel:
+    external: true
