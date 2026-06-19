@@ -265,10 +265,26 @@ class FlowGraphRunner:
             state["replies"] = [self.COMPLAINT_HANDOFF_MESSAGE]
             state["report_reason"] = self._complaint_report_reason(state["text"], stored)
             return state
-        if self.classifier.asks_for_human_help(state["text"]):
+        if classification.intent == "human_handoff":
             state["should_report"] = True
             state["replies"] = [self.COMPLAINT_HANDOFF_MESSAGE]
             state["report_reason"] = self._human_help_report_reason(state["text"], stored, state)
+            return state
+
+        if classification.intent == "greeting":
+            # Un saludo o cortesía social no es una pregunta: no llamamos a RAG ni
+            # derivamos a un asesor; simplemente retomamos la pregunta pendiente.
+            state["off_flow_answered"] = True
+            state["replies"] = [self._retake_message(stored)]
+            stored.conversation_history = self._append_history(
+                stored.conversation_history,
+                state["text"],
+                state["replies"],
+                stored.flow,
+                stored.node,
+                "greeting",
+            )
+            ConversationStateRepo.set(state["channel"], state["user_id"], stored)
             return state
 
         if classification.intent == "decline":
@@ -326,12 +342,6 @@ class FlowGraphRunner:
 
     def _answer_off_flow_question(self, state: FlowGraphState) -> FlowGraphState:
         stored = state["stored"]
-        if self.classifier.asks_for_human_help(state["text"]):
-            state["should_report"] = True
-            state["replies"] = [self.COMPLAINT_HANDOFF_MESSAGE]
-            state["report_reason"] = self._human_help_report_reason(state["text"], stored, state)
-            return state
-
         state["replies"], turn_type = self._off_flow_replies(
             state["text"],
             stored,
@@ -612,10 +622,7 @@ class FlowGraphRunner:
         return "Para continuar, cuénteme cómo desea seguir con su proceso."
 
     def _complaint_report_reason(self, text: str, stored: ConversationState) -> str:
-        context = self._recent_complaint_context(stored.conversation_history)
         reason = f"El usuario manifestó queja o enojo en {stored.flow}.{stored.node}: {text}"
-        if context:
-            reason += f" | Contexto reciente: {context}"
         return reason[:1000]
 
     def _human_help_report_reason(
@@ -624,27 +631,18 @@ class FlowGraphRunner:
         stored: ConversationState,
         state: FlowGraphState | None = None,
     ) -> str:
+        # El resumen lo genera el LLM, que recibe el historial reciente para
+        # incorporar por sí mismo cualquier señal de molestia o frustración
+        # previa, sin depender de listas de palabras clave.
         summary = self.classifier.summarize_for_report(
             text,
             stored.flow,
             stored.node,
             client_id=(state or {}).get("user_id", ""),
             canal=(state or {}).get("channel", ""),
+            conversation_history=stored.conversation_history,
         )
-        context = self._recent_complaint_context(stored.conversation_history)
-        if context:
-            summary = f"{summary} | El historial reciente muestra molestia/queja: {context}"
         return summary[:1000]
-
-    def _recent_complaint_context(self, history: list[dict]) -> str:
-        snippets = []
-        for turn in history[-settings.RAG_CONVERSATION_HISTORY_LIMIT:]:
-            user_text = str(turn.get("user") or "").strip()
-            if user_text and self.classifier.is_angry_or_complaint(user_text):
-                flow = turn.get("flow") or ""
-                node = turn.get("node") or ""
-                snippets.append(f"{flow}.{node}: {user_text[:180]}")
-        return " / ".join(snippets[-2:])
 
     def _append_history(
         self,

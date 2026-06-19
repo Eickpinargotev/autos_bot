@@ -24,7 +24,7 @@ Mensaje del usuario:
 
 Devuelve JSON estricto:
 {{
-  "intent": "positive|negative|city|license|question|complaint|decline|change_intent|unknown",
+  "intent": "positive|negative|city|license|question|complaint|decline|change_intent|human_handoff|greeting|unknown",
   "value": "liberia|other|car|moto|b2|b3|b4|bus|",
   "has_off_flow_question": true|false,
   "off_flow_question": "pregunta lateral del usuario o vacío"
@@ -46,7 +46,10 @@ Reglas:
 - Si hace una pregunta fuera de la última pregunta enviada y no responde la pregunta del flujo, intent question.
 - Si el mensaje responde la pregunta del flujo y además incluye una duda real que requiere una respuesta independiente, conserva la respuesta en intent/value, pon has_off_flow_question=true y copia solo esa duda lateral en off_flow_question.
 - Solo usa has_off_flow_question=true cuando haya una duda informativa independiente que requiera respuesta además de avanzar el flujo.
-- Si muestra enojo, queja, insulto, frustración o devolución, intent complaint.
+- Si el mensaje es solo un saludo, cortesía o charla social (por ejemplo "hola", "buenas", "cómo está", "todo bien", "gracias") y no responde la pregunta del flujo ni trae una duda informativa real, intent greeting.
+- Nunca trates un saludo o una simple cortesía como pregunta: no uses intent question ni has_off_flow_question=true para un saludo o agradecimiento sin contenido informativo.
+- Si el usuario pide explícitamente hablar con una persona, asesor, agente o humano, se dirige a Enrique por su nombre, informa que ya hizo un pago/depósito/transferencia, envía o menciona un comprobante/recibo, pide revisar dinero, confirmar un pago o el estado/seguimiento de un trámite, o plantea un caso que requiere que una persona revise datos internos, intent human_handoff.
+- Si muestra enojo, queja, insulto, frustración o pide una devolución, intent complaint.
 """
 
 OFF_FLOW_QUESTION_PROMPT = """
@@ -71,6 +74,9 @@ Flujo: {flujo}
 Nodo: {nodo}
 Mensaje:
 {mensaje}
+
+Historial reciente (para contexto; si muestra molestia, enojo o frustración previa, menciónalo en el resumen):
+{historial}
 
 Devuelve JSON estricto:
 {{"resumen": "texto breve"}}
@@ -112,6 +118,7 @@ Reglas de decisión:
 - Si el mensaje es principalmente una duda informativa sobre condiciones, recursos, requisitos, disponibilidad, costos o consecuencias, usa action="answer_and_clarify", flow="", answer_source="rag" y una sola pregunta de avance para confirmar si desea conocer o continuar con el proceso correspondiente.
 - Si hay pregunta pero no está claro el flujo, usa action="answer_and_clarify" y genera una sola pregunta aclaratoria natural.
 - Si no hay pregunta y hay intención clara, usa action="start_flow".
+- Si el mensaje es solo un saludo o cortesía sin intención ni pregunta clara (por ejemplo "hola", "buenas", "cómo está", "todo bien"), responde con calidez y usa action="clarify" ofreciendo las opciones de servicios. No uses handoff ni rag para un simple saludo; un saludo no es una pregunta informativa.
 - Si no hay pregunta ni intención clara, usa action="clarify". Tu pregunta aclaratoria DEBE ofrecer siempre opciones explícitas de nuestros servicios principales (por ejemplo: 'Hola, ¿estás buscando ayuda con tu licencia, dictamen médico, clases de manejo o alquiler de vehículo?'). Evita hacer preguntas abiertas o genéricas como '¿Qué tipo de ayuda necesitas?' o '¿En qué te puedo ayudar?'.
 - Si hay pago realizado, comprobante, revisión de dinero, estado de trámite, seguimiento manual, promesa previa, solicitud explícita de asesor/persona/humano o caso administrativo que requiere revisar datos internos, usa action="handoff".
 - Si el usuario se dirige a Enrique directamente o menciona a Enrique, usa action="handoff".

@@ -4,6 +4,17 @@ from src.domain.entities import Channel
 
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
+# Lee y borra el buffer en una sola operación atómica para que dos tareas de
+# Celery concurrentes (una por cada mensaje recibido en la ráfaga) no puedan
+# leer el mismo contenido y procesarlo dos veces. La que llega primero se lleva
+# todos los mensajes; las demás reciben una lista vacía.
+_DRAIN_BUFFER_LUA = """
+local messages = redis.call('lrange', KEYS[1], 0, -1)
+redis.call('del', KEYS[1])
+return messages
+"""
+_drain_buffer = redis_client.register_script(_DRAIN_BUFFER_LUA)
+
 def scoped_key(prefix: str, channel: Channel | str, user_id: str) -> str:
     channel_value = channel.value if isinstance(channel, Channel) else channel
     return f"{prefix}:{channel_value}:{user_id}"
@@ -19,8 +30,7 @@ class BufferService:
     @staticmethod
     def get_and_clear_buffer(user_id: str, channel: Channel | str = Channel.TELEGRAM) -> str:
         key = scoped_key("buffer", channel, user_id)
-        messages = redis_client.lrange(key, 0, -1)
-        redis_client.delete(key)
+        messages = _drain_buffer(keys=[key]) or []
         return " ".join(messages)
 
     @staticmethod

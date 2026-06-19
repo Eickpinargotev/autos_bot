@@ -44,7 +44,11 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(action="start_flow", flow="QUEJA", confidence=0.9),
+        ):
             result = self.runner.run(Channel.WHATSAPP, "50611111111", "Estoy muy molesto con el servicio", "Cliente")
 
         self.assertEqual(result.legacy_state, UserState.QUEJAS)
@@ -61,7 +65,11 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(action="start_flow", flow="QUEJA", confidence=0.9),
+        ):
             result = self.runner.run(
                 Channel.TELEGRAM,
                 "1049838038",
@@ -83,7 +91,11 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, _ = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(action="start_flow", flow="WIN", confidence=0.9),
+        ):
             result = self.runner.run(Channel.TELEGRAM, "1049838038", "Gracias por la ayuda aprove el examen", "Erick")
 
         self.assertEqual(result.legacy_state, UserState.GENERAL)
@@ -98,7 +110,11 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(action="start_flow", flow="GENERAL", confidence=0.9),
+        ):
             result = self.runner.run(Channel.TELEGRAM, "1049838038", "No aprobé el examen", "Erick")
 
         self.assertEqual(result.legacy_state, UserState.GENERAL)
@@ -161,6 +177,17 @@ class FlowGraphRegressionTests(unittest.TestCase):
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
         with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="answer_and_clarify",
+                has_question=True,
+                question="ustedes me prestan el casco o tengo que llevar uno?",
+                answer_source="rag",
+                clarifying_question="¿Busca ayuda con su licencia, dictamen, clases o alquiler, o es para otro trámite o servicio?",
+                confidence=0.6,
+            ),
+        ), patch.object(
             self.runner.rag,
             "answer_question",
             return_value=RagAnswer(True, "Para moto normalmente debe usar casco."),
@@ -424,6 +451,14 @@ class FlowGraphRegressionTests(unittest.TestCase):
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
         with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="clarify",
+                clarifying_question="¿El pago es para qué servicio: licencia, dictamen, clases o alquiler?",
+                confidence=0.4,
+            ),
+        ), patch.object(
             self.runner.rag,
             "answer_question",
             return_value=RagAnswer(True, "SINPE AL 60023618"),
@@ -444,7 +479,15 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="handoff",
+                handoff_reason="Recepción requiere revisión manual: pago ya realizado, seguimiento de trámite.",
+                confidence=0.9,
+            ),
+        ):
             result = self.runner.run(
                 Channel.WHATSAPP,
                 "50613131313",
@@ -837,7 +880,11 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, _ = self._repo_patches(stored)
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("complaint"),
+        ):
             result = self.runner.run(Channel.WHATSAPP, "50655555555", "Esto es una estafa, estoy molesto", "Cliente")
 
         self.assertEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
@@ -845,7 +892,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         block_repo.block_user.assert_called_once()
         self.assertIn("GENERAL.G35", report_mock.call_args.kwargs["problema"])
 
-    def test_human_help_report_includes_recent_angry_history(self):
+    def test_human_help_request_hands_off_and_summarizes_with_history(self):
         stored = ConversationState(
             flow="GENERAL",
             node="G35",
@@ -864,14 +911,23 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, _ = self._repo_patches(stored)
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("human_handoff"),
+        ), patch.object(
+            self.runner.classifier,
+            "summarize_for_report",
+            return_value="El usuario pide un asesor; el historial reciente muestra molestia: nadie responde.",
+        ) as summary_mock:
             result = self.runner.run(Channel.WHATSAPP, "50666666666", "Pónganme en contacto con un asesor", "Cliente")
 
         self.assertEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
         report_mock.assert_called_once()
         block_repo.block_user.assert_called_once()
+        # El historial se delega al LLM (summarize_for_report), no a keywords.
+        self.assertEqual(summary_mock.call_args.kwargs["conversation_history"], stored.conversation_history)
         problema = report_mock.call_args.kwargs["problema"]
-        self.assertIn("historial reciente", problema.lower())
         self.assertIn("nadie responde", problema)
 
     def test_indirect_question_does_not_advance_g1_as_positive(self):
@@ -1014,15 +1070,16 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(decision.answer, "")
         self.assertTrue(decision.clarifying_question)
 
-    def test_reception_fallback_answers_and_confirms_when_initial_service_intent_has_real_question(self):
+    def test_reception_fallback_degrades_to_clarify_without_keyword_guessing(self):
+        # Sin LLM no se adivina la intención con reglas: se degrada de forma
+        # segura pidiendo una aclaración. La interpretación del lenguaje natural
+        # es responsabilidad exclusiva del modelo de IA.
         decision = ReceptionAgent()._fallback_decision(
             "Hola, quiero llevar un curso de licencia y tengo una duda sobre una condición del examen?"
         )
 
-        self.assertEqual(decision.action, "answer_and_clarify")
+        self.assertEqual(decision.action, "clarify")
         self.assertEqual(decision.flow, "")
-        self.assertTrue(decision.has_question)
-        self.assertEqual(decision.answer_source, "rag")
         self.assertTrue(decision.clarifying_question)
 
     def test_decline_reply_closes_flow_without_sending_next_sales_node(self):
@@ -1051,20 +1108,54 @@ class FlowGraphRegressionTests(unittest.TestCase):
         clear_mock.assert_called_once_with(Channel.TELEGRAM.value, "1049838038")
         set_mock.assert_not_called()
 
+    def test_greeting_in_active_flow_retakes_question_without_rag_or_handoff(self):
+        stored = ConversationState(
+            flow="GENERAL",
+            node="G1",
+            last_question="Ya tiene el teórico ganado???",
+            user_name="Erick",
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+
+        with get_patch, set_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("greeting"),
+        ), patch.object(self.runner.rag, "answer_question", return_value=RagAnswer(False)) as rag_mock, patch(
+            "src.application.flow_graph.ReportRepository.create_report",
+            return_value=(True, {}),
+        ) as report_mock:
+            result = self.runner.run(Channel.WHATSAPP, "50677777777", "Hola, buenas, ¿cómo está? ¿todo bien?", "Erick")
+
+        # Un saludo no dispara RAG, ni handoff, ni reporte: solo retoma la pregunta.
+        self.assertEqual(len(result.replies), 1)
+        self.assertNotIn(FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE, result.replies)
+        self.assertNotIn(
+            "Por ahora no tengo esa información disponible",
+            result.replies[0],
+        )
+        rag_mock.assert_not_called()
+        report_mock.assert_not_called()
+        set_mock.assert_called_once()
+
     def test_reply_classifier_handles_question_and_mixed_cases(self):
         classifier = ResponseClassifier()
-        completion = MagicMock()
-        completion.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content='{"intent": "question", "value": "", "has_off_flow_question": false, "off_flow_question": ""}'
-                )
-            )
+
+        def _completion(content):
+            return MagicMock(choices=[MagicMock(message=MagicMock(content=content))])
+
+        completions = [
+            _completion('{"intent": "question", "value": "", "has_off_flow_question": false, "off_flow_question": ""}'),
+            _completion('{"intent": "city", "value": "liberia", "has_off_flow_question": false, "off_flow_question": ""}'),
+            _completion(
+                '{"intent": "city", "value": "liberia", "has_off_flow_question": true, '
+                '"off_flow_question": "tengo una consulta, y si pierdo el examen teórico tengo que volver a pagar?"}'
+            ),
         ]
 
         with patch("src.application.response_classifier.settings.OPENAI_API_KEY", "test-key"), patch(
             "src.application.response_classifier.client.chat.completions.create",
-            return_value=completion,
+            side_effect=completions,
         ) as completion_mock:
             result = classifier.classify_reply(
                 "Tengo una duda sobre el trámite",
@@ -1072,20 +1163,20 @@ class FlowGraphRegressionTests(unittest.TestCase):
                 "G1",
                 "Ya tiene el teórico ganado???",
             )
+            self.assertEqual(result.intent, "question")
 
-        self.assertEqual(result.intent, "question")
-        completion_mock.assert_called_once()
+            city = classifier.classify_reply("Es en Liberia", "GENERAL", "G35", "Donde es su prueba de manejo???")
+            self.assertEqual(city.intent, "city")
+            self.assertEqual(city.value, "liberia")
 
-        city = classifier.classify_reply("Es en Liberia", "GENERAL", "G35", "Donde es su prueba de manejo???")
-        self.assertEqual(city.intent, "city")
-        self.assertEqual(city.value, "liberia")
+            mixed = classifier.classify_reply(
+                "Es en Liberia, pero tengo una consulta, y si pierdo el examen teórico tengo que volver a pagar?",
+                "GENERAL",
+                "G35",
+                "Donde es su prueba de manejo???",
+            )
 
-        mixed = classifier.classify_reply(
-            "Es en Liberia, pero tengo una consulta, y si pierdo el examen teórico tengo que volver a pagar?",
-            "GENERAL",
-            "G35",
-            "Donde es su prueba de manejo???",
-        )
+        self.assertEqual(completion_mock.call_count, 3)
         self.assertEqual(mixed.intent, "city")
         self.assertEqual(mixed.value, "liberia")
         self.assertTrue(mixed.has_off_flow_question)

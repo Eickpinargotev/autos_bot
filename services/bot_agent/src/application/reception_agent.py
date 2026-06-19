@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from openai import OpenAI
 
-from src.application.response_classifier import ResponseClassifier
 from src.core.config import settings
 from src.core.prompts import RECEPTION_AGENT_PROMPT
 from src.domain.entities import Channel
@@ -31,9 +30,6 @@ class ReceptionAgent:
     VALID_ACTIONS = {"answer_and_start_flow", "answer_and_clarify", "start_flow", "clarify", "handoff", "close"}
     VALID_FLOWS = {"GENERAL", "Alquiler", "CLASES", "DICTAMEN", "QUEJA", "WIN", ""}
     VALID_ANSWER_SOURCES = {"prompt_rules", "rag", "none"}
-
-    def __init__(self):
-        self.classifier = ResponseClassifier()
 
     def decide(
         self,
@@ -118,16 +114,10 @@ class ReceptionAgent:
         return self._normalized_decision(decision, text, conversation_history or [])
 
     def _fallback_decision(self, text: str, conversation_history: list[dict] | None = None) -> ReceptionDecision:
-        if self.classifier.is_angry_or_complaint(text):
-            return ReceptionDecision("start_flow", flow="QUEJA", confidence=0.75)
-
-        if self.classifier.asks_for_human_help(text) or self.classifier.needs_manual_handoff(text):
-            return ReceptionDecision(
-                "handoff",
-                handoff_reason=f"Recepción requiere revisión manual: {text[:240]}",
-                confidence=0.75,
-            )
-
+        # Sin modelo de IA disponible (o si la llamada falla) no intentamos
+        # adivinar la intención con reglas: degradamos de forma segura pidiendo
+        # una aclaración con las opciones de servicio. La interpretación del
+        # lenguaje natural del cliente es responsabilidad exclusiva del LLM.
         return ReceptionDecision(
             "clarify",
             clarifying_question=self.clarifying_question_for(text),

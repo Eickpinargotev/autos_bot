@@ -1,5 +1,4 @@
 import json
-import re
 import time
 from dataclasses import dataclass
 
@@ -26,54 +25,6 @@ class ReplyClassification:
 
 
 class ResponseClassifier:
-    SERVICE_DISCOVERY_QUESTION = "¿Lo necesita para prueba de manejo, clases, alquiler, dictamen o información de licencia?"
-
-    anger_words = (
-        "queja",
-        "molest",
-        "devolucion",
-        "devolución",
-        "problema",
-        "enojo",
-        "frustr",
-        "insatisf",
-        "estafa",
-        "reclamo",
-        "reclamar",
-        "mal servicio",
-        "pesimo",
-        "pésimo",
-        "horrible",
-        "indign",
-        "irrespet",
-        "mentira",
-        "engañ",
-        "engan",
-        "robo",
-        "ladron",
-        "ladrón",
-        "denuncia",
-        "demand",
-        "me bloquearon",
-        "me dejaron",
-        "no responden",
-        "nadie responde",
-        "quiero solucion",
-        "quiero solución",
-        "solucionen",
-        "me siento",
-        "terrible",
-        "fatal",
-        "no puedo ingresar",
-        "no me deja ingresar",
-        "no funciona",
-        "no sirve",
-        "seccion de tareas",
-        "sección de tareas",
-        "no se que hacer",
-        "no sé qué hacer",
-    )
-
     def classify_reply(
         self,
         text: str,
@@ -87,31 +38,19 @@ class ResponseClassifier:
             return self._classify_with_llm(text, flow, node, last_question, client_id=client_id, canal=canal)
         return ReplyClassification("unknown")
 
-    def is_angry_or_complaint(self, text: str) -> bool:
-        cleaned = self._normalize(text)
-        ascii_cleaned = self._strip_accents(cleaned)
-        return any(word in cleaned or self._strip_accents(word) in ascii_cleaned for word in self.anger_words)
-
-    def asks_for_human_help(self, text: str) -> bool:
-        cleaned = self._normalize(text)
-        return any(phrase in cleaned for phrase in ("asesor", "persona", "humano", "llamen", "llamar", "contacten", "contactar", "ayuda de alguien"))
-
-    def needs_manual_handoff(self, text: str) -> bool:
-        cleaned = self._strip_accents(self._normalize(text))
-        manual_patterns = (
-            r"\b(ya|hoy|ayer|te|le)\s+(deposite|pague|transferi|mande|envie)\b",
-            r"\b(deposito|pago|transferencia)\s+(hecho|realizado|enviado|lista|listo)\b",
-            r"\b(comprobante|recibo|factura|revisar|revise|confirmar|confirmame|verificar|validar)\b",
-            r"\b(hace|desde) \d+ (mes|meses|dia|dias|semana|semanas)\b",
-            r"\b(estado|seguimiento|pendiente|tramite|tr[aá]mite)\b",
-            r"\b(hablar|comunicarme|contactar|ocupo|necesito)\s+(con\s+)?(enrique|asesor|persona|humano)\b",
-        )
-        return any(re.search(pattern, cleaned) for pattern in manual_patterns)
-
-    def summarize_for_report(self, text: str, flow: str, node: str, client_id: str = "", canal: Channel | str = "") -> str:
+    def summarize_for_report(
+        self,
+        text: str,
+        flow: str,
+        node: str,
+        client_id: str = "",
+        canal: Channel | str = "",
+        conversation_history: list[dict] | None = None,
+    ) -> str:
         if not settings.OPENAI_API_KEY:
             return f"El usuario pide ayuda fuera del flujo {flow}.{node}: {text[:240]}"
         started = time.monotonic()
+        historial = json.dumps(conversation_history or [], ensure_ascii=False)
         input_data = {"text": text, "flow": flow, "node": node}
         try:
             completion = client.chat.completions.create(
@@ -119,7 +58,7 @@ class ResponseClassifier:
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": "Devuelve JSON estricto."},
-                    {"role": "user", "content": REPORT_SUMMARY_PROMPT.format(mensaje=text, flujo=flow, nodo=node)},
+                    {"role": "user", "content": REPORT_SUMMARY_PROMPT.format(mensaje=text, flujo=flow, nodo=node, historial=historial)},
                 ],
             )
             data = json.loads(completion.choices[0].message.content)
@@ -249,10 +188,3 @@ class ResponseClassifier:
             error=error,
             duration_ms=ToolCallLogger._duration_ms(started),
         )
-
-    def _normalize(self, text: str) -> str:
-        return " ".join(text.lower().strip().split())
-
-    def _strip_accents(self, text: str) -> str:
-        replacements = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
-        return text.translate(replacements)
