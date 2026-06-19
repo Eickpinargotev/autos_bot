@@ -28,9 +28,17 @@ from src.application.fsm import process_fsm
 celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL)
 
 @celery_app.task
-def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desconocido"):
+def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desconocido", seq: int | None = None):
     channel_value = Channel(channel)
-    text = BufferService.get_and_clear_buffer(user_id, channel_value)
+    if seq is None:
+        # Compatibilidad con tareas agendadas por versiones anteriores.
+        text = BufferService.get_and_clear_buffer(user_id, channel_value)
+    else:
+        # Debounce: solo procesa la tarea del último mensaje de la ráfaga.
+        drained = BufferService.drain_if_current(user_id, channel_value, seq)
+        if drained is None:
+            return  # Llegó un mensaje más nuevo; esta tarea quedó obsoleta.
+        text = drained
     if not text.strip():
         return # Buffer was empty or cleared by a command
 

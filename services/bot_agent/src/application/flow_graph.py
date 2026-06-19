@@ -187,13 +187,21 @@ class FlowGraphRunner:
             return state
 
         if action in {"answer_and_clarify", "clarify"}:
+            # Evitamos enviar dos mensajes redundantes (p. ej. un saludo de
+            # bienvenida con opciones + una pregunta genérica encima). Solo
+            # recurrimos a la pregunta de descubrimiento si no hay nada más que
+            # decir; si el modelo ya devolvió una respuesta o una pregunta de
+            # aclaración propia, esa basta.
             replies = []
             if decision.answer:
                 replies.append(decision.answer)
-            question = decision.clarifying_question or self.reception.clarifying_question_for(state["text"])
-            replies.append(question)
+            if decision.clarifying_question:
+                replies.append(decision.clarifying_question)
+            elif not decision.answer:
+                replies.append(self.reception.clarifying_question_for(state["text"]))
+            last_question = replies[-1] if replies else ""
             state["replies"] = replies
-            self._save_intake_state(state, stored, replies, "intake_clarify", last_question=question)
+            self._save_intake_state(state, stored, replies, "intake_clarify", last_question=last_question)
             state["legacy_state"] = UserState.GENERAL
             state["intake_turn_type"] = "intake_clarify"
             return state

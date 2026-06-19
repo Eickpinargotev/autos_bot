@@ -140,7 +140,15 @@ class ReceptionAgent:
         if decision.action in {"answer_and_start_flow", "start_flow"} and not decision.flow:
             decision.action = "answer_and_clarify" if decision.answer or decision.has_question else "clarify"
 
-        if decision.action in {"answer_and_clarify", "clarify"} and not decision.clarifying_question:
+        # Solo agregamos una pregunta de descubrimiento genérica cuando no hay
+        # nada más que enviar. Si el modelo ya devolvió una respuesta (p. ej. un
+        # saludo cálido con opciones), no añadimos una segunda pregunta encima,
+        # para no contestar con dos mensajes redundantes.
+        if (
+            decision.action in {"answer_and_clarify", "clarify"}
+            and not decision.clarifying_question
+            and not decision.answer
+        ):
             decision.clarifying_question = self.clarifying_question_for(decision.question)
 
         if decision.action == "handoff" and not decision.handoff_reason:

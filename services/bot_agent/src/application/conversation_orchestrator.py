@@ -52,8 +52,8 @@ class ConversationOrchestrator:
             return [self._send(message, "Ayuda solicitada: el usuario insiste enviando varias imagenes/documentos")]
 
         if message.message_type == MessageType.AUDIO:
-            BufferService.add_message(message.user_id, "texto transcrito", message.channel)
-            process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name), countdown=settings.MESSAGE_BUFFER_SECONDS)
+            seq = BufferService.add_message(message.user_id, "texto transcrito", message.channel)
+            process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name, seq), countdown=settings.MESSAGE_BUFFER_SECONDS)
             return []
 
         return []
@@ -100,8 +100,8 @@ class ConversationOrchestrator:
         if is_in_ad_flow:
             return []
 
-        BufferService.add_message(message.user_id, text, message.channel)
-        process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name), countdown=settings.MESSAGE_BUFFER_SECONDS)
+        seq = BufferService.add_message(message.user_id, text, message.channel)
+        process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name, seq), countdown=settings.MESSAGE_BUFFER_SECONDS)
         return []
 
     def _handle_group_join(self, message: InboundMessage) -> list[OrchestratorAction]:

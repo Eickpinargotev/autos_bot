@@ -1138,6 +1138,27 @@ class FlowGraphRegressionTests(unittest.TestCase):
         report_mock.assert_not_called()
         set_mock.assert_called_once()
 
+    def test_greeting_intake_sends_single_message_not_answer_plus_generic_clarify(self):
+        # Un usuario nuevo que solo saluda debe recibir UN solo mensaje (saludo +
+        # opciones), nunca el saludo del modelo seguido de la pregunta genérica.
+        get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="clarify",
+                answer="Hola, estoy bien. ¿Buscas ayuda con tu licencia, dictamen, clases o alquiler?",
+                confidence=0.3,
+            ),
+        ), patch.object(self.runner.rag, "answer_question", return_value=RagAnswer(False)) as rag_mock:
+            result = self.runner.run(Channel.WHATSAPP, "50699999999", "Hola, ¿cómo estás? ¿todo bien?", "Cliente")
+
+        self.assertEqual(len(result.replies), 1)
+        self.assertNotIn("Con gusto. ¿Desea que sigamos", "\n".join(result.replies))
+        rag_mock.assert_not_called()
+
     def test_reply_classifier_handles_question_and_mixed_cases(self):
         classifier = ResponseClassifier()
 
