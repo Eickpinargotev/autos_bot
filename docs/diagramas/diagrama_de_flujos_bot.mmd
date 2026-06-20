@@ -1,0 +1,296 @@
+flowchart TD
+    classDef msgNode fill:#d4edda,stroke:#28a745,stroke-width:2px,color:#155724
+    classDef remindNode fill:#fff3cd,stroke:#ffc107,stroke-width:2px,color:#856404
+    classDef reportNode fill:#f8d7da,stroke:#dc3545,stroke-width:2px,color:#721c24
+    subgraph Alquiler
+        A1["Hola!!!  Mi nombre es Enrique Guzmán y estaré pendiente de su proceso de obtención de licencia  Ya tiene cita agendada p..."]:::msgNode
+        A1_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  No recibí tu respuesta  Ya tiene cita agendada para la prueba de manejo???"]:::remindNode
+        A1 -- Si no responde en 23s --> A1_rem1
+    end
+    subgraph CLASES
+        C1["Hola!!!  Ofrecemos el servicio de clases de manejo personalizadas. Las clases las ocupas en Liberia???"]:::msgNode
+        C1_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  Dime en cual sede ocupas tus clases"]:::remindNode
+        C1 -- Si no responde en 23s --> C1_rem1
+        C2["Excelente!!!  Acá le envío el precio de los paquetes disponibles y el enlace a nuestra agenda para reservar su espacio<br>💡💡💡 Contamos con 3 opciones para la contratación de clases de manejo.  ✒ Clase individual: la hora de clase de manejo va..."]:::msgNode
+        C2_report["📝 REPORTE:<br>contestaron al mensaje de clases de manejo"]:::reportNode
+        C2 -- Si el usuario responde --> C2_report
+        C2_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  Pudo llenar el formulario para agendar su clase???"]:::remindNode
+        C2 -- Si no responde en 23s --> C2_rem1
+        C2_rem1_report["📝 REPORTE:<br>respondieron recordatorio sobre clase de manejo"]:::reportNode
+        C2_rem1 -- Si responde al recordatorio --> C2_rem1_report
+        C5["🛡🛡🛡 Contamos con 3 opciones para la contratación de clases de manejo.  ✒ Clase individual: la hora de clase de manejo va...<br>Me envía la foto del depósito para coordinar la atención"]:::msgNode
+        C5_report["📝 REPORTE:<br>contestaron al ultimo mensaje de clases de manejo"]:::reportNode
+        C5 -- Si el usuario responde --> C5_report
+        C5_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  Envíeme la foto del depósito para poder coordinarle la enseñanza de manejo"]:::remindNode
+        C5 -- Si no responde en 23s --> C5_rem1
+        C5_rem1_report["📝 REPORTE:<br>respondieron recordatorio de clase de manejo"]:::reportNode
+        C5_rem1 -- Si responde al recordatorio --> C5_rem1_report
+    end
+    subgraph DICTAMEN
+        D1["EL DICTAMEN VALE 22600<br>SINPE AL 60023618<br>Me envía la foto del depósito, foto de la cita, foto de la cédula y el siguiente formulario lleno con sus datos<br>💡💡💡DICTAMEN DE LICENCIAS 💡💡💡  🩸1) Nombre completo:  🩸2) Cédula:  🩸3) Edad:  🩸4) Estado civil:  🩸5) Ocupación:  🩸6) Provi..."]:::msgNode
+        D1_report["📝 REPORTE:<br>contestaron al mensaje de dictamen de licencias"]:::reportNode
+        D1 -- Si el usuario responde --> D1_report
+        D1_rem1["⏳ Recordatorio (23s):<br>📌Hola!!!  No me envió el formulario con los datos y la información que ocupo para gestionar su dictamen"]:::remindNode
+        D1 -- Si no responde en 23s --> D1_rem1
+        D1_rem1_report["📝 REPORTE:<br>respondieron recordatorio sobre dictamen"]:::reportNode
+        D1_rem1 -- Si responde al recordatorio --> D1_rem1_report
+        D1_1["EL DICTAMEN VALE 22600<br>SINPE AL 61103205<br>Me envía la foto del depósito, foto de la cita, foto de la cédula y el siguiente formulario lleno con sus datos<br>💡💡💡DICTAMEN DE LICENCIAS 💡💡💡  🩸1) Nombre completo:  🩸2) Cédula:  🩸3) Edad:  🩸4) Estado civil:  🩸5) Ocupación:  🩸6) Provi..."]:::msgNode
+        D1_1_report["📝 REPORTE:<br>contestaron al mensaje de dictamen de licencias"]:::reportNode
+        D1_1 -- Si el usuario responde --> D1_1_report
+        D1_1_rem1["⏳ Recordatorio (23s):<br>📌Hola!!!  No me envió el formulario con los datos y la información que ocupo para gestionar su dictamen"]:::remindNode
+        D1_1 -- Si no responde en 23s --> D1_1_rem1
+        D1_1_rem1_report["📝 REPORTE:<br>respondieron recordatorio sobre dictamen"]:::reportNode
+        D1_1_rem1 -- Si responde al recordatorio --> D1_1_rem1_report
+    end
+    subgraph GENERAL
+        G1["Hola!!!  Gracias por tu mensaje  Mi nombre es Enrique Guzmán y estaré pendiente de su proceso de obtención de licencias<br>Ya tiene el teórico ganado???"]:::msgNode
+        G1_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  No recibí tu respuesta  Ya tiene el teórico ganado???"]:::remindNode
+        G1 -- Si no responde en 23s --> G1_rem1
+        G3["Excelente. Muchas felicidades.  Ya tiene cita agendada para la prueba de manejo???"]:::msgNode
+        G3_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  No recibí tu respuesta  Ya tiene cita agendada para la prueba de manejo???"]:::remindNode
+        G3 -- Si no responde en 23s --> G3_rem1
+        G4["Nosotros ofrecemos el servicio de preparación y citas para el examen teórico.  Donde vives???"]:::msgNode
+        G4_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  Le agradezco mucho que me indique en cual ciudad es que va a realizar su curso teórico"]:::remindNode
+        G4 -- Si no responde en 23s --> G4_rem1
+        G35["Donde es su prueba de manejo???"]:::msgNode
+        G35_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  Le agradezco mucho si si me dice en cual sede es su prueba de manejo???"]:::remindNode
+        G35 -- Si no responde en 23s --> G35_rem1
+        G7["No hay problema!!!  Yo le puedo ayudar con la cita<br>💡💡💡 Por favor llenar el formulario de solicitud de citas para prueba de manejo  En la pregunta que dice *''INGRESO COSEV..."]:::msgNode
+        G7_report["📝 REPORTE:<br>contestaron al mensaje sobre formulario de solicitud de citas para prueba de man..."]:::reportNode
+        G7 -- Si el usuario responde --> G7_report
+        G7_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario para agendar la cita???"]:::remindNode
+        G7 -- Si no responde en 23s --> G7_rem1
+        G7_rem1_report["📝 REPORTE:<br>contestaron el recordatorio para el formulario para agendar cita"]:::reportNode
+        G7_rem1 -- Si responde al recordatorio --> G7_rem1_report
+        G7_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!!  No me dijo si pudo llenar el formulario para agendar su cita"]:::remindNode
+        G7_rem1 -- Si no responde en 23s --> G7_rem2
+        G7_rem2_report["📝 REPORTE:<br>contestaron el recordatorio para el formulario para agendar cita"]:::reportNode
+        G7_rem2 -- Si responde al recordatorio --> G7_rem2_report
+        G11["La licencia que usted va a sacar es moto o carro???"]:::msgNode
+        G12["La licencia que usted va a sacar es moto o carro???"]:::msgNode
+        G13["💡💡💡Hola!!!  Tenemos el siguiente paquete para alquilar su vehículo para prueba de manejo. Si no tiene cita para prueba l...<br>💡💡💡 Hola!!!  El paquete que deseas incluye una preparación qué consiste en:  🌺 Recorrido visual explicativo de la ruta  ...<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G13_report["📝 REPORTE:<br>Contestaron mensaje sobre formulario de reservación"]:::reportNode
+        G13 -- Si el usuario responde --> G13_report
+        G13_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en ambos formularios???"]:::remindNode
+        G13 -- Si no responde en 23s --> G13_rem1
+        G13_rem1_report["📝 REPORTE:<br>Contestaron recordatorio por formulario de reservación"]:::reportNode
+        G13_rem1 -- Si responde al recordatorio --> G13_rem1_report
+        G13_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos y el de la preparación"]:::remindNode
+        G13_rem1 -- Si no responde en 23s --> G13_rem2
+        G13_rem2_report["📝 REPORTE:<br>Contestaron recordatorio por formulario de reservación"]:::reportNode
+        G13_rem2 -- Si responde al recordatorio --> G13_rem2_report
+        G16["*Tenemos un paquete para usted!!!*  🖊 El alquiler de moto *A1* vale 30 mil colones.   (Se reserva con 10 mil colones)   ...<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G16_report["📝 REPORTE:<br>Contestaron mensaje sobre formulario de reservacion, revisar!"]:::reportNode
+        G16 -- Si el usuario responde --> G16_report
+        G16_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G16 -- Si no responde en 23s --> G16_rem1
+        G16_rem1_report["📝 REPORTE:<br>Contestaron mensaje sobre formulario de reservacion, revisar!"]:::reportNode
+        G16_rem1 -- Si responde al recordatorio --> G16_rem1_report
+        G16_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos y el de la preparación"]:::remindNode
+        G16_rem1 -- Si no responde en 23s --> G16_rem2
+        G16_rem2_report["📝 REPORTE:<br>Contestaron mensaje sobre formulario de reservacion, revisar!"]:::reportNode
+        G16_rem2 -- Si responde al recordatorio --> G16_rem2_report
+        G16_1["*Tenemos un paquete para usted!!!*  🖊 El alquiler de moto *A1* vale 30 mil colones.   (Se reserva con 10 mil colones)   ...<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 61103205    https://..."]:::msgNode
+        G16_1_report["📝 REPORTE:<br>Contestaron mensaje sobre formulario de reservacion, revisar!"]:::reportNode
+        G16_1 -- Si el usuario responde --> G16_1_report
+        G16_1_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G16_1 -- Si no responde en 23s --> G16_1_rem1
+        G16_1_rem1_report["📝 REPORTE:<br>Contestaron mensaje sobre formulario de reservacion, revisar!"]:::reportNode
+        G16_1_rem1 -- Si responde al recordatorio --> G16_1_rem1_report
+        G16_1_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos y el de la preparación"]:::remindNode
+        G16_1_rem1 -- Si no responde en 23s --> G16_1_rem2
+        G16_1_rem2_report["📝 REPORTE:<br>Contestaron mensaje sobre formulario de reservacion, revisar!"]:::reportNode
+        G16_1_rem2 -- Si responde al recordatorio --> G16_1_rem2_report
+        G19["El alquiler de camión para b2 vale 55 mil colones<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G19_report["📝 REPORTE:<br>contestaron mensaje sobre formulario de reservacion de camion"]:::reportNode
+        G19 -- Si el usuario responde --> G19_report
+        G19_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G19 -- Si no responde en 23s --> G19_rem1
+        G19_rem1_report["📝 REPORTE:<br>Contestaron recordatorio sobre formulario de reservacion, revisar!"]:::reportNode
+        G19_rem1 -- Si responde al recordatorio --> G19_rem1_report
+        G19_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G19_rem1 -- Si no responde en 23s --> G19_rem2
+        G19_rem2_report["📝 REPORTE:<br>Contestaron recordatorio por formulario de reservación"]:::reportNode
+        G19_rem2 -- Si responde al recordatorio --> G19_rem2_report
+        G20["El alquiler de camión automático para B3 vale 75 mil colones<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G20_report["📝 REPORTE:<br>contestaron mensaje sobre formulario de reservacion de B3"]:::reportNode
+        G20 -- Si el usuario responde --> G20_report
+        G20_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G20 -- Si no responde en 23s --> G20_rem1
+        G20_rem1_report["📝 REPORTE:<br>Contestaron recordatorio sobre formulario de reservacion, revisar!"]:::reportNode
+        G20_rem1 -- Si responde al recordatorio --> G20_rem1_report
+        G20_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G20_rem1 -- Si no responde en 23s --> G20_rem2
+        G20_rem2_report["📝 REPORTE:<br>Contestaron recordatorio por formulario de reservación"]:::reportNode
+        G20_rem2 -- Si responde al recordatorio --> G20_rem2_report
+        G21["El alquiler de camión para B4 (traíler) vale 130 mil colones<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G21_report["📝 REPORTE:<br>contestaron mensaje sobre formulario de reservacion de B4 o trailer"]:::reportNode
+        G21 -- Si el usuario responde --> G21_report
+        G21_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G21 -- Si no responde en 23s --> G21_rem1
+        G21_rem1_report["📝 REPORTE:<br>Contestaron recordatorio sobre formulario de reservacion, revisar!"]:::reportNode
+        G21_rem1 -- Si responde al recordatorio --> G21_rem1_report
+        G21_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G21_rem1 -- Si no responde en 23s --> G21_rem2
+        G21_rem2_report["📝 REPORTE:<br>Contestaron recordatorio por formulario de reservación"]:::reportNode
+        G21_rem2 -- Si responde al recordatorio --> G21_rem2_report
+        G22["El alquiler de bus automático para prueba de manejo vale 85 mil colones<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G22_report["📝 REPORTE:<br>contestaron mensaje sobre formulario de reservacion de bus automático"]:::reportNode
+        G22 -- Si el usuario responde --> G22_report
+        G22_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G22 -- Si no responde en 23s --> G22_rem1
+        G22_rem1_report["📝 REPORTE:<br>Contestaron recordatorio sobre formulario de reservacion, revisar!"]:::reportNode
+        G22_rem1 -- Si responde al recordatorio --> G22_rem1_report
+        G22_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G22_rem1 -- Si no responde en 23s --> G22_rem2
+        G22_rem2_report["📝 REPORTE:<br>Contestaron recordatorio por formulario de reservación"]:::reportNode
+        G22_rem2 -- Si responde al recordatorio --> G22_rem2_report
+        G25["*Tenemos un paquete para usted!!!*    Le asesoramos y ayudamos obtener la cita de forma gratuita    🖊 El alquiler del ve...<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G25_report["📝 REPORTE:<br> Contestaron mensaje de formulario para alquiler o reservacion de carro, automov..."]:::reportNode
+        G25 -- Si el usuario responde --> G25_report
+        G25_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G25 -- Si no responde en 23s --> G25_rem1
+        G25_rem1_report["📝 REPORTE:<br> Contestaron recordatorio de formulario para alquiler o reservacion de carro, au..."]:::reportNode
+        G25_rem1 -- Si responde al recordatorio --> G25_rem1_report
+        G25_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G25_rem1 -- Si no responde en 23s --> G25_rem2
+        G25_rem2_report["📝 REPORTE:<br> Contestaron recordatorio de formulario para alquiler o reservacion de carro, au..."]:::reportNode
+        G25_rem2 -- Si responde al recordatorio --> G25_rem2_report
+        G28["*Tenemos un paquete para usted!!!*    🖊 El alquiler de moto *A1* vale 30 mil colones.   (Se reserva con 10 mil colones) ...<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G28_report["📝 REPORTE:<br> Contestaron mensaje sobre formulario para reservación de moto, A1, A2 o A3 con ..."]:::reportNode
+        G28 -- Si el usuario responde --> G28_report
+        G28_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G28 -- Si no responde en 23s --> G28_rem1
+        G28_rem1_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G28_rem1 -- Si responde al recordatorio --> G28_rem1_report
+        G28_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G28_rem1 -- Si no responde en 23s --> G28_rem2
+        G28_rem2_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G28_rem2 -- Si responde al recordatorio --> G28_rem2_report
+        G28_1["*Tenemos un paquete para usted!!!*    🖊 El alquiler de moto *A1* vale 30 mil colones.   (Se reserva con 10 mil colones) ...<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler     El sinpe móvil se hace al número 61103205   https://..."]:::msgNode
+        G28_1_report["📝 REPORTE:<br> Contestaron mensaje sobre formulario para reservación de moto, A1, A2 o A3 con ..."]:::reportNode
+        G28_1 -- Si el usuario responde --> G28_1_report
+        G28_1_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G28_1 -- Si no responde en 23s --> G28_1_rem1
+        G28_1_rem1_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G28_1_rem1 -- Si responde al recordatorio --> G28_1_rem1_report
+        G28_1_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G28_1_rem1 -- Si no responde en 23s --> G28_1_rem2
+        G28_1_rem2_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G28_1_rem2 -- Si responde al recordatorio --> G28_1_rem2_report
+        G29["El alquiler de camión para B2 vale 55 mil colones<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G29_report["📝 REPORTE:<br> Contestaron mensaje sobre formulario para reservación para B2 o camión"]:::reportNode
+        G29 -- Si el usuario responde --> G29_report
+        G29_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G29 -- Si no responde en 23s --> G29_rem1
+        G29_rem1_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G29_rem1 -- Si responde al recordatorio --> G29_rem1_report
+        G29_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G29_rem1 -- Si no responde en 23s --> G29_rem2
+        G29_rem2_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G29_rem2 -- Si responde al recordatorio --> G29_rem2_report
+        G30["El alquiler de camión automático para B3 vale 75 mil colones.<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G30_report["📝 REPORTE:<br> Contestaron mensaje sobre formulario para reservación para camión automático o ..."]:::reportNode
+        G30 -- Si el usuario responde --> G30_report
+        G30_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G30 -- Si no responde en 23s --> G30_rem1
+        G30_rem1_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G30_rem1 -- Si responde al recordatorio --> G30_rem1_report
+        G30_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G30_rem1 -- Si no responde en 23s --> G30_rem2
+        G30_rem2_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G30_rem2 -- Si responde al recordatorio --> G30_rem2_report
+        G31["El alquiler de camión para B4 (traíler) vale 130 mil colones<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G31_report["📝 REPORTE:<br> Contestaron mensaje sobre formulario para reservación para B4 (trailer)"]:::reportNode
+        G31 -- Si el usuario responde --> G31_report
+        G31_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G31 -- Si no responde en 23s --> G31_rem1
+        G31_rem1_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G31_rem1 -- Si responde al recordatorio --> G31_rem1_report
+        G31_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G31_rem1 -- Si no responde en 23s --> G31_rem2
+        G31_rem2_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G31_rem2 -- Si responde al recordatorio --> G31_rem2_report
+        G32["El alquiler de bus automático para prueba de manejo vale 85 mil colones.<br>💡💡💡 Por favor llenar el formulario de reservación para alquiler    El sinpe móvil se hace al número 60023618    https://..."]:::msgNode
+        G32_report["📝 REPORTE:<br> Contestaron mensaje sobre formulario para reservación de bus automático"]:::reportNode
+        G32 -- Si el usuario responde --> G32_report
+        G32_rem1["⏳ Recordatorio (23s):<br>📌 Pudo completar la información que se pide en el formulario de reservación de vehículos???"]:::remindNode
+        G32 -- Si no responde en 23s --> G32_rem1
+        G32_rem1_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G32_rem1 -- Si responde al recordatorio --> G32_rem1_report
+        G32_rem2["⏳ Recordatorio (23s):<br>📌 Hola!!! No me dijo si pudo llenar el formulario de reservación de vehículos"]:::remindNode
+        G32_rem1 -- Si no responde en 23s --> G32_rem2
+        G32_rem2_report["📝 REPORTE:<br> Contestaron recordatorio sobre formulario para reservación de vehiculo"]:::reportNode
+        G32_rem2 -- Si responde al recordatorio --> G32_rem2_report
+    end
+    subgraph KEYWORD
+        T1["💡💡💡Hola!!!  Para iniciar con el curso teórico solamente debes ingresar al siguiente enlace  👇🏻👇🏻👇🏻👇🏻👇🏻 De inmediato come..."]:::msgNode
+        T2["📌 Pudo ingresar a la página de estudio???"]:::msgNode
+        T2_report["📝 REPORTE:<br>Contestaron recordatorio 1 día despues de palabra clave"]:::reportNode
+        T2 -- Si el usuario responde --> T2_report
+        T3["📌 Como va con su programa de estudio???"]:::msgNode
+        T3_report["📝 REPORTE:<br>Contestaron recordatorio 3 días despues de palabra clave"]:::reportNode
+        T3 -- Si el usuario responde --> T3_report
+        T4["Recuerde que puede solicitar su cita teórica en el siguiente enlace  En la pregunta que dice 'INGRESO COSEVI' debe poner..."]:::msgNode
+        T4_report["📝 REPORTE:<br>Contestaron recordatorio 1 semana despues de palabra clave"]:::reportNode
+        T4 -- Si el usuario responde --> T4_report
+        H1["💡💡💡Hola!!!  Para iniciar con el curso teórico de transporte público solamente debes ingresar al siguiente enlace  👇🏻👇🏻👇🏻..."]:::msgNode
+    end
+    subgraph QUEJA
+        Q1["📌 HOLA!!!  Mi nombre es Enrique Guzmán  Le agradezco si me detalla toda la situación de lo ocurrido con lujo de detalles..."]:::msgNode
+        Q1_report["📝 REPORTE:<br>El cliente tiene una queja y contestó al mensaje envíado por el agente"]:::reportNode
+        Q1 -- Si el usuario responde --> Q1_report
+        Q1_rem1["⏳ Recordatorio (23s):<br>📌 Hola!!!  Disculpe la insistencia pero le agradezco más detalles de lo ocurrido"]:::remindNode
+        Q1 -- Si no responde en 23s --> Q1_rem1
+        Q1_rem1_report["📝 REPORTE:<br>El cliente tiene una queja y contestó el recordatorio"]:::reportNode
+        Q1_rem1 -- Si responde al recordatorio --> Q1_rem1_report
+    end
+    subgraph WELCOME
+        W["📲 Gracias por unirse a nuestro grupo del curso teórico!!!  Recuerde:  🎯 Por política de transparencia no cobramos nada a..."]:::msgNode
+        W_report["📝 REPORTE:<br>Respondieron a mensaje de bienvenida al grupo"]:::reportNode
+        W -- Si el usuario responde --> W_report
+    end
+    subgraph WIN
+        W1["💡💡💡Le agradezco si me ayuda con una buena calificación y recomendación en nuestra página.   Para nosotros es demasiado i..."]:::msgNode
+        W1_report["📝 REPORTE:<br>Se detectó que el cliente envío un mensaje sobre que ganó la prueba y a contesta..."]:::reportNode
+        W1 -- Si el usuario responde --> W1_report
+    end
+    subgraph PUBLICIDAD
+        CITY_INV["Envía secuencia de 5 mensajes leídos de NocoDB<br>(Se programa envío y se bloquea usuario)"]:::msgNode
+        CITY_ERR["📝 REPORTE:<br>Faltan datos o link de WhatsApp en NocoDB"]:::reportNode
+        CITY_INV -- "Si la BD tiene datos incompletos" --> CITY_ERR
+    end
+    G4_Retoma["Mensaje de Retoma:<br>Para continuar, retomemos la última pregunta..."]:::msgNode
+    CHECK_REG_G16{"¿Usuario registrado<br>en BD?"}:::flowNode
+    CHECK_REG_G28{"¿Usuario registrado<br>en BD?"}:::flowNode
+    DICTAMEN_START{"Inicio Flujo DICTAMEN:<br>¿Usuario registrado en BD?"}:::flowNode
+    G1 -- "Si positivo" --> G3
+    G1 -- "Si negativo" --> G4
+    G4 -- "Si existe la ciudad en la BD" --> CITY_INV
+    G4 -- "Si NO existe la ciudad" --> G4_Retoma
+    G3 -- "Si positivo" --> G35
+    G3 -- "Si negativo" --> G7
+    G35 -- "Si liberia" --> G11
+    G35 -- "Si no liberia" --> G12
+    G12 -- "carro/B1" --> G25
+    G12 -- "moto/A1/A2/A3" --> CHECK_REG_G28
+    CHECK_REG_G28 -- "Si está registrado" --> G28_1
+    CHECK_REG_G28 -- "Si NO está registrado" --> G28
+    G12 -- "B2" --> G29
+    G12 -- "B3" --> G30
+    G12 -- "B4/Trailer" --> G31
+    G12 -- "bus/C2" --> G32
+    G11 -- "carro/B1" --> G13
+    G11 -- "moto/A1/A2/A3" --> CHECK_REG_G16
+    CHECK_REG_G16 -- "Si está registrado" --> G16_1
+    CHECK_REG_G16 -- "Si NO está registrado" --> G16
+    G11 -- "B2" --> G19
+    G11 -- "B3" --> G20
+    G11 -- "B4/Trailer" --> G21
+    G11 -- "bus/C2" --> G22
+    A1 -- "Si positivo" --> G35
+    A1 -- "Si negativo" --> G7
+    C1 -- "Si liberia" --> C2
+    C1 -- "Si no liberia" --> C5
+    DICTAMEN_START -- "Si el usuario está registrado en BD" --> D1_1
+    DICTAMEN_START -- "Si el usuario NO está registrado" --> D1

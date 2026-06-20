@@ -20,11 +20,8 @@ data/*
 !data/nocodb_metadata/**
 data/qdrant_storage/
 
-# Local knowledge library
-aqui cualquier catedra/
-
-# Local private/reference files
-No entrar a a esta carpeta/
+# Local private / dev-only files (notes, scratch scripts, local overrides)
+_local/
 
 # OS and editor files
 .DS_Store
@@ -38,6 +35,6 @@ No entrar a a esta carpeta/
 # Docker/local overrides
 docker-compose.override.yml
 
-# Documentation and generated files
-docs/
-scratch_generate_mermaid.py
+# Documentation: keep sources (.md/.mmd) versioned, ignore generated exports
+docs/**/*.pdf
+docs/**/*.svg

@@ -1,4 +1,0 @@
-services:
-  nocodb:
-    ports:
-      - "8013:8080"
