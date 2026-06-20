@@ -74,6 +74,17 @@ class BufferService:
         return " ".join(messages)
 
     @staticmethod
+    def has_pending(user_id: str, channel: Channel | str = Channel.TELEGRAM) -> bool:
+        """Indica si el usuario tiene mensajes en el buffer sin procesar.
+
+        El buffer solo existe (rpush) mientras hay mensajes esperando a que la
+        tarea de debounce los drene. Si existe, el usuario ya respondió aunque su
+        mensaje todavía no se haya procesado.
+        """
+        buffer_key = scoped_key("buffer", channel, user_id)
+        return bool(redis_client.exists(buffer_key))
+
+    @staticmethod
     def get_and_clear_buffer(user_id: str, channel: Channel | str = Channel.TELEGRAM) -> str:
         key = scoped_key("buffer", channel, user_id)
         messages = _drain_buffer(keys=[key]) or []

@@ -154,6 +154,13 @@ def schedule_flow_reminder_for_result(channel: Channel | str, user_id: str, remi
 
 @celery_app.task
 def send_flow_reminder(channel: str, user_id: str, flow: str, node: str, reminder_level: int = 1):
+    # El usuario pudo responder justo cuando vence el recordatorio: su mensaje
+    # sigue en el buffer (aún sin procesar), pero ya respondió. No enviamos el
+    # recordatorio ni reprogramamos: el process_buffered_messages pendiente
+    # cancelará/reprogramará los recordatorios según el nuevo estado.
+    if BufferService.has_pending(user_id, channel):
+        return
+
     node_data = get_node_data(flow, node)
     reminder = _reminder_at_level(node_data.get("recordatorio"), reminder_level)
     if not reminder:

@@ -60,6 +60,15 @@ class BufferServiceTests(unittest.TestCase):
             args=["3"],
         )
 
+    def test_has_pending_true_when_buffer_key_exists(self):
+        with patch("src.application.buffer_service.redis_client.exists", return_value=1) as exists_mock:
+            self.assertTrue(BufferService.has_pending("50688888888", Channel.WHATSAPP))
+        exists_mock.assert_called_once_with(scoped_key("buffer", Channel.WHATSAPP, "50688888888"))
+
+    def test_has_pending_false_when_buffer_key_absent(self):
+        with patch("src.application.buffer_service.redis_client.exists", return_value=0):
+            self.assertFalse(BufferService.has_pending("50688888888", Channel.WHATSAPP))
+
     def test_drain_if_current_returns_none_when_task_is_stale(self):
         # Llegó un mensaje más nuevo: el script Lua devuelve nil y la tarea
         # obsoleta no debe procesar nada.
