@@ -36,6 +36,7 @@ x-bot-environment: &bot-environment
 x-bot-build: &bot-build
   context: ./services/bot_agent
   dockerfile: Dockerfile
+  target: prod
 
 services:
   postgres:

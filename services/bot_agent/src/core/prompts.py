@@ -43,9 +43,11 @@ Reglas:
 - Si menciona B1/carro/auto, intent license value car.
 - Si menciona moto/A1/A2/A3, intent license value moto.
 - Si menciona B2, B3, B4/trailer o bus/C2, usa el value correspondiente.
-- Si hace una pregunta fuera de la última pregunta enviada y no responde la pregunta del flujo, intent question.
+- Usa intent question SOLO cuando el mensaje no responde en absoluto la última pregunta enviada. Si alguna parte del mensaje contiene una respuesta válida a esa pregunta (tipo de licencia, ciudad/sede, sí/no, etc.), NUNCA uses intent question: clasifica esa respuesta en intent/value.
 - Si el mensaje responde la pregunta del flujo y además incluye una duda real que requiere una respuesta independiente, conserva la respuesta en intent/value, pon has_off_flow_question=true y copia solo esa duda lateral en off_flow_question.
+- La respuesta al flujo tiene prioridad aunque sea muy corta (una sola palabra) y la duda lateral sea más larga o esté redactada como la pregunta principal. Primero detecta si alguna parte del mensaje responde la última pregunta enviada; si la responde, eso va en intent/value y la otra parte en off_flow_question.
 - Solo usa has_off_flow_question=true cuando haya una duda informativa independiente que requiera respuesta además de avanzar el flujo.
+- Ejemplos (la respuesta corta al flujo SIEMPRE manda): última pregunta "¿moto o carro?" + mensaje "moto, pero ¿tienen campo el sábado?" -> intent license, value moto, has_off_flow_question true, off_flow_question "¿tienen campo el sábado?". Última pregunta "¿Dónde es su prueba?" + mensaje "en Liberia, y otra consulta aparte..." -> intent city, value liberia, has_off_flow_question true.
 - Si el mensaje es solo un saludo, cortesía o charla social (por ejemplo "hola", "buenas", "cómo está", "todo bien", "gracias") y no responde la pregunta del flujo ni trae una duda informativa real, intent greeting.
 - Nunca trates un saludo o una simple cortesía como pregunta: no uses intent question ni has_off_flow_question=true para un saludo o agradecimiento sin contenido informativo.
 - Si el usuario pide explícitamente hablar con una persona, asesor, agente o humano, se dirige a Enrique por su nombre, informa que ya hizo un pago/depósito/transferencia, envía o menciona un comprobante/recibo, pide revisar dinero, confirmar un pago o el estado/seguimiento de un trámite, o plantea un caso que requiere que una persona revise datos internos, intent human_handoff.

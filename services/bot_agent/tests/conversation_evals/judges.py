@@ -43,6 +43,7 @@ class SemanticJudge:
     def evaluate(self, case: ShotEvalCase, result: EvalRunResult) -> dict:
         completion = self.client.chat.completions.create(
             model=self.model,
+            temperature=0,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": "Eres un juez estricto de calidad conversacional. Devuelve JSON."},

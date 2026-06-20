@@ -52,6 +52,7 @@ class ReceptionAgent:
         try:
             completion = client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
+                temperature=0,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": "Devuelve JSON estricto."},

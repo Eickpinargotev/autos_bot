@@ -77,7 +77,47 @@ Usa volúmenes con nombre, la red externa `easypanel` y no publica puertos direc
 
 ## Tests
 
+**Las dependencias de test viven en la imagen, no en el host.** No instales nada con
+`pip` en tu máquina: los tests se ejecutan dentro del contenedor, en el mismo entorno
+que la app.
+
+- Dependencias de producción: `services/bot_agent/requirements.txt`
+- Dependencias de desarrollo/test: `services/bot_agent/requirements-dev.txt` (incluye `pytest`)
+
+El `Dockerfile` es multi-stage:
+- etapa `prod` (final, por defecto) → la usa la nube (`docker-compose.yml`), sin pytest.
+- etapa `dev` → la usa el local (`docker-compose.local.yml`), con las deps de test.
+
+El código se monta por **bind mount** (`./services/bot_agent:/app`), así editas en tu
+editor y el contenedor ve los cambios al instante; **solo reconstruyes la imagen cuando
+cambian las dependencias**, no al cambiar código.
+
+### Correr los tests
+
+`docker compose` inyecta automáticamente las variables de `.env` (incluida
+`OPENAI_API_KEY`) al contenedor, así que el LLM queda integrado en los tests:
+
 ```bash
-cd services/bot_agent
-pytest
+# Suite completa (levanta dependencias y usa la key de .env):
+docker compose -f docker-compose.local.yml run --rm bot_agent pytest
+
+# Subconjunto / un archivo:
+docker compose -f docker-compose.local.yml run --rm bot_agent pytest tests/unit
 ```
+
+Hay **tres niveles** de tests:
+
+1. **Deterministas** (la mayoría): mockean el LLM. Corren siempre, con o sin key.
+2. **Integración con LLM real** (`@requires_llm` en `tests/regression`): ejercitan el
+   clasificador/recepción reales. Con `OPENAI_API_KEY` se ejecutan; **sin key se saltan**
+   (no fallan). Las llamadas de clasificación/recepción usan `temperature=0` para ser
+   estables.
+3. **Juez LLM semántico** (`tests/conversation_evals/test_llm_judge_evals.py`): evalúa la
+   calidad de la respuesta con un LLM como juez. Solo corre con `RUN_LLM_EVALS=1` + key:
+
+   ```bash
+   docker compose -f docker-compose.local.yml run --rm -e RUN_LLM_EVALS=1 bot_agent pytest
+   ```
+
+> Para forzar el modo sin LLM (solo deterministas), pasa `-e OPENAI_API_KEY=`:
+> `docker compose -f docker-compose.local.yml run --rm -e OPENAI_API_KEY= bot_agent pytest`

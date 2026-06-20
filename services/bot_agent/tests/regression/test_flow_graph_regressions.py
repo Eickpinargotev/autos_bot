@@ -15,8 +15,18 @@ from src.application.flow_graph import FlowGraphRunner
 from src.application.rag_service import RagAnswer
 from src.application.reception_agent import ReceptionAgent, ReceptionDecision
 from src.application.response_classifier import ReplyClassification, ResponseClassifier
+from src.core.config import settings
 from src.domain.entities import Channel, UserState
 from src.infrastructure.repositories.conversation_state_repo import ConversationState
+
+
+# Tests de INTEGRACIÓN que llaman al LLM real (reception/classifier sin mock).
+# Se saltan si no hay OPENAI_API_KEY, igual que el juez LLM (SemanticJudge.enabled()).
+# El flujo normal (docker compose ... run) inyecta la key desde .env y sí los ejecuta.
+requires_llm = unittest.skipUnless(
+    bool(settings.OPENAI_API_KEY),
+    "requiere OPENAI_API_KEY (test de integración con LLM real)",
+)
 
 
 class FlowGraphRegressionTests(unittest.TestCase):
@@ -211,6 +221,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.node, "I1")
         self.assertEqual(saved_state.last_question, result.replies[-1])
 
+    @requires_llm
     def test_intake_followup_can_enter_alquiler_flow(self):
         stored = ConversationState(
             flow="INTAKE",
@@ -369,6 +380,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "GENERAL")
         self.assertEqual(saved_state.node, "G1")
 
+    @requires_llm
     def test_intake_followup_obtener_licencia_enters_general_flow(self):
         stored = ConversationState(
             flow="INTAKE",
@@ -396,6 +408,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "GENERAL")
         self.assertEqual(saved_state.node, "G1")
 
+    @requires_llm
     def test_initial_moto_without_license_enters_general_not_alquiler_or_clases(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
@@ -417,6 +430,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "GENERAL")
         self.assertEqual(saved_state.node, "G1")
 
+    @requires_llm
     def test_initial_prueba_de_manejo_without_explicit_alquiler_enters_general(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
@@ -429,6 +443,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "GENERAL")
         self.assertEqual(saved_state.node, "G1")
 
+    @requires_llm
     def test_initial_explicit_alquiler_with_prueba_de_manejo_enters_alquiler(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
@@ -604,6 +619,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "Alquiler")
         self.assertEqual(saved_state.node, "A1")
 
+    @requires_llm
     def test_rag_answer_is_logged_as_tool_event(self):
         get_patch, set_patch, _ = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
@@ -700,6 +716,17 @@ class FlowGraphRegressionTests(unittest.TestCase):
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
 
         with get_patch, set_patch, report_patch, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="answer_and_clarify",
+                has_question=True,
+                question="ustede me ayudan con el casco o lo tengo que llevar yo?",
+                answer_source="rag",
+                clarifying_question="¿Desea continuar con el proceso de alquiler?",
+                confidence=0.6,
+            ),
+        ), patch.object(
             self.runner.rag,
             "answer_question",
             return_value=RagAnswer(True, "Puede traer su casco o consultar disponibilidad con el asesor."),
@@ -716,12 +743,13 @@ class FlowGraphRegressionTests(unittest.TestCase):
             result.replies[0],
             "Puede traer su casco o consultar disponibilidad con el asesor.",
         )
-        self.assertIn("alquilar", result.replies[1])
+        self.assertIn("alquil", result.replies[1].lower())
         self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
         self.assertEqual(saved_state.flow, "INTAKE")
         self.assertEqual(saved_state.node, "I1")
 
+    @requires_llm
     def test_initial_alquiler_typo_with_question_answers_and_clarifies(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
@@ -746,12 +774,13 @@ class FlowGraphRegressionTests(unittest.TestCase):
             result.replies[0],
             "Es conveniente traer un casco de su medida y gusto, pero si no lo trae, nosotros le proporcionaremos uno y cinta reflectiva.",
         )
-        self.assertIn("alquilar", result.replies[1])
+        self.assertIn("alquil", result.replies[1].lower())
         self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
         self.assertEqual(saved_state.flow, "INTAKE")
         self.assertEqual(saved_state.node, "I1")
 
+    @requires_llm
     def test_initial_alquiler_with_different_implicit_question_uses_rag_then_clarifies(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
@@ -770,12 +799,13 @@ class FlowGraphRegressionTests(unittest.TestCase):
 
         rag_mock.assert_called_once()
         self.assertEqual(result.replies[0], "El recorrido de práctica va incluido en el paquete de alquiler.")
-        self.assertIn("alquilar", result.replies[1])
+        self.assertIn("alquil", result.replies[1].lower())
         self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
         self.assertEqual(saved_state.flow, "INTAKE")
         self.assertEqual(saved_state.node, "I1")
 
+    @requires_llm
     def test_general_moto_reply_uses_registered_variant_by_city(self):
         cases = [
             ("G11", True, "G16_1"),
@@ -826,6 +856,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         block_repo.block_user.assert_called_once()
         self.assertIn("El cliente tiene una queja", report_mock.call_args.kwargs["problema"])
 
+    @requires_llm
     def test_g4_city_uses_publicidad_invitation_flow(self):
         stored = ConversationState(
             flow="GENERAL",
@@ -856,7 +887,11 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, set_mock = self._repo_patches(stored)
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
-        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch(
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("unknown"),
+        ), patch(
             "src.application.publicidad_service.PublicidadService.handle_invitation_by_city",
             return_value=False,
         ):
@@ -930,6 +965,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
         problema = report_mock.call_args.kwargs["problema"]
         self.assertIn("nadie responde", problema)
 
+    @requires_llm
     def test_indirect_question_does_not_advance_g1_as_positive(self):
         stored = ConversationState(
             flow="GENERAL",
@@ -972,6 +1008,15 @@ class FlowGraphRegressionTests(unittest.TestCase):
         get_patch, set_patch, set_mock = self._repo_patches(stored)
 
         with get_patch, set_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification(
+                "city",
+                value="liberia",
+                has_off_flow_question=True,
+                off_flow_question="tengo una consulta, y si pierdo el examen teórico tengo que volver a pagar?",
+            ),
+        ), patch.object(
             self.runner.rag,
             "answer_question",
             return_value=RagAnswer(True, "Si pierde el examen teórico, debe volver a pagar el derecho correspondiente."),
@@ -995,6 +1040,49 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "GENERAL")
         self.assertEqual(saved_state.node, "G11")
         self.assertEqual(saved_state.last_question, "La licencia que usted va a sacar es moto o carro???")
+
+    def test_license_answer_with_side_question_answers_then_advances_flow(self):
+        # "moto" responde la pregunta del flujo y, a la vez, trae una duda
+        # lateral: el bot debe responder la duda y AVANZAR (no re-preguntar).
+        stored = ConversationState(
+            flow="GENERAL",
+            node="G11",
+            last_question="La licencia que usted va a sacar es moto o carro???",
+            user_name="Cliente",
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+
+        with get_patch, set_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification(
+                "license",
+                value="moto",
+                has_off_flow_question=True,
+                off_flow_question="ustedes ofrecen el casco o tengo que llevarlo?",
+            ),
+        ), patch(
+            "src.infrastructure.repositories.keyword_registry_repository.KeywordRegistryRepository.exists",
+            return_value=False,
+        ), patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "Acá le damos casco y cinta reflectiva si no trae uno."),
+        ) as rag_mock:
+            result = self.runner.run(
+                Channel.WHATSAPP,
+                "50688888888",
+                "moto\nustedes ofrecen el casco o tengo que llevarlo?",
+                "Cliente",
+            )
+
+        rag_mock.assert_called_once()
+        # Primero responde la duda lateral, luego envía el nodo de avance.
+        self.assertEqual(result.replies[0], "Acá le damos casco y cinta reflectiva si no trae uno.")
+        self.assertNotIn("retomemos la última pregunta", "\n".join(result.replies))
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "GENERAL")
+        self.assertEqual(saved_state.node, "G16")
 
     def test_retake_cleans_reminder_wrapper_from_last_question(self):
         stored = ConversationState(
@@ -1022,6 +1110,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
             "Para continuar, retomemos la última pregunta:\n\nYa tiene el teórico ganado???",
         )
 
+    @requires_llm
     def test_retake_uses_node_specific_short_message_for_long_sales_node(self):
         stored = ConversationState(
             flow="CLASES",

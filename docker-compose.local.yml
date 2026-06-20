@@ -40,6 +40,7 @@ services:
     build:
       context: ./services/bot_agent
       dockerfile: Dockerfile
+      target: dev
     container_name: bot_agent_telegram
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -87,6 +88,7 @@ services:
     build:
       context: ./services/bot_agent
       dockerfile: Dockerfile
+      target: dev
     container_name: bot_agent_worker
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -131,6 +133,7 @@ services:
     build:
       context: ./services/bot_agent
       dockerfile: Dockerfile
+      target: dev
     container_name: whatsapp_webhook
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}

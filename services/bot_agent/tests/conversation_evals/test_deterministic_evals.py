@@ -11,14 +11,20 @@ os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from tests.conversation_evals.runner import ConversationEvalRunner
-from tests.conversation_evals.schemas import CapturedConversationShot, EvalExpected
+from tests.conversation_evals.schemas import (
+    CapturedConversationShot,
+    EvalExpected,
+    ReplyClassificationMock,
+)
 
 
 class DeterministicConversationEvalTests(unittest.TestCase):
     def test_runner_can_simulate_captured_shot(self):
         shot = _sample_shot()
         runner = ConversationEvalRunner()
-        result = runner.run_shot(
+        # Test determinista: mockeamos la clasificación ("No" -> negative) para no
+        # depender del LLM real, según la regla de conversation_evals.
+        case = ConversationEvalRunner.case_from_shot(
             shot,
             metadata={"chanel": "whatsapp", "id_user": "5061", "shot_id": "5061_20260606_174533"},
             expected=EvalExpected(
@@ -29,6 +35,8 @@ class DeterministicConversationEvalTests(unittest.TestCase):
                 must_not_call_tools=["rag.answer_question", "report.create"],
             ),
         )
+        case.mocked_tools.reply_classification = ReplyClassificationMock(intent="negative")
+        result = runner.run_case(case)
 
         self.assertEqual(result.final_flow, "GENERAL")
         self.assertEqual(result.final_node, "G4")
