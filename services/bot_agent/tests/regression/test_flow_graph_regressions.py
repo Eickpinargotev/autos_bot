@@ -1084,6 +1084,57 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "GENERAL")
         self.assertEqual(saved_state.node, "G16")
 
+    def test_unanswered_off_flow_question_does_not_push_pending_step(self):
+        # El usuario hace una duda dentro del flujo y no podemos responderla
+        # (se ofrece asesor). NO debemos insistir con el paso pendiente: la
+        # conversación pausa en la duda abierta, sin "retomemos la última...".
+        stored = ConversationState(
+            flow="CLASES",
+            node="C2",
+            last_question="Para continuar, envíeme la foto del comprobante de pago.",
+            user_name="Cliente",
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+
+        with get_patch, set_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("question"),
+        ), patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(False),
+        ), patch("src.application.flow_graph.UnansweredQuestionRepository.create", return_value=True):
+            result = self.runner.run(Channel.WHATSAPP, "50611112222", "¿Las clases incluyen seguro?", "Cliente")
+
+        self.assertEqual(len(result.replies), 1)
+        self.assertIn("no tengo esa información", result.replies[0].lower())
+        self.assertNotIn("retomemos la última", "\n".join(result.replies).lower())
+
+    def test_answered_off_flow_question_reanchors_to_pending_step(self):
+        # Si la duda SÍ se resuelve, reanclamos al paso pendiente del flujo.
+        stored = ConversationState(
+            flow="CLASES",
+            node="C2",
+            last_question="Para continuar, envíeme la foto del comprobante de pago.",
+            user_name="Cliente",
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+
+        with get_patch, set_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("question"),
+        ), patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "Las clases son individuales y personalizadas."),
+        ):
+            result = self.runner.run(Channel.WHATSAPP, "50611112222", "¿Las clases son grupales?", "Cliente")
+
+        self.assertEqual(result.replies[0], "Las clases son individuales y personalizadas.")
+        self.assertEqual(len(result.replies), 2)
+
     def test_retake_cleans_reminder_wrapper_from_last_question(self):
         stored = ConversationState(
             flow="GENERAL",

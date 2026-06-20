@@ -396,7 +396,11 @@ class FlowGraphRunner:
             ]
             turn_type = "rag_fallback"
 
-        if include_retake:
+        # Solo reanclamos al paso pendiente del flujo si la duda del usuario
+        # quedó resuelta. Si no pudimos responder (se ofreció un asesor), no
+        # insistimos con la pregunta pendiente: sería robótico empujar el flujo
+        # mientras la duda del cliente sigue abierta. La conversación pausa ahí.
+        if include_retake and turn_type == "rag_answer":
             replies.append(self._retake_message(stored))
         return replies, turn_type
 

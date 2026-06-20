@@ -80,10 +80,35 @@ Pipeline de conversación:
 Reglas para cambios:
 - Para cambiar **el comportamiento del flujo** (qué intención avanza, a qué nodo), edita el
   **prompt** (`core/prompts.py`) o el **router** (`flow_router.py`). No cablees lógica en el grafo.
-- Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §5). No metas
+- Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §6). No metas
   texto de negocio en el código ni en los prompts.
 
-## 5. Restricciones duras (rompen si las ignoras)
+## 5. Diseño conversacional (FSM + LLM)
+
+El reto del sistema es mezclar un **flujo automático de mensajes curados** (FSM) con un
+**flujo conversacional** (responder dudas). Reglas para que sea natural y no robótico:
+
+- **Separación de capas:**
+  - *Esqueleto FSM (determinista):* qué nodo sigue (`flow_router.py`) y los **mensajes
+    curados** del flujo (`mensajes.json`: precios, links, guiones). El LLM NO los reinventa.
+  - *Capa conversacional (razonada con contexto):* cuando el usuario no avanza el flujo
+    (duda, saludo…), se decide con el **paso pendiente como dato** (qué espera el bot)
+    cómo responder. El contexto del estado se pasa como DATO, no como ramas hardcodeadas.
+- **Re-anclaje consciente de la resolución:** no insistir con el paso del flujo ("retomemos…")
+  si la duda del cliente **no quedó resuelta**. Solo reanclar cuando se resolvió y aún aporta
+  (ver `_off_flow_replies` en `flow_graph.py`).
+- **Prohibido el prompt overfitting:** las instrucciones se dan por **contexto/intención**,
+  nunca por frase exacta. ❌ "si el usuario dice 'hola', responde X". ✅ "si el mensaje
+  contiene un saludo, haz X". La diversidad de expresión humana es infinita; una regla por
+  frase confunde al modelo. Los ejemplos *few-shot* se permiten solo como ilustración del
+  principio, no como reglas rígidas por caso.
+- **Prohibido regex / coincidencia exacta para interpretar lenguaje natural** del cliente.
+  Interpretar intención es responsabilidad exclusiva del LLM con instrucciones contextuales.
+  *Excepción consciente:* comandos estructurados (`/d`, `/block`, `grupo["…"]`, `add["…"]`) y
+  disparadores de keyword del negocio ("tareas"/"transporte") NO son interpretación de NL; ahí
+  el match exacto es intencional.
+
+## 6. Restricciones duras (rompen si las ignoras)
 
 - **`mensajes.json` vive en la RAÍZ del repo.** Ambos compose lo montan como
   `./mensajes.json:/mensajes.json:ro` en los 3 servicios. El loader es
@@ -95,7 +120,7 @@ Reglas para cambios:
 - Ese mismo test exige que ciertas frases clave **existan** en los prompts. Si reescribes un
   prompt, conserva esas frases o actualiza el test de forma deliberada.
 
-## 6. Convenciones del repo
+## 7. Convenciones del repo
 
 - `docs/` está **versionado** (fuentes `.md`/`.mmd`; los PDF/SVG generados se ignoran).
 - `_local/` está **ignorado** por git: notas personales, scripts scratch, overrides locales.
