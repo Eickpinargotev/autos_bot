@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from src.core.config import settings
 from src.application.buffer_service import BufferService, redis_client, scoped_key
 from src.application.message_catalog import get_node_data
@@ -16,6 +17,7 @@ from src.domain.entities import Channel
 from src.infrastructure.repositories.redis_state_repo import RedisStateRepo
 from src.infrastructure.channels.senders import ChannelSenderRegistry
 from src.infrastructure.repositories.conversation_state_repo import ConversationStateRepo
+from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 from src.infrastructure.repositories.report_repository import ReportRepository
 from src.infrastructure.evals.conversation_shots import (
@@ -26,6 +28,16 @@ from src.infrastructure.evals.conversation_shots import (
 from src.application.fsm import process_fsm
 
 celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL)
+
+# Tarea periódica de retención: una vez al día purga el historial de
+# conversaciones (NocoDB) vencido. La hora es UTC (~02:00 en Costa Rica), un
+# horario de baja actividad. Requiere que el worker corra con beat (`-B`).
+celery_app.conf.beat_schedule = {
+    "purgar-conversaciones-vencidas": {
+        "task": "src.infrastructure.tasks.celery_app.purge_expired_conversations",
+        "schedule": crontab(hour=8, minute=0),
+    },
+}
 
 @celery_app.task
 def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desconocido", seq: int | None = None):
@@ -233,6 +245,25 @@ def schedule_ad_programmed_messages(channel: str, user_id: str, dia: str, valor:
     save_ad_task_id(channel, user_id, 1, t1.id)
     save_ad_task_id(channel, user_id, 2, t2.id)
     save_ad_task_id(channel, user_id, 3, t3.id)
+
+@celery_app.task
+def purge_expired_conversations():
+    """Borra el historial de conversaciones que lleva inactivo más de N días.
+
+    Política: `settings.CONVERSATION_RETENTION_DAYS` días desde la última
+    interacción. El estado/historial en Redis ya expira solo por TTL; aquí se
+    limpia el registro durable en NocoDB (log de conversaciones y, si está
+    configurada, la tabla de shots). La agenda la dispara Celery beat a diario.
+    """
+    days = settings.CONVERSATION_RETENTION_DAYS
+    conversations = ConversationLogRepository.purge_older_than(days)
+    shots = ConversationShotRepository.purge_older_than(days)
+    print(
+        f"[retención] Purga >{days}d: {conversations} conversaciones y "
+        f"{shots} shots eliminados de NocoDB"
+    )
+    return {"conversations": conversations, "shots": shots}
+
 
 @celery_app.task
 def schedule_keyword_programmed_messages(channel: str, user_id: str):

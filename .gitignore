@@ -32,6 +32,10 @@ _local/
 *.log
 *.pid
 
+# Celery beat schedule (agenda de tareas periódicas)
+celerybeat-schedule*
+celerybeat.pid
+
 # Docker/local overrides
 docker-compose.override.yml
 

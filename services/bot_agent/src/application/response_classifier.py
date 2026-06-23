@@ -122,11 +122,13 @@ class ResponseClassifier:
                 ],
             )
             data = json.loads(completion.choices[0].message.content)
-            classification = ReplyClassification(
-                data.get("intent", "unknown"),
-                data.get("value", ""),
-                bool(data.get("has_off_flow_question")),
-                str(data.get("off_flow_question") or ""),
+            classification = self._normalize(
+                ReplyClassification(
+                    data.get("intent", "unknown"),
+                    data.get("value", ""),
+                    bool(data.get("has_off_flow_question")),
+                    str(data.get("off_flow_question") or ""),
+                )
             )
             self._log_tool_success(
                 client_id,
@@ -148,6 +150,21 @@ class ResponseClassifier:
                 started,
             )
             return ReplyClassification("unknown")
+
+    @staticmethod
+    def _normalize(classification: ReplyClassification) -> ReplyClassification:
+        # Coherencia con la tabla de decisión (estados imposibles de PD2):
+        # F-i: un saludo, una queja o una derivación a humano NO llevan duda
+        # lateral; esos casos se atienden por su propio intent (retomar o
+        # humano), nunca por RAG. Evita el falso "tengo una pregunta".
+        if classification.intent in {"greeting", "complaint", "human_handoff"}:
+            classification.has_off_flow_question = False
+            classification.off_flow_question = ""
+        # F-iii: bandera de duda activada pero sin texto -> no hay duda real.
+        if classification.has_off_flow_question and not classification.off_flow_question.strip():
+            classification.has_off_flow_question = False
+            classification.off_flow_question = ""
+        return classification
 
     @staticmethod
     def _log_tool_success(

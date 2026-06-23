@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://qdrant:6333"
     MESSAGE_BUFFER_SECONDS: int = 15
     MAX_INFO_MESSAGES_PER_5_MIN: int = 2
+    # Retención del historial de conversaciones: se conserva hasta N días desde la
+    # ÚLTIMA interacción (ventana deslizante). Pasado ese plazo de inactividad el
+    # estado en Redis expira solo y la purga programada borra el log en NocoDB.
+    CONVERSATION_RETENTION_DAYS: int = 20
     NOCODB_INVITACIONES_URL: str = ""
     NOCODB_REPORTES_URL: str = ""
     NOCODB_CONVERSATIONS_URL: str = "http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5"

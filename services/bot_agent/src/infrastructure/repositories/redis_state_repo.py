@@ -5,6 +5,10 @@ from src.application.buffer_service import scoped_key
 
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
+# Misma ventana de retención que el historial: el estado FSM expira tras N días
+# de inactividad (se renueva en cada interacción al volver a escribirlo).
+STATE_TTL_SECONDS = settings.CONVERSATION_RETENTION_DAYS * 24 * 60 * 60
+
 class RedisStateRepo:
     @staticmethod
     def get_state(user_id: str, channel: Channel | str = Channel.TELEGRAM) -> UserState:
@@ -18,7 +22,7 @@ class RedisStateRepo:
 
     @staticmethod
     def set_state(user_id: str, state: UserState, channel: Channel | str = Channel.TELEGRAM):
-        redis_client.set(scoped_key("state", channel, user_id), state.value)
+        redis_client.set(scoped_key("state", channel, user_id), state.value, ex=STATE_TTL_SECONDS)
 
     @staticmethod
     def reset_state(user_id: str, channel: Channel | str = Channel.TELEGRAM):

@@ -83,6 +83,16 @@ Reglas para cambios:
 - Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §6). No metas
   texto de negocio en el código ni en los prompts.
 
+Retención del historial (20 días desde la última interacción, ventana deslizante):
+- El plazo lo controla `settings.CONVERSATION_RETENTION_DAYS` (por defecto 20). Para cambiarlo,
+  ajusta esa variable; no hardcodees el número en otra parte.
+- **Redis** (`conversation_state:*`, `state:*`) usa TTL deslizante: `ConversationStateRepo.set`
+  y `RedisStateRepo.set_state` reescriben la clave con `ex=...` en cada interacción.
+- **NocoDB** (log durable y *shots*) se purga con la tarea Celery `purge_expired_conversations`,
+  agendada por **Celery beat**. Por eso el `celery_worker` corre con `-B` en ambos compose: si
+  tocas ese comando, conserva el beat o la purga deja de ejecutarse. Helpers de borrado:
+  `infrastructure/repositories/nocodb_retention.py`. Tests: `tests/unit/test_conversation_retention.py`.
+
 ## 5. Diseño conversacional (FSM + LLM)
 
 El reto del sistema es mezclar un **flujo automático de mensajes curados** (FSM) con un

@@ -9,6 +9,7 @@ import httpx
 
 from src.core.config import settings
 from src.domain.entities import Channel
+from src.infrastructure.repositories import nocodb_retention
 
 
 _active_collector: ContextVar["ShotTraceCollector | None"] = ContextVar("active_shot_collector", default=None)
@@ -208,6 +209,30 @@ class ConversationShotRepository:
         except Exception as exc:
             print(f"Error guardando conversation shot en NocoDB: {exc}")
             return False
+
+    @staticmethod
+    def purge_older_than(days: int, now: datetime | None = None) -> int:
+        """Borra los shots cuya fecha (`fecha_hora`) supere `days` días.
+
+        Mismo criterio de retención que el log de conversaciones. Si la tabla de
+        shots no está configurada, no hace nada. Devuelve cuántos se eliminaron.
+        """
+        if not settings.NOCODB_CONVERSATION_SHOTS_URL:
+            return 0
+
+        url = settings.NOCODB_CONVERSATION_SHOTS_URL
+        try:
+            expired_ids = [
+                nocodb_retention.record_id(record)
+                for record in nocodb_retention.iter_records(url)
+                if nocodb_retention.is_expired(
+                    nocodb_retention.record_fields(record).get("fecha_hora"), days, now
+                )
+            ]
+            return nocodb_retention.delete_records(url, expired_ids)
+        except Exception as exc:
+            print(f"Error purgando conversation shots vencidos en NocoDB: {exc}")
+            return 0
 
     @staticmethod
     def _headers() -> dict[str, str]:

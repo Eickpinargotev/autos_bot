@@ -162,6 +162,14 @@ class ReceptionAgent:
             decision.question = ""
             if decision.answer_source == "rag":
                 decision.answer_source = "none"
+            # Invariante P2 (tabla de decisión, estado inválido P2): sin una
+            # pregunta detectada NO hay respuesta previa. Un start_flow no
+            # antepone cortesía, felicitaciones ni comentarios antes del flujo
+            # formal; answer_and_start_flow sin pregunta degrada a start_flow.
+            if decision.action in {"start_flow", "answer_and_start_flow"}:
+                decision.action = "start_flow"
+                decision.answer = ""
+                decision.answer_source = "none"
 
         return decision
 

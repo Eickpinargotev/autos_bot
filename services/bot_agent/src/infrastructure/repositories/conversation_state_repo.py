@@ -2,7 +2,13 @@ import json
 from dataclasses import asdict, dataclass, field
 
 from src.application.buffer_service import redis_client, scoped_key
+from src.core.config import settings
 from src.domain.entities import Channel
+
+
+# TTL deslizante del estado/historial en Redis: cada vez que se guarda (es decir,
+# cada interacción) se renueva. Tras N días sin actividad, Redis lo expira solo.
+CONVERSATION_STATE_TTL_SECONDS = settings.CONVERSATION_RETENTION_DAYS * 24 * 60 * 60
 
 
 @dataclass
@@ -33,7 +39,11 @@ class ConversationStateRepo:
 
     @staticmethod
     def set(channel: Channel | str, user_id: str, state: ConversationState):
-        redis_client.set(scoped_key("conversation_state", channel, user_id), json.dumps(asdict(state), ensure_ascii=False))
+        redis_client.set(
+            scoped_key("conversation_state", channel, user_id),
+            json.dumps(asdict(state), ensure_ascii=False),
+            ex=CONVERSATION_STATE_TTL_SECONDS,
+        )
 
     @staticmethod
     def clear(channel: Channel | str, user_id: str):

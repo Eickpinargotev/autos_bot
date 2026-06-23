@@ -110,7 +110,9 @@ services:
       - postgres
       - redis
       - qdrant
-    command: celery -A src.infrastructure.tasks.celery_app worker --loglevel=info
+    # -B: corre el scheduler beat embebido (purga diaria del historial vencido).
+    # -s: el archivo de agenda va a /tmp para no tocar el código montado.
+    command: celery -A src.infrastructure.tasks.celery_app worker -B -s /tmp/celerybeat-schedule --loglevel=info
     restart: unless-stopped
 
   whatsapp_webhook:

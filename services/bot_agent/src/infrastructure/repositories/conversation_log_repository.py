@@ -8,6 +8,7 @@ import httpx
 
 from src.core.config import settings
 from src.domain.entities import Channel, MessageType
+from src.infrastructure.repositories import nocodb_retention
 
 
 class ConversationLogRepository:
@@ -204,6 +205,60 @@ class ConversationLogRepository:
         except Exception as e:
             print(f"Error eliminando conversacion en NocoDB: {e}")
             return False
+
+    @staticmethod
+    def purge_older_than(days: int, now: datetime | None = None) -> int:
+        """Borra las conversaciones cuya última actividad supere `days` días.
+
+        "Última actividad" = `updated_at` del log (o, en su defecto, la fecha del
+        último mensaje / creación). Recorre toda la tabla paginando y borra por
+        lotes. Devuelve cuántas conversaciones se eliminaron.
+        """
+        if not settings.NOCODB_CONVERSATIONS_URL:
+            return 0
+
+        url = settings.NOCODB_CONVERSATIONS_URL
+        try:
+            expired_ids = [
+                nocodb_retention.record_id(record)
+                for record in nocodb_retention.iter_records(url)
+                if nocodb_retention.is_expired(
+                    ConversationLogRepository._last_activity(record), days, now
+                )
+            ]
+            return nocodb_retention.delete_records(url, expired_ids)
+        except Exception as e:
+            print(f"Error purgando conversaciones vencidas en NocoDB: {e}")
+            return 0
+
+    @staticmethod
+    def _last_activity(record: dict[str, Any]) -> datetime | None:
+        """Marca de tiempo más reciente registrada en una conversación."""
+        fields = nocodb_retention.record_fields(record)
+        raw = fields.get("json_mensajes")
+        if isinstance(raw, dict):
+            data = raw
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {}
+        else:
+            data = {}
+
+        candidates: list[Any] = [data.get("updated_at"), data.get("created_at")]
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            candidates.extend(
+                msg.get("created_at") for msg in messages if isinstance(msg, dict)
+            )
+
+        parsed = [
+            dt
+            for dt in (nocodb_retention.parse_timestamp(value) for value in candidates)
+            if dt is not None
+        ]
+        return max(parsed) if parsed else None
 
     @staticmethod
     def _conversation_from_record(record: dict[str, Any], client_id: str, canal: str) -> dict[str, Any]:

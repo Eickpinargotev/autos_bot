@@ -13,7 +13,7 @@ El proyecto es un monorepo orquestado con Docker Compose. Un único servicio de 
 | ------------------- | --------------------------------------------------------------- |
 | `bot_agent`         | Bot de Telegram (long-polling)                                  |
 | `whatsapp_webhook`  | API FastAPI/uvicorn para el webhook de WhatsApp (puerto 8010)   |
-| `celery_worker`     | Tareas en segundo plano (recordatorios, publicidad, etc.)       |
+| `celery_worker`     | Tareas en segundo plano (recordatorios, publicidad, purga de historial) |
 
 Infraestructura de apoyo:
 
@@ -74,6 +74,29 @@ docker compose up --build -d
 
 Usa volúmenes con nombre, la red externa `easypanel` y no publica puertos directamente
 (el reverse proxy de EasyPanel los enruta). Ver `docs/despliegue_docker_easypanel.md`.
+
+## Retención del historial de conversaciones
+
+El historial de conversaciones se conserva **hasta 20 días desde la última
+interacción** de cada usuario; pasado ese plazo de inactividad se elimina
+**automáticamente**. Es una ventana **deslizante**: cada mensaje nuevo reinicia
+la cuenta, así que solo se borra el historial que lleve 20 días sin actividad.
+
+El plazo es configurable con la variable `CONVERSATION_RETENTION_DAYS` (por
+defecto `20`). Se aplica en dos capas, según dónde vive el historial:
+
+| Dónde vive                          | Cómo se borra                                                                 |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| **Redis** — estado/historial activo (`conversation_state:*`, `state:*`) | TTL deslizante: cada interacción reescribe la clave con un vencimiento de 20 días, así Redis la expira sola tras la inactividad. |
+| **NocoDB** — log durable (tabla de conversaciones y, si está activa, la de *shots*) | Purga programada: una tarea de Celery (`purge_expired_conversations`) recorre la tabla a diario y elimina los registros cuya última actividad supere los 20 días. |
+
+La purga la dispara **Celery beat**, embebido en el `celery_worker` (se ejecuta
+con `worker -B`). Corre una vez al día (≈02:00 hora de Costa Rica). No hace falta
+ningún servicio extra. La lógica de borrado es determinista y está cubierta por
+`tests/unit/test_conversation_retention.py`.
+
+> No afecta otros datos (usuarios bloqueados, dictámenes, base de conocimiento
+> del RAG): la retención de 20 días aplica **solo** al historial de conversaciones.
 
 ## Tests
 
