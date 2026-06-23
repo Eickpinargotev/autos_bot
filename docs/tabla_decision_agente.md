@@ -27,6 +27,14 @@ PD3 y PD4 son **subdecisiones deterministas/derivadas** que dependen de PD1/PD2.
 El guardrail vive sobre PD1 y PD2 (donde se interpreta lenguaje natural), usando
 PD3/PD4 como funciones puras de apoyo.
 
+**Otras llamadas LLM (NO son puntos de decisión de routing, fuera de alcance del guardrail):**
+- `classifier.summarize_for_report` (`REPORT_SUMMARY_PROMPT`): genera el resumen del
+  reporte cuando hay handoff/queja. No decide ruta, solo redacta.
+- `publicidad_service` (`EXTRACT_AD_INFO_PROMPT`): extrae fecha/valor/hora de un
+  anuncio. Pertenece al flujo de publicidad, no a la conversación con el cliente.
+- `OFF_FLOW_QUESTION_PROMPT`: **definido en `core/prompts.py` pero sin uso** (código
+  muerto). Candidato a eliminar; no interviene en ninguna decisión.
+
 ---
 
 ## 2. Variables (contrato) de cada punto
@@ -85,7 +93,9 @@ tomar el caso completo (`C` o `H`), porque entonces el humano también la atiend
 
 1. **`C` (Queja)** → `QUEJA` / handoff. Atender primero; no se responde RAG antes.
 2. **`H` (Handoff)** → handoff. Un humano revisa (incluida cualquier duda `Q`).
-3. **`D` (Rechazo)** → cerrar. Si además hay `Q`, **responder la duda y luego cerrar** (no reanclar al flujo).
+3. **`D` (Rechazo)** → cerrar. *(Comportamiento actual: si además hay `Q`, hoy el
+   código cierra y NO responde la duda — ver limitación L3. La intención de diseño
+   es responder la duda y luego cerrar.)*
 4. **`K` (Cambio, solo PD2)** → re-enrutar a intake con el mensaje completo.
 5. **`A` + `Q` / `A` / `Q`** → matriz principal (sección 5/6).
 6. **`G` (Saludo)** → bienvenida/retoma cálida, **sin RAG**.
@@ -107,7 +117,7 @@ respondiendo a "¿desea continuar con el proceso X?"). Esto habilita
 | I-C | `C` | `start_flow` | `QUEJA` | Queja fuerte manda. |
 | I-H | `H` (con o sin `Q`) | `handoff` | `""` | Humano revisa; la duda la atiende la persona. |
 | I-D | `D` sin `Q` | `close` | `""` | Cerrar cordialmente. |
-| I-D+Q | `D` **y** `Q` | `answer_and_clarify` | `""` | Responder la duda; pregunta final mínima; no forzar flujo. |
+| I-D+Q | `D` **y** `Q` | `close` (hoy) | `""` | **Comportamiento actual:** cierra; la duda NO se responde por separado (ver L3). Diseño deseado: `answer_and_clarify`. |
 
 ### 5.2 Matriz principal `A` × `Q` × `prev_confirm`
 
@@ -125,6 +135,20 @@ respondiendo a "¿desea continuar con el proceso X?"). Esto habilita
 | ---- | ------- | -------- | ----- |
 | I-G | `G` solo | `clarify` | Saludo cálido + opciones de servicio en `clarifying_question`. `answer` vacío. |
 | I-∅ | `∅` | `clarify` | Pregunta con opciones explícitas de servicios. Nunca abierta ("¿en qué te ayudo?"). |
+
+### 5.4 Respondibilidad del RAG en intake (dimensión `rag_ok` que faltaba)
+
+Los casos con `Q` (I-2, I-3, I-4) asumían que el RAG responde. Pero el intake
+también resuelve el RAG en [`_resolve_reception_rag`](../services/bot_agent/src/application/flow_graph.py:217),
+y si **no** hay respuesta cambia la decisión:
+
+| Caso | `Q` | `rag_ok` | Resultado real |
+| ---- | --- | -------- | -------------- |
+| I-2/3/4 | sí | sí | Se responde la duda (como indican esas filas). |
+| **I-RAG✗** | sí | no | **`action=handoff`**: se registra la pregunta sin respuesta y un humano atiende. NO se inventa respuesta ni se inicia flujo. |
+
+Es el equivalente en intake de F-3/F-5, pero aquí termina en **handoff** (no en un
+mensaje de "no tengo información"). Garantiza que la duda siempre se aborda.
 
 **Invariante clave de PD1 (raíz del caso 1):**
 `A` sin `Q` (I-1, I-5) ⇒ **`answer` debe ir vacío**. Una respuesta previa solo
@@ -146,7 +170,7 @@ Dimensiones de apoyo:
 | ---- | ------------------ | ------ |
 | F-C | `complaint` | Si `flow=QUEJA` y `pending_report` → reporte directo. Si no → mensaje de handoff + reporte. |
 | F-H | `human_handoff` | Mensaje de handoff + reporte (resumen LLM). La duda la atiende la persona. |
-| F-D | `decline` | Mensaje de cierre + limpiar estado. |
+| F-D | `decline` | Mensaje de cierre + limpiar estado. Si traía `Q`, hoy NO se responde (ver L3). |
 | F-K | `change_intent` | Reiniciar estado conservando historial → re-ejecutar **PD1** con el mensaje. |
 | F-G | `greeting` | Retomar la pregunta pendiente, **sin RAG**. |
 
@@ -175,15 +199,22 @@ afirmación, comentario o plan ("ya mañana hago el trámite") **no** es `Q` →
 
 ## 7. Estados imposibles / inválidos
 
-El LLM puede devolver combinaciones incoherentes. El guardrail debe
-**normalizarlas** (no confiar ciegamente). Lista exhaustiva:
+El LLM puede devolver combinaciones incoherentes. Algunas se corrigen con un
+**guardrail determinista** (código que valida la salida del LLM); otras solo se
+previenen en el **prompt** porque distinguirlas requiere interpretar lenguaje, o
+porque la combinación ni siquiera puede ocurrir (estados vacíos). Cada fila marca
+de qué tipo es.
+
+> Nota importante: en PD2, **`R` se deriva de `intent`+`value`** (lo calcula el
+> router `PD3`), no es una señal independiente. Por eso una fila como "intent X
+> **y** `R`" puede ser **imposible/vacía** cuando ese intent nunca produce avance.
 
 ### 7.1 PD1 (intake)
 
 | # | Estado inválido | Por qué es imposible | Normalización |
 | - | --------------- | -------------------- | ------------- |
 | P1 | `action ∈ {start_flow, answer_and_start_flow}` con `flow=""` | No se puede entrar a un flujo inexistente. | → `answer_and_clarify` si hay `answer`/`Q`, si no `clarify`. *(ya existe parcialmente, [reception_agent.py:141](../services/bot_agent/src/application/reception_agent.py:141))* |
-| **P2** | `has_question=false` **y** `answer≠""` en `start_flow`/`answer_and_start_flow` | Una respuesta previa solo responde una pregunta; sin `Q` es relleno. | **→ `answer=""`** y `answer_and_start_flow`→`start_flow`. *(falta — raíz del caso 1)* |
+| **P2** | `has_question=false` **y** `answer≠""` en `start_flow`/`answer_and_start_flow` | Una respuesta previa solo responde una pregunta; sin `Q` es relleno. | **→ `answer=""`** y `answer_and_start_flow`→`start_flow`. *(implementado, raíz del caso 1, [reception_agent.py:165](../services/bot_agent/src/application/reception_agent.py:165))* |
 | P3 | `has_question=true` con `answer` de `prompt_rules` que sea conocimiento de negocio | `prompt_rules` no debe traer datos operativos. | → `answer=""`, `answer_source=rag` (re-resolver por RAG). *(ya existe, [reception_agent.py:134](../services/bot_agent/src/application/reception_agent.py:134))* |
 | P4 | `has_question=true` y `question=""` | Hay pregunta sin texto. | → `question = mensaje del cliente`. *(ya existe, [reception_agent.py:101](../services/bot_agent/src/application/reception_agent.py:101))* |
 | P5 | `has_question=false` y `answer_source=rag` | No hay pregunta que justifique RAG. | → `answer_source=none`. *(ya existe, [reception_agent.py:163](../services/bot_agent/src/application/reception_agent.py:163))* |
@@ -193,15 +224,16 @@ El LLM puede devolver combinaciones incoherentes. El guardrail debe
 
 ### 7.2 PD2 (flujo)
 
-| # | Estado inválido | Por qué es imposible | Normalización |
-| - | --------------- | -------------------- | ------------- |
-| **F-i** | `has_off_flow_question=true` con `intent=greeting` | Un saludo no contiene una duda real. | → `has_off_flow_question=false` (gana el saludo). |
-| **F-ii** | `intent=question` **y** `R` (PD3 devolvió nodo) | `question` significa "no responde el paso"; no puede avanzar a la vez. | → si responde el paso, no es `question`: tratar como avance (`R`); si no, no avanzar. |
-| F-iii | `has_off_flow_question=true` y `off_flow_question=""` | Bandera de duda sin texto. | → `off_flow_question = mensaje` o bajar la bandera. |
-| F-iv | `intent ∈ {city, license}` y `value=""` | El intent exige un dato que falta. | PD3 devuelve "" → cae a F-6 (retomar pidiendo el dato). |
-| F-v | `intent=positive/negative` pero `R=no` (no encaja en el nodo) | El "sí/no" no aplica al paso actual. | Cae a F-6 (retomar). No inventar avance. |
-| F-vi | `intent=complaint` **y** `has_off_flow_question=true` | La queja domina; la duda la ve el humano. | Ignorar `Q`, ir a F-C. |
-| F-vii | `intent=decline` **y** `R` (avanza) | Rechazar contradice avanzar. | El rechazo explícito manda → F-D (cerrar). |
+| # | Estado inválido | Por qué es imposible | Normalización | Tipo |
+| - | --------------- | -------------------- | ------------- | ---- |
+| **F-i** | `has_off_flow_question=true` con `intent=greeting` | Un saludo no contiene una duda real. | → `has_off_flow_question=false`. | **Código** ([response_classifier._normalize](../services/bot_agent/src/application/response_classifier.py)) |
+| F-iii | `has_off_flow_question=true` y `off_flow_question=""` | Bandera de duda sin texto. | → bajar la bandera. | **Código** (`_normalize`) |
+| F-vi | `intent=complaint`/`human_handoff` **y** `has_off_flow_question=true` | El humano domina; la duda la ve la persona. | → bajar `Q`; el override (F-C/F-H) manda. | **Código** (`_normalize`) |
+| F-ii | `intent=question` **y** `R` | `question` y avance se excluyen. | El router nunca avanza con `intent=question` → **combinación vacía**. | Prompt (no puede ocurrir) |
+| F-vii | `intent=decline` **y** `R` | Rechazo y avance se excluyen. | `decline` nunca produce avance → **combinación vacía**; además `decline` se evalúa antes que el router. | Prompt (no puede ocurrir) |
+| F-iv-lic | `intent=license` y `value=""` | Falta el tipo de licencia. | El router devuelve "" → cae a F-6 (retomar pidiendo el dato). | Determinista (router) |
+| F-iv-city | `intent=city` y `value=""` | — | **Ojo: el router SÍ avanza**: `city` sin `value` se trata como "otra ciudad" (p. ej. G35→G12, C1→C5). No cae a F-6. | Determinista (router) — comportamiento a revisar |
+| F-v | `intent=positive/negative` pero `R=no` | El "sí/no" no aplica al paso actual. | El router devuelve "" → cae a F-6 (retomar). | Determinista (router) |
 
 ### 7.3 Reglas de coherencia transversales
 
@@ -210,6 +242,14 @@ El LLM puede devolver combinaciones incoherentes. El guardrail debe
 - **`Q` siempre se aborda:** responder (`rag_ok`) o registrar + ofrecer asesor
   (`¬rag_ok`); o la atiende el humano (`C`/`H`). Nunca se descarta una duda real.
 - **Sin `Q` no hay `answer`:** invariantes P2 (PD1) y "F-1 sin fallback" (PD2).
+
+### 7.4 Limitaciones conocidas (huecos reales del código)
+
+| # | Hueco | Detalle | Estado |
+| - | ----- | ------- | ------ |
+| **L1** | **Duda lateral descartada si no avanza y el intent no es `question`** | En [`_evaluate_reply`](../services/bot_agent/src/application/flow_graph.py:312), cuando el router no avanza (`R=no`), solo se atiende la duda lateral si `intent=question`. Si el intent es `positive/negative/city/license/unknown` y NO avanza pero trae `has_off_flow_question=true`, la duda se **descarta** y solo se retoma la pregunta pendiente. Contradice "`Q` siempre se aborda". | Mitigado por el prompt (debe clasificar como `question` si no responde el paso), pero **no garantizado** por código. Pendiente de decidir si se enruta a `answer_off_flow` siempre que haya `Q` sin avance. |
+| L2 | **`city` sin `value` avanza como "otra ciudad"** | Ver F-iv-city. Un `intent=city` ambiguo no pide aclarar la sede; entra al ramal de ciudad no-Liberia. | A revisar si es el comportamiento deseado. |
+| L3 | **`D` + `Q` cierra sin responder la duda** | Tanto en intake ([`_handle_intake` close](../services/bot_agent/src/application/flow_graph.py:166)) como en flujo ([`_evaluate_reply` decline](../services/bot_agent/src/application/flow_graph.py:298)), un rechazo con duda adjunta cierra y descarta la duda. No existe acción "responder y cerrar". | Pendiente decidir: ¿responder la duda antes de cerrar? |
 
 ---
 
@@ -221,8 +261,8 @@ El LLM puede devolver combinaciones incoherentes. El guardrail debe
    start_flow. Backstop determinista del caso 1.
 3. **F-1 sin fallback**: el "no tengo información / asesor" solo se emite ante una
    `Q` real (F-3/F-5), no cuando el cliente solo avanzó el flujo. Backstop del caso 2.
-4. **Normalización F-i / F-ii**: bajar `has_off_flow_question` en saludos y resolver
-   el conflicto `question` vs avance.
+4. **Normalización F-i / F-iii / F-vi**: bajar `has_off_flow_question` en saludos,
+   quejas y handoff, y cuando la bandera viene sin texto.
 
 ## 9. Estado de implementación
 

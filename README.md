@@ -19,10 +19,10 @@ Infraestructura de apoyo:
 
 | Servicio    | Uso                                                          |
 | ----------- | ------------------------------------------------------------ |
-| `postgres`  | Estado de conversación y checkpoints de LangGraph            |
-| `redis`     | Buffer de mensajes y broker/result backend de Celery         |
+| `postgres`  | Usuarios bloqueados y registro de dictamen (no almacena conversaciones) |
+| `redis`     | Estado/historial activo de la conversación, buffer de mensajes y broker/result backend de Celery |
 | `qdrant`    | Base vectorial para el RAG (`escuela_manejo_kb`)             |
-| `nocodb`    | Panel de administración y registro de logs/datos             |
+| `nocodb`    | Panel de administración y registro durable de conversaciones/datos |
 
 El código del bot sigue una organización por capas en `services/bot_agent/src/`
 (`domain/`, `application/`, `infrastructure/`, `core/`).
@@ -97,6 +97,73 @@ ningún servicio extra. La lógica de borrado es determinista y está cubierta p
 
 > No afecta otros datos (usuarios bloqueados, dictámenes, base de conocimiento
 > del RAG): la retención de 20 días aplica **solo** al historial de conversaciones.
+
+## Persistencia y durabilidad de datos
+
+Dónde vive cada cosa (importante para no confundir "memoria" con "se pierde al apagar"):
+
+| Dato | Almacén | Durabilidad |
+| ---- | ------- | ----------- |
+| **Estado activo de la conversación** (en qué paso del flujo va cada usuario + historial reciente) | **Redis** (`conversation_state:*`, `state:*`) | En memoria **con persistencia a disco** (volumen + AOF). |
+| **Registro durable de conversaciones** (el log que se ve en el panel) | **NocoDB** | Persistente en disco. |
+| **Usuarios bloqueados y registro de dictamen** | **Postgres** | Persistente en disco. |
+| **Base de conocimiento del RAG** | **Qdrant** | Persistente en disco. |
+
+### ¿Por qué Redis con AOF (`appendonly yes`)?
+
+Redis es en memoria, pero **no es volátil** en este proyecto: ambos compose lo corren
+con `redis-server --appendonly yes` y un volumen montado (`/data`). Lo activamos por dos razones:
+
+- **No perder el estado al reiniciar.** Con AOF, Redis reconstruye su estado desde
+  disco al arrancar. Un reinicio planificado (deploy, `restart`) **no pierde nada**.
+- **Minimizar la pérdida ante una caída dura.** Sin AOF (solo snapshots RDB por
+  defecto), un corte de luz o crash podía perder hasta **varios minutos** de cambios
+  (lo escrito desde el último snapshot). Con AOF la ventana de pérdida baja a **~1 segundo**.
+
+Qué implica en la práctica: si Redis perdiera esa ventana, lo único afectado sería
+"en qué nodo del flujo estaba cada conversación activa" (esos usuarios volverían al
+intake). El **historial guardado de las conversaciones no se pierde**, porque su copia
+durable está en **NocoDB**, no en Redis.
+
+> Sobre carga: Redis maneja decenas de miles de operaciones por segundo. A ritmos como
+> ~200 chats/minuto (≈3–4 mensajes/s) Redis no es el cuello de botella; lo son las
+> llamadas al LLM y la concurrencia del `celery_worker`.
+
+## Cola y concurrencia del worker
+
+Cada mensaje del cliente se procesa como una tarea de **Celery**, con **Redis como
+broker** (cola de tareas). Si todas las "ranuras" de procesamiento están ocupadas, las
+tareas nuevas **esperan en la cola** hasta que se libere una.
+
+El `celery_worker` corre con `--pool=threads --concurrency=20`: hasta **20 tareas en
+paralelo**.
+
+### ¿Por qué hilos y por qué 20 (y no se satura la CPU)?
+
+- **Las tareas son I/O-bound, no CPU-bound.** Cada turno hace varias llamadas al LLM
+  (recepción/clasificador + RAG): el ~95% del tiempo el hilo está **esperando la
+  respuesta de OpenAI por la red**, con la CPU ociosa.
+- **Hilos, no procesos.** Con `--pool=threads` los 20 son hilos dentro de **un solo
+  proceso**. Por el **GIL** de Python, solo un hilo ejecuta cálculo a la vez, así que
+  20 hilos **no consumen 20 núcleos**: el trabajo real de CPU equivale a ~1 núcleo. Y
+  mientras un hilo espera la red, **suelta el GIL** y consume ~0% CPU. Por eso 20 hilos
+  son seguros incluso en una máquina de 4 núcleos ocupada: el límite es la red, no el
+  cálculo. *(Lo contrario —`--pool=prefork --concurrency=20`— sí saturaría: serían 20
+  procesos reales compitiendo por la CPU y 20× memoria.)*
+- **El número 20** sale de la carga objetivo: ~200 chats/min ≈ 3,3 msg/s; si cada tarea
+  tarda ~3 s, se necesitan ~10 concurrentes para no acumular (regla de Little), y 20 da
+  ~2× de margen para picos y respuestas lentas del LLM. Se ajusta cambiando
+  `--concurrency` en ambos compose.
+- **El techo real** lo pone el **rate limit de OpenAI**, no la CPU ni Redis.
+
+> **Thread-safety:** el código es seguro para el pool de hilos: los objetos compartidos
+> son de solo lectura (catálogo de `mensajes.json`), clientes thread-safe (`redis`,
+> `openai`) o aislados por hilo (el trazado de *shots* usa `contextvars`). El grafo se
+> invoca con estado por llamada y las conexiones a Postgres se crean por uso.
+
+> **Escalado horizontal:** si más adelante hicieran falta más réplicas del
+> `celery_worker`, el beat (`-B`) debe quedar en **una sola** réplica para no duplicar la
+> purga diaria; habría que separar el `celery beat` en su propio servicio.
 
 ## Tests
 
