@@ -187,6 +187,19 @@ class FlowGraphRunner:
             return state
 
         if action in {"answer_and_clarify", "clarify"}:
+            # Anti-bucle: si ya aclaramos dos veces seguidas y el cliente sigue sin
+            # concretar un servicio, no repetimos la misma pregunta; que lo atienda
+            # un humano. Garantiza que el intake nunca quede en un loop de aclaración.
+            if self._consecutive_intake_clarifies(stored.conversation_history) >= 2:
+                state["should_report"] = True
+                state["replies"] = [self.COMPLAINT_HANDOFF_MESSAGE]
+                state["report_reason"] = (
+                    decision.handoff_reason
+                    or f"Recepción no logró concretar el servicio tras varias aclaraciones: {state['text'][:240]}"
+                )
+                state["legacy_state"] = UserState.GENERAL
+                state["intake_turn_type"] = "intake_handoff"
+                return state
             # Evitamos enviar dos mensajes redundantes (p. ej. un saludo de
             # bienvenida con opciones + una pregunta genérica encima). Solo
             # recurrimos a la pregunta de descubrimiento si no hay nada más que
@@ -213,6 +226,16 @@ class FlowGraphRunner:
         state["legacy_state"] = UserState.GENERAL
         state["intake_turn_type"] = "intake_answer"
         return state
+
+    def _consecutive_intake_clarifies(self, history: list[dict]) -> int:
+        """Cuántos turnos de aclaración del intake hay seguidos al final del historial."""
+        count = 0
+        for entry in reversed(history or []):
+            if entry.get("type") == "intake_clarify":
+                count += 1
+            else:
+                break
+        return count
 
     def _resolve_reception_rag(
         self,

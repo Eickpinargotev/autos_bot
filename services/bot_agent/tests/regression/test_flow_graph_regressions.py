@@ -516,6 +516,65 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertIn("revisión manual", report_mock.call_args.kwargs["problema"])
         set_mock.assert_not_called()
 
+    def test_intake_clarify_loop_escalates_to_human(self):
+        # Tras dos aclaraciones seguidas sin que el cliente concrete un servicio,
+        # el intake no debe repetir la misma pregunta: deriva a un humano.
+        prior_clarifies = [
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "tengo una prueba de manejo en una semana", "bot": ["¿Con qué le ayudo?"]},
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "como me pueden ayudar", "bot": ["¿Con qué le ayudo?"]},
+        ]
+        stored = ConversationState(flow="INTAKE", node="I1", conversation_history=prior_clarifies)
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="clarify",
+                clarifying_question="¿Con qué le ayudo: licencia, clases o alquiler?",
+                confidence=0.5,
+            ),
+        ):
+            result = self.runner.run(
+                Channel.WHATSAPP,
+                "50614141414",
+                "Claro, tengo una prueba de manejo, como me pueden ayudar?",
+                "Cliente",
+            )
+
+        self.assertEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
+        report_mock.assert_called_once()
+        self.assertIn("varias aclaraciones", report_mock.call_args.kwargs["problema"])
+
+    def test_intake_single_clarify_does_not_escalate(self):
+        # Una sola aclaración previa no debe escalar: el cliente todavía puede concretar.
+        prior = [
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "hola", "bot": ["¿Con qué le ayudo?"]},
+        ]
+        stored = ConversationState(flow="INTAKE", node="I1", conversation_history=prior)
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="clarify",
+                clarifying_question="¿Con qué le ayudo: licencia, clases o alquiler?",
+                confidence=0.5,
+            ),
+        ):
+            result = self.runner.run(
+                Channel.WHATSAPP, "50614141414", "tengo una prueba de manejo", "Cliente",
+            )
+
+        self.assertIn("licencia, clases o alquiler", result.replies[0])
+        report_mock.assert_not_called()
+
     def test_prompt_rules_operational_answer_is_rechecked_with_rag_instead_of_prompt_text(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()

@@ -72,6 +72,17 @@ class PromptContractTests(unittest.TestCase):
     def test_reception_prompt_does_not_pre_ask_flow_qualifiers(self):
         self.assertIn("No preguntes tú esos datos", RECEPTION_AGENT_PROMPT)
 
+    def test_reception_clarify_is_adaptive_not_a_fixed_phrase(self):
+        # Evita el overfitting: el modelo no debe copiar un ejemplo literal de
+        # pregunta de aclaración (causaba el bucle de la misma frase repetida).
+        self.assertIn("No copies una frase fija", RECEPTION_AGENT_PROMPT)
+        self.assertIn("NO repitas la misma pregunta", RECEPTION_AGENT_PROMPT)
+        # El ejemplo literal que el modelo loro-repetía ya no debe estar como guion.
+        self.assertNotIn(
+            "¿está buscando ayuda con su licencia, dictamen médico, clases de manejo o alquiler de vehículo?",
+            RECEPTION_AGENT_PROMPT,
+        )
+
     def test_prompts_keep_scope_generic_without_catalog_values(self):
         # El mapa de alcance debe ser de CATEGORÍAS, nunca datos del catálogo
         # (precios, sinpe, links, marcas de vehículo). Refuerza CLAUDE.md §6.
