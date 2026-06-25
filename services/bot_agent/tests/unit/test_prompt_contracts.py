@@ -58,6 +58,20 @@ class PromptContractTests(unittest.TestCase):
     def test_reply_prompt_references_known_topics_for_side_questions(self):
         self.assertIn("Como referencia de qué es una duda informativa real", REPLY_EVALUATION_PROMPT)
 
+    def test_reception_prompt_distinguishes_win_from_theory_exam(self):
+        # Aprobar el TEÓRICO es parte del proceso (GENERAL), no WIN (que es la
+        # prueba de manejo / examen práctico final). Evita el misrouting a WIN.
+        self.assertIn("Aprobar el examen TEÓRICO no es WIN", RECEPTION_AGENT_PROMPT)
+
+    def test_reception_prompt_knows_admin_tramites_have_no_flow(self):
+        # renovación/homologación/etc. no tienen nodo de entrada en el router:
+        # se responden por RAG y se derivan a humano para ejecutar.
+        self.assertIn("NO tienen flujo", RECEPTION_AGENT_PROMPT)
+        self.assertIn("No los fuerces dentro de GENERAL", RECEPTION_AGENT_PROMPT)
+
+    def test_reception_prompt_does_not_pre_ask_flow_qualifiers(self):
+        self.assertIn("No preguntes tú esos datos", RECEPTION_AGENT_PROMPT)
+
     def test_prompts_keep_scope_generic_without_catalog_values(self):
         # El mapa de alcance debe ser de CATEGORÍAS, nunca datos del catálogo
         # (precios, sinpe, links, marcas de vehículo). Refuerza CLAUDE.md §6.
