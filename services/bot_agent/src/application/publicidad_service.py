@@ -82,8 +82,8 @@ class PublicidadService:
                 model=settings.OPENAI_MODEL,
                 response_format={ "type": "json_object" },
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts data into JSON."},
-                    {"role": "user", "content": EXTRACT_AD_INFO_PROMPT.format(mensaje=primer_mensaje)}
+                    {"role": "system", "content": EXTRACT_AD_INFO_PROMPT},
+                    {"role": "user", "content": json.dumps({"mensaje": primer_mensaje}, ensure_ascii=False)}
                 ]
             )
             extracted = json.loads(completion.choices[0].message.content)

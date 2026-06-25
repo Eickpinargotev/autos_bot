@@ -134,7 +134,14 @@ respondiendo a "¿desea continuar con el proceso X?"). Esto habilita
 | Caso | Señales | `action` | Notas |
 | ---- | ------- | -------- | ----- |
 | I-G | `G` solo | `clarify` | Saludo cálido + opciones de servicio en `clarifying_question`. `answer` vacío. |
+| I-CTX | Solo contexto / pedido genérico de ayuda (sin `Q`, sin intención explícita de UN servicio) | `clarify` | El cliente narra una situación ("tengo prueba mañana") o pide ayuda en general. **NO RAG, NO flujo.** Ofrece las opciones relevantes al contexto (p. ej. prueba de manejo → alquiler / clases / proceso de licencia) para que elija. `has_question=false`. |
 | I-∅ | `∅` | `clarify` | Pregunta con opciones explícitas de servicios. Nunca abierta ("¿en qué te ayudo?"). |
+
+> **Clave (corrige el caso "Tengo prueba mañana"):** una afirmación de contexto o un
+> "¿cómo me pueden ayudar?" **no** es `Q`. Antes el LLM lo marcaba como pregunta → RAG
+> volcaba requisitos y, si no podía, escalaba a humano. Ahora se clasifica como I-CTX →
+> `clarify`. La intención explícita de un servicio concreto sigue yendo a `start_flow`
+> (I-1) y una pregunta real sigue yendo a RAG (I-2).
 
 ### 5.4 Respondibilidad del RAG en intake (dimensión `rag_ok` que faltaba)
 
@@ -271,7 +278,9 @@ de qué tipo es.
   rechazo, cambio, saludo, respuesta al paso, pregunta, unknown) + sección
   aparte para `has_off_flow_question` y reglas de coherencia.
 - `RECEPTION_AGENT_PROMPT` (PD1): PASO 1 (¿hay pregunta?) → PASO 2 (action por
-  prioridad, un caso por bloque) → PASO 3 (answer_source) + estilo/seguridad.
+  prioridad, un caso por bloque, incluido **I-CTX** "solo contexto / pedido genérico
+  de ayuda" → `clarify` sin RAG) → PASO 3 (answer_source) + estilo/seguridad.
+  PASO 1 endurecido: no inferir pregunta implícita de una afirmación de contexto.
 
 **Guardrails deterministas (backstop, validan y corrigen al LLM):**
 - **P2** — [`reception_agent._normalized_decision`](../services/bot_agent/src/application/reception_agent.py:161):

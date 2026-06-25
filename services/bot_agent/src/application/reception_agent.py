@@ -55,12 +55,12 @@ class ReceptionAgent:
                 temperature=0,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": "Devuelve JSON estricto."},
+                    {"role": "system", "content": RECEPTION_AGENT_PROMPT},
                     {
                         "role": "user",
-                        "content": RECEPTION_AGENT_PROMPT.format(
-                            mensaje=text,
-                            conversation_history=json.dumps(conversation_history, ensure_ascii=False),
+                        "content": json.dumps(
+                            {"mensaje": text, "conversation_history": conversation_history},
+                            ensure_ascii=False,
                         ),
                     },
                 ],
