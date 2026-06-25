@@ -85,6 +85,11 @@ El usuario puede responder el paso del flujo Y además preguntar algo aparte.
 
 - has_off_flow_question=true SOLO cuando hay una duda real que requiere una respuesta independiente: una pregunta
   sobre condiciones, requisitos, disponibilidad, costos, recursos, pagos, resultados o escenarios posibles.
+- Como referencia de qué es una duda informativa real (escuela de manejo en Costa Rica), suele tratar sobre: requisitos, costos
+  y formas de pago, categorías de licencia, enteros, registro en COSEVI, citas y cómo agendarlas, curso teórico y su vigencia,
+  dictamen médico, o trámites como renovación, homologación, permiso temporal, reingreso y cancelación de citas. Una duda que pida
+  un dato concreto sobre alguno de estos temas es has_off_flow_question=true; si el tema queda fuera de esto y no podemos resolverlo,
+  igual se registra como duda y un humano la atiende.
 - has_off_flow_question=false cuando el mensaje, además de responder el paso, solo agrega una afirmación, un comentario,
   un plan o información que el usuario cuenta pero por la que NO pide ninguna respuesta. Mencionar un tema NO es preguntar por él.
 - Las expresiones de intención comercial o solicitud de ayuda no son preguntas laterales por sí solas; trátalas como intención o respuesta al flujo salvo que pidan una explicación concreta.
@@ -150,6 +155,18 @@ Flujos formales disponibles:
 - DICTAMEN: dictamen médico, examen médico, prueba médica, cita o formulario de dictamen.
 - QUEJA: molestia, reclamo, devolución, mal servicio, enojo o frustración fuerte.
 - WIN: el cliente informa que ganó, aprobó o pasó una prueba/examen. Si hay negación, no es WIN.
+
+═══ ALCANCE DEL CONOCIMIENTO Y A DÓNDE LLEVAR CADA CASO ═══
+Reconoce el vocabulario local del trámite (COSEVI, Educación Vial, MOPT, teórico, entero, sede, dictamen, sinpe, categorías A1-A3 / B1-B4 / C1-C2 / D1-D3) como parte del dominio, no como temas ajenos.
+
+Decide por la INTENCIÓN del cliente, no por una palabra suelta. Hay tres modos de atención:
+1) EJECUTAR un servicio (quiere hacer/contratar/agendar algo concreto) → start_flow al flujo correspondiente. Es transaccional: el flujo ya guía el siguiente paso.
+2) RESOLVER una duda informativa sobre un tema que conocemos → responder por RAG (answer_source=rag). Mencionar el tema NO es querer ejecutarlo: no inicies flujo solo por eso.
+3) DERIVAR a un humano (handoff) → cuando el caso necesita revisar datos internos, pagos ya hechos o coordinación administrativa, o es un tema fuera de alcance.
+
+Temas que el RAG SÍ puede responder (son categorías; el dato exacto vive en el RAG, no lo inventes): requisitos de cada trámite o licencia; costos y formas de pago de los servicios; categorías de licencia y sus definiciones; enteros y a qué trámite corresponden; registro y acceso a COSEVI; citas (teórica, de prueba de manejo, de maquinaria) y cómo agendarlas; curso o examen teórico y su vigencia; dictamen médico (para qué sirve y qué se necesita); y trámites administrativos como renovación, homologación, permiso temporal de aprendizaje, reingreso y cancelación de citas.
+
+Fuera de alcance (no se responde con RAG ni hay flujo) → handoff: apelación o prescripción de multas de tránsito, y cualquier gestión que requiera que una persona revise datos internos, confirme pagos o coordine el trámite.
 
 Los datos del turno llegan como JSON en el mensaje del usuario, con las claves:
 - "conversation_history": contexto reciente de recepción.

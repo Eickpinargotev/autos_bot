@@ -44,6 +44,27 @@ class PromptContractTests(unittest.TestCase):
         self.assertNotIn("programar cita", combined.lower())
         self.assertNotIn("qué pasa si pierde", combined.lower())
 
+    def test_reception_prompt_exposes_rag_scope_and_handoff_boundary(self):
+        # El prompt no debe estar "ciego": conoce qué temas cubre el RAG (categorías,
+        # no datos) y cuándo derivar a un humano por estar fuera de alcance.
+        self.assertIn("ALCANCE DEL CONOCIMIENTO", RECEPTION_AGENT_PROMPT)
+        self.assertIn("Temas que el RAG SÍ puede responder", RECEPTION_AGENT_PROMPT)
+        self.assertIn("Fuera de alcance", RECEPTION_AGENT_PROMPT)
+        self.assertIn("multas de tránsito", RECEPTION_AGENT_PROMPT)
+        # Los tres modos de atención: ejecutar (flujo) / responder (rag) / derivar.
+        self.assertIn("answer_source=rag", RECEPTION_AGENT_PROMPT)
+        self.assertIn("Mencionar el tema NO es querer ejecutarlo", RECEPTION_AGENT_PROMPT)
+
+    def test_reply_prompt_references_known_topics_for_side_questions(self):
+        self.assertIn("Como referencia de qué es una duda informativa real", REPLY_EVALUATION_PROMPT)
+
+    def test_prompts_keep_scope_generic_without_catalog_values(self):
+        # El mapa de alcance debe ser de CATEGORÍAS, nunca datos del catálogo
+        # (precios, sinpe, links, marcas de vehículo). Refuerza CLAUDE.md §6.
+        combined = f"{RECEPTION_AGENT_PROMPT}\n{REPLY_EVALUATION_PROMPT}".lower()
+        for leaked in ("60023618", "colones", "https://", "smart", "spark", "calendly"):
+            self.assertNotIn(leaked, combined)
+
     def test_prompts_keep_instructions_separate_from_turn_data(self):
         # Las instrucciones son estáticas (van en el mensaje system, cacheables);
         # los datos del turno llegan como JSON en el mensaje del usuario. Por eso
