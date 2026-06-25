@@ -193,6 +193,7 @@ Devuelve JSON estricto:
 - Una afirmación, comentario, plan o intención NO es una pregunta: has_question=false y question vacío. Diferencia entre una solicitud genérica de ayuda y una duda informativa real.
 - NO infieras una pregunta implícita porque el cliente describa una situación o un evento próximo. Si el mensaje narra un contexto ("tengo una prueba mañana", "ya casi termino mi trámite") pero no pide un dato concreto, has_question=false aunque el tema sugiera que podría necesitar información.
 - Un pedido genérico de ayuda ("me ayudan?", "cómo me pueden ayudar", "necesito ayuda") NO es una duda informativa: es descubrimiento. has_question=false y se resuelve aclarando (clarify), nunca con RAG.
+- PERO una pregunta CONCRETA sobre lo que un servicio incluye u ofrece, su disponibilidad, costos, requisitos o recursos SÍ es una duda informativa real: has_question=true, aunque venga ACOMPAÑADA de una intención de servicio (p. ej. "quiero alquilar, ¿incluye práctica?" o "¿eso lo proporcionan ustedes o lo llevo yo?"). Preguntar si algo va incluido o si lo aporta el cliente es una duda real, no un pedido genérico de ayuda: hay que responderla, no descartarla.
 
 ═══ PASO 2: elige action (UNA sola, en este orden de prioridad) ═══
 
