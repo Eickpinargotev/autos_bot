@@ -579,6 +579,47 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertIn("licencia, clases o alquiler", result.replies[0])
         report_mock.assert_not_called()
 
+    def test_intake_real_question_after_two_clarifies_answers_not_escalates(self):
+        # Tras 2 aclaraciones, si el cliente por fin trae una pregunta REAL
+        # (answer_and_clarify), se responde; NO se escala a humano. answer_and_clarify
+        # es progreso, no un bucle de aclaración.
+        prior_clarifies = [
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "buenas", "bot": ["¿Con qué le ayudo?"]},
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "mañana tengo una prueba de manejo", "bot": ["¿Con qué le ayudo?"]},
+        ]
+        stored = ConversationState(flow="INTAKE", node="I1", conversation_history=prior_clarifies)
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="clarify",
+                has_question=True,
+                answer_source="rag",
+                question="si alquilo una moto, ¿dan el casco?",
+                clarifying_question="¿Desea alquilar moto o carro?",
+                confidence=0.7,
+            ),
+        ), patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "Sí, le facilitamos casco si no trae el suyo."),
+        ):
+            result = self.runner.run(
+                Channel.WHATSAPP,
+                "50615151515",
+                "Deseo alquilar, pero ¿si alquilo una moto dan el casco?",
+                "Cliente",
+            )
+
+        self.assertNotEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
+        self.assertEqual(result.replies[0], "Sí, le facilitamos casco si no trae el suyo.")
+        report_mock.assert_not_called()
+
     def test_prompt_rules_operational_answer_is_rechecked_with_rag_instead_of_prompt_text(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
