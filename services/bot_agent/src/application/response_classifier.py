@@ -50,7 +50,6 @@ class ResponseClassifier:
         if not settings.OPENAI_API_KEY:
             return f"El usuario pide ayuda fuera del flujo {flow}.{node}: {text[:240]}"
         started = time.monotonic()
-        historial = json.dumps(conversation_history or [], ensure_ascii=False)
         input_data = {"text": text, "flow": flow, "node": node}
         try:
             completion = client.chat.completions.create(
@@ -58,8 +57,14 @@ class ResponseClassifier:
                 temperature=0,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": "Devuelve JSON estricto."},
-                    {"role": "user", "content": REPORT_SUMMARY_PROMPT.format(mensaje=text, flujo=flow, nodo=node, historial=historial)},
+                    {"role": "system", "content": REPORT_SUMMARY_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"mensaje": text, "flujo": flow, "nodo": node, "historial": conversation_history or []},
+                            ensure_ascii=False,
+                        ),
+                    },
                 ],
             )
             data = json.loads(completion.choices[0].message.content)
@@ -109,14 +114,12 @@ class ResponseClassifier:
                 temperature=0,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": "Devuelve JSON estricto."},
+                    {"role": "system", "content": REPLY_EVALUATION_PROMPT},
                     {
                         "role": "user",
-                        "content": REPLY_EVALUATION_PROMPT.format(
-                            mensaje=text,
-                            flujo=flow,
-                            nodo=node,
-                            pregunta=last_question,
+                        "content": json.dumps(
+                            {"mensaje": text, "flujo": flow, "nodo": node, "pregunta": last_question},
+                            ensure_ascii=False,
                         ),
                     },
                 ],

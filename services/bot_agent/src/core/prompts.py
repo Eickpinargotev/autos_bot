@@ -7,8 +7,7 @@ Necesitamos:
 
 Si falta alguno, indica null.
 Devuelve un JSON estricto con las claves "dia", "valor", "hora".
-Mensaje:
-{mensaje}
+El mensaje del anuncio llega como dato (clave "mensaje") en el mensaje del usuario.
 """
 
 # ---------------------------------------------------------------------------
@@ -21,21 +20,19 @@ REPLY_EVALUATION_PROMPT = """
 Evalúa la respuesta del usuario dentro de una máquina de estados de una escuela de manejo.
 Clasifica el mensaje en UNA sola intención principal y, por separado, detecta si además trae una duda lateral real.
 
-Flujo actual: {flujo}
-Nodo actual: {nodo}
-Última pregunta enviada:
-{pregunta}
-
-Mensaje del usuario:
-{mensaje}
+Los datos del turno llegan como JSON en el mensaje del usuario, con las claves:
+- "flujo": flujo actual.
+- "nodo": nodo actual.
+- "pregunta": última pregunta enviada al usuario.
+- "mensaje": mensaje del usuario a clasificar.
 
 Devuelve JSON estricto:
-{{
+{
   "intent": "positive|negative|city|license|question|complaint|decline|change_intent|human_handoff|greeting|unknown",
   "value": "liberia|other|car|moto|b2|b3|b4|bus|",
   "has_off_flow_question": true|false,
   "off_flow_question": "pregunta lateral del usuario o vacío"
-}}
+}
 
 ═══ CÓMO ELEGIR intent (UNA sola, en este orden de prioridad) ═══
 
@@ -124,16 +121,14 @@ Devuelve JSON estricto con:
 REPORT_SUMMARY_PROMPT = """
 Resume en una oración corta la duda o problema del usuario para que un asesor lo contacte.
 
-Flujo: {flujo}
-Nodo: {nodo}
-Mensaje:
-{mensaje}
-
-Historial reciente (para contexto; si muestra molestia, enojo o frustración previa, menciónalo en el resumen):
-{historial}
+Los datos llegan como JSON en el mensaje del usuario, con las claves:
+- "flujo": flujo actual.
+- "nodo": nodo actual.
+- "mensaje": mensaje del usuario.
+- "historial": historial reciente (para contexto; si muestra molestia, enojo o frustración previa, menciónalo en el resumen).
 
 Devuelve JSON estricto:
-{{"resumen": "texto breve"}}
+{"resumen": "texto breve"}
 """
 
 # ---------------------------------------------------------------------------
@@ -156,14 +151,12 @@ Flujos formales disponibles:
 - QUEJA: molestia, reclamo, devolución, mal servicio, enojo o frustración fuerte.
 - WIN: el cliente informa que ganó, aprobó o pasó una prueba/examen. Si hay negación, no es WIN.
 
-Contexto reciente de recepción:
-{conversation_history}
-
-Mensaje del cliente:
-{mensaje}
+Los datos del turno llegan como JSON en el mensaje del usuario, con las claves:
+- "conversation_history": contexto reciente de recepción.
+- "mensaje": mensaje del cliente.
 
 Devuelve JSON estricto:
-{{
+{
   "action": "answer_and_start_flow|answer_and_clarify|start_flow|clarify|handoff|close",
   "flow": "GENERAL|Alquiler|CLASES|DICTAMEN|QUEJA|WIN|",
   "has_question": true|false,
@@ -173,12 +166,14 @@ Devuelve JSON estricto:
   "clarifying_question": "una sola pregunta breve o vacío",
   "handoff_reason": "resumen interno si action=handoff o vacío",
   "confidence": 0.0
-}}
+}
 
 ═══ PASO 1: ¿hay una pregunta? ═══
 - Primero detecta si el cliente hizo una pregunta. Una pregunta puede venir sin signos.
-- has_question=true SOLO si hay una duda informativa real (consecuencias, condiciones, requisitos, disponibilidad, costos, recursos, pagos, resultados o escenarios). Copia esa duda en question.
+- has_question=true SOLO si el cliente pide EXPLÍCITAMENTE un dato concreto: una duda informativa real (consecuencias, condiciones, requisitos, disponibilidad, costos, recursos, pagos, resultados o escenarios). Copia esa duda en question.
 - Una afirmación, comentario, plan o intención NO es una pregunta: has_question=false y question vacío. Diferencia entre una solicitud genérica de ayuda y una duda informativa real.
+- NO infieras una pregunta implícita porque el cliente describa una situación o un evento próximo. Si el mensaje narra un contexto ("tengo una prueba mañana", "ya casi termino mi trámite") pero no pide un dato concreto, has_question=false aunque el tema sugiera que podría necesitar información.
+- Un pedido genérico de ayuda ("me ayudan?", "cómo me pueden ayudar", "necesito ayuda") NO es una duda informativa: es descubrimiento. has_question=false y se resuelve aclarando (clarify), nunca con RAG.
 
 ═══ PASO 2: elige action (UNA sola, en este orden de prioridad) ═══
 
@@ -199,11 +194,16 @@ CASO SALUDO / CORTESÍA → action="clarify":
 - Si el mensaje es solo un saludo o cortesía sin intención ni pregunta clara (por ejemplo "hola", "buenas", "cómo está", "todo bien"), responde con calidez y usa action="clarify" ofreciendo las opciones de servicios. No uses handoff ni rag para un simple saludo; un saludo no es una pregunta informativa.
 - Para un saludo deja answer vacío y coloca el saludo cálido junto con las opciones de servicio en clarifying_question, en una sola frase. Nunca devuelvas a la vez una respuesta de saludo en answer y además una pregunta de aclaración aparte: eso genera dos mensajes y debe evitarse.
 
-CASO INTENCIÓN CLARA, SIN DUDA (hay intención de una línea de negocio y NO hay pregunta) → action="start_flow":
-- Si el cliente expresa intención, necesidad o solicita información general claramente sobre una línea de negocio (alquiler, dictamen, clases, licencia/general o aprobación), usa action="start_flow" sin hacer preguntas extra.
+CASO INTENCIÓN CLARA, SIN DUDA (intención EXPLÍCITA de UN servicio concreto y NO hay pregunta) → action="start_flow":
+- Úsalo solo cuando el cliente pide explícitamente un servicio identificable: contratar, agendar, preparar, alquilar, sacar/obtener licencia, hacer dictamen, tomar clases o reportar aprobación. Entonces usa action="start_flow" sin hacer preguntas extra.
 - En este caso answer va VACÍO y answer_source="none": sin una pregunta detectada NO se antepone ninguna respuesta, felicitación, deseo de suerte ni comentario. El flujo formal ya contiene la siguiente pregunta.
 - Si el usuario quiere sacar u obtener licencia, el flujo es GENERAL aunque mencione moto o carro.
 - No hagas preguntas previas que dupliquen preguntas del flujo formal; si el flujo ya puede continuar, entra al flujo.
+
+CASO SOLO CONTEXTO O PEDIDO GENÉRICO DE AYUDA (describe una situación o pide ayuda en general, SIN pregunta concreta y SIN intención explícita de un servicio) → action="clarify":
+- NO respondas con RAG ni inicies ningún flujo. Un contexto ("tengo prueba mañana") puede tocar varios servicios (alquilar el vehículo, tomar clases, info del proceso): no asumas cuál quiere.
+- Usa action="clarify" con answer vacío y ofrece en clarifying_question las opciones de servicio RELEVANTES a lo que mencionó, para que el cliente elija. Una sola frase cálida.
+- Ante la duda entre "intención clara" y "solo contexto", trátalo como contexto y aclara: es preferible preguntar a iniciar el flujo equivocado.
 
 CASO DUDA INFORMATIVA REAL, FLUJO NO CONFIRMADO → action="answer_and_clarify":
 - Si el mensaje es principalmente una duda informativa, o mezcla intención comercial con una duda informativa real, extra y puntual, no inicies el flujo todavía. Usa action="answer_and_clarify", flow="", answer_source="rag", copia la duda en question y termina con UNA sola pregunta global de confirmación/aclaración.

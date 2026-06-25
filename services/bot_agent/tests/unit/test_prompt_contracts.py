@@ -44,6 +44,15 @@ class PromptContractTests(unittest.TestCase):
         self.assertNotIn("programar cita", combined.lower())
         self.assertNotIn("qué pasa si pierde", combined.lower())
 
+    def test_prompts_keep_instructions_separate_from_turn_data(self):
+        # Las instrucciones son estáticas (van en el mensaje system, cacheables);
+        # los datos del turno llegan como JSON en el mensaje del usuario. Por eso
+        # los prompts NO deben interpolar datos del turno (placeholders .format).
+        for prompt in (RECEPTION_AGENT_PROMPT, REPLY_EVALUATION_PROMPT):
+            for placeholder in ("{mensaje}", "{flujo}", "{nodo}", "{pregunta}", "{conversation_history}"):
+                self.assertNotIn(placeholder, prompt)
+            self.assertIn("llegan como JSON en el mensaje del usuario", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
