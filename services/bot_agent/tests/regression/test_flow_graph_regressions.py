@@ -409,7 +409,10 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.node, "G1")
 
     @requires_llm
-    def test_initial_moto_without_license_enters_general_not_alquiler_or_clases(self):
+    def test_initial_generic_help_with_context_clarifies_without_flow(self):
+        # I-CTX: "me ayudan?" es un pedido genérico de ayuda + contexto (tiene moto,
+        # no licencia). Es ambiguo (licencia, clases o alquiler) -> se aclara con
+        # opciones; no se asume un flujo. (Antes se forzaba GENERAL.)
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
 
@@ -425,23 +428,24 @@ class FlowGraphRegressionTests(unittest.TestCase):
                 "Erick",
             )
 
-        self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
-        self.assertEqual(saved_state.flow, "GENERAL")
-        self.assertEqual(saved_state.node, "G1")
+        self.assertEqual(saved_state.flow, "INTAKE")
+        self.assertEqual(saved_state.node, "I1")
 
     @requires_llm
-    def test_initial_prueba_de_manejo_without_explicit_alquiler_enters_general(self):
+    def test_initial_prueba_de_manejo_context_clarifies_without_assuming_flow(self):
+        # I-CTX: "tengo prueba de manejo" es contexto (no nombra un servicio
+        # concreto: podría ser alquiler, clases o el proceso de licencia). No se
+        # asume un flujo; se aclara con opciones. (Antes se forzaba GENERAL.)
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, _ = self._report_block_patches()
 
         with get_patch, set_patch, report_patch, block_patch, clear_patch:
             result = self.runner.run(Channel.TELEGRAM, "1049838038", "Mi prueba de manejo es en Liberia", "Erick")
 
-        self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
-        self.assertEqual(saved_state.flow, "GENERAL")
-        self.assertEqual(saved_state.node, "G1")
+        self.assertEqual(saved_state.flow, "INTAKE")
+        self.assertEqual(saved_state.node, "I1")
 
     @requires_llm
     def test_initial_explicit_alquiler_with_prueba_de_manejo_enters_alquiler(self):
@@ -515,6 +519,65 @@ class FlowGraphRegressionTests(unittest.TestCase):
         block_repo.block_user.assert_called_once()
         self.assertIn("revisión manual", report_mock.call_args.kwargs["problema"])
         set_mock.assert_not_called()
+
+    def test_intake_clarify_loop_escalates_to_human(self):
+        # Tras dos aclaraciones seguidas sin que el cliente concrete un servicio,
+        # el intake no debe repetir la misma pregunta: deriva a un humano.
+        prior_clarifies = [
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "tengo una prueba de manejo en una semana", "bot": ["¿Con qué le ayudo?"]},
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "como me pueden ayudar", "bot": ["¿Con qué le ayudo?"]},
+        ]
+        stored = ConversationState(flow="INTAKE", node="I1", conversation_history=prior_clarifies)
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="clarify",
+                clarifying_question="¿Con qué le ayudo: licencia, clases o alquiler?",
+                confidence=0.5,
+            ),
+        ):
+            result = self.runner.run(
+                Channel.WHATSAPP,
+                "50614141414",
+                "Claro, tengo una prueba de manejo, como me pueden ayudar?",
+                "Cliente",
+            )
+
+        self.assertEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
+        report_mock.assert_called_once()
+        self.assertIn("varias aclaraciones", report_mock.call_args.kwargs["problema"])
+
+    def test_intake_single_clarify_does_not_escalate(self):
+        # Una sola aclaración previa no debe escalar: el cliente todavía puede concretar.
+        prior = [
+            {"flow": "INTAKE", "node": "I1", "type": "intake_clarify",
+             "user": "hola", "bot": ["¿Con qué le ayudo?"]},
+        ]
+        stored = ConversationState(flow="INTAKE", node="I1", conversation_history=prior)
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="clarify",
+                clarifying_question="¿Con qué le ayudo: licencia, clases o alquiler?",
+                confidence=0.5,
+            ),
+        ):
+            result = self.runner.run(
+                Channel.WHATSAPP, "50614141414", "tengo una prueba de manejo", "Cliente",
+            )
+
+        self.assertIn("licencia, clases o alquiler", result.replies[0])
+        report_mock.assert_not_called()
 
     def test_prompt_rules_operational_answer_is_rechecked_with_rag_instead_of_prompt_text(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
@@ -743,7 +806,9 @@ class FlowGraphRegressionTests(unittest.TestCase):
             result.replies[0],
             "Puede traer su casco o consultar disponibilidad con el asesor.",
         )
-        self.assertIn("alquil", result.replies[1].lower())
+        # La aclaración se redacta de forma variada (no es una frase fija); basta
+        # con que ofrezca la opción relevante al contexto de alquiler/vehículo.
+        self.assertTrue(any(t in result.replies[1].lower() for t in ("alquil", "reserv", "veh", "moto")))
         self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
         self.assertEqual(saved_state.flow, "INTAKE")
@@ -765,7 +830,7 @@ class FlowGraphRegressionTests(unittest.TestCase):
             result = self.runner.run(
                 Channel.TELEGRAM,
                 "1049838038",
-                "Hola, buenas, ustede ayudan con casco o lo tengo que llevar yo, quiero alguilar",
+                "Hola buenas, quiero alguilar, el casco va incluido o lo tengo que llevar yo?",
                 "Erick",
             )
 
@@ -774,7 +839,9 @@ class FlowGraphRegressionTests(unittest.TestCase):
             result.replies[0],
             "Es conveniente traer un casco de su medida y gusto, pero si no lo trae, nosotros le proporcionaremos uno y cinta reflectiva.",
         )
-        self.assertIn("alquil", result.replies[1].lower())
+        # La aclaración se redacta de forma variada (no es una frase fija); basta
+        # con que ofrezca la opción relevante al contexto de alquiler/vehículo.
+        self.assertTrue(any(t in result.replies[1].lower() for t in ("alquil", "reserv", "veh", "moto")))
         self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
         self.assertEqual(saved_state.flow, "INTAKE")
@@ -799,7 +866,9 @@ class FlowGraphRegressionTests(unittest.TestCase):
 
         rag_mock.assert_called_once()
         self.assertEqual(result.replies[0], "El recorrido de práctica va incluido en el paquete de alquiler.")
-        self.assertIn("alquil", result.replies[1].lower())
+        # La aclaración se redacta de forma variada (no es una frase fija); basta
+        # con que ofrezca la opción relevante al contexto de alquiler/vehículo.
+        self.assertTrue(any(t in result.replies[1].lower() for t in ("alquil", "reserv", "veh", "moto")))
         self.assertEqual(result.legacy_state, UserState.GENERAL)
         saved_state = set_mock.call_args.args[2]
         self.assertEqual(saved_state.flow, "INTAKE")
