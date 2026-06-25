@@ -187,10 +187,12 @@ class FlowGraphRunner:
             return state
 
         if action in {"answer_and_clarify", "clarify"}:
-            # Anti-bucle: si ya aclaramos dos veces seguidas y el cliente sigue sin
-            # concretar un servicio, no repetimos la misma pregunta; que lo atienda
-            # un humano. Garantiza que el intake nunca quede en un loop de aclaración.
-            if self._consecutive_intake_clarifies(stored.conversation_history) >= 2:
+            # Anti-bucle: solo aplica al clarify "puro" (descubrimiento sin respuesta).
+            # Si ya aclaramos dos veces seguidas y el cliente vuelve a NO concretar un
+            # servicio, no repetimos la misma pregunta; que lo atienda un humano.
+            # answer_and_clarify SÍ es progreso (responde una duda real): nunca escala
+            # ni cuenta como bucle, aunque haya aclaraciones previas.
+            if action == "clarify" and self._consecutive_intake_clarifies(stored.conversation_history) >= 2:
                 state["should_report"] = True
                 state["replies"] = [self.COMPLAINT_HANDOFF_MESSAGE]
                 state["report_reason"] = (
@@ -214,9 +216,12 @@ class FlowGraphRunner:
                 replies.append(self.reception.clarifying_question_for(state["text"]))
             last_question = replies[-1] if replies else ""
             state["replies"] = replies
-            self._save_intake_state(state, stored, replies, "intake_clarify", last_question=last_question)
+            # answer_and_clarify es progreso: lo marcamos distinto para que NO
+            # alimente el contador de aclaraciones consecutivas del anti-bucle.
+            turn_type = "intake_answer_clarify" if action == "answer_and_clarify" else "intake_clarify"
+            self._save_intake_state(state, stored, replies, turn_type, last_question=last_question)
             state["legacy_state"] = UserState.GENERAL
-            state["intake_turn_type"] = "intake_clarify"
+            state["intake_turn_type"] = turn_type
             return state
 
         replies = [decision.answer] if decision.answer else [self._initial_rag_fallback(state, state["text"])]
