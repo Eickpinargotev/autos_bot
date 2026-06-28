@@ -152,10 +152,16 @@ y si **no** hay respuesta cambia la decisión:
 | Caso | `Q` | `rag_ok` | Resultado real |
 | ---- | --- | -------- | -------------- |
 | I-2/3/4 | sí | sí | Se responde la duda (como indican esas filas). |
-| **I-RAG✗** | sí | no | **`action=handoff`**: se registra la pregunta sin respuesta y un humano atiende. NO se inventa respuesta ni se inicia flujo. |
+| **I-RAG✗** | sí | no | **`action=clarify`** (sin bloquear): se registra la pregunta sin respuesta para el equipo y se pide precisar. NO se inventa respuesta ni se inicia flujo. |
 
-Es el equivalente en intake de F-3/F-5, pero aquí termina en **handoff** (no en un
-mensaje de "no tengo información"). Garantiza que la duda siempre se aborda.
+> **Corrección importante (antes bloqueaba 12 días).** Esta rama hacía `action=handoff`,
+> y en intake el handoff dispara [`_create_report_and_block`](../services/bot_agent/src/application/flow_graph.py:590)
+> → `block_user(days=12)`. Es decir, una pregunta vaga **mal clasificada** ("¿cómo me
+> pueden ayudar?") podía **bloquear al cliente 12 días**. Ahora intake nunca deriva-y-bloquea
+> por un fallo de RAG; aclara sin bloquear, igual que F-5 dentro de un flujo. El `handoff`
+> (con bloqueo) queda reservado a disparadores humanos explícitos que marca el LLM:
+> pago, comprobante, "quiero hablar con alguien" (CASO DERIVACIÓN A HUMANO del prompt).
+> Cubierto por [`tests/unit/test_decision_guardrails.py`](../services/bot_agent/tests/unit/test_decision_guardrails.py) (`IntakeRagMissTests`).
 
 **Invariante clave de PD1 (raíz del caso 1):**
 `A` sin `Q` (I-1, I-5) ⇒ **`answer` debe ir vacío**. Una respuesta previa solo

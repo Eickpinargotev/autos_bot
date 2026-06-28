@@ -268,11 +268,19 @@ class FlowGraphRunner:
                 decision.action = "answer_and_clarify"
             return decision
 
+        # RAG no tiene respaldo para la duda. NO derivamos a un humano: en intake
+        # el handoff dispara _create_report_and_block, que BLOQUEA al cliente 12
+        # días, y esa duda quizá ni era una pregunta real (afirmación de contexto
+        # mal clasificada). Registramos la pregunta sin respuesta para el equipo y
+        # aclaramos SIN bloquear, igual que el fallback dentro de un flujo (F-5).
+        # El handoff queda reservado a disparadores humanos explícitos (pago,
+        # comprobante, pide asesor), que el LLM marca como action="handoff".
         self._create_unanswered_question(state, question)
-        decision.action = "handoff"
+        decision.action = "clarify"
         decision.answer = ""
         decision.answer_source = "none"
-        decision.handoff_reason = f"Pregunta de recepción sin respuesta en RAG: {question[:240]}"
+        decision.has_question = False
+        decision.question = ""
         return decision
 
     def _after_intake(self, state: FlowGraphState) -> str:
