@@ -5,7 +5,9 @@ LLM (operan sobre la normalización pura de las decisiones).
 """
 
 import os
+import types
 import unittest
+from unittest.mock import patch
 
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
@@ -13,8 +15,10 @@ os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/tes
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
-from src.application.reception_agent import ReceptionAgent
+from src.application.flow_graph import FlowGraphRunner
+from src.application.reception_agent import ReceptionAgent, ReceptionDecision
 from src.application.response_classifier import ReplyClassification, ResponseClassifier
+from src.infrastructure.repositories.conversation_state_repo import ConversationState
 
 
 class ReceptionP2Tests(unittest.TestCase):
@@ -101,6 +105,77 @@ class ClassifierCoherenceTests(unittest.TestCase):
         )
         self.assertTrue(result.has_off_flow_question)
         self.assertEqual(result.off_flow_question, "¿tienen campo el sábado?")
+
+
+class IntakeRagMissTests(unittest.TestCase):
+    """Una duda en intake sin respuesta del RAG aclara, NO deriva ni bloquea."""
+
+    def test_rag_miss_clarifies_instead_of_handoff(self):
+        runner = FlowGraphRunner()
+        decision = ReceptionDecision(
+            action="answer_and_clarify",
+            flow="",
+            has_question=True,
+            question="¿tienen sede en un lugar muy específico?",
+            answer_source="rag",
+            clarifying_question="¿Desea conocer más sobre nuestro proceso de licencia?",
+        )
+        state = {"user_id": "", "channel": ""}
+        no_answer = types.SimpleNamespace(has_answer=False, answer="", sources=[])
+
+        with patch.object(runner, "_answer_rag", return_value=no_answer), \
+             patch.object(runner, "_create_unanswered_question") as register_mock:
+            out = runner._resolve_reception_rag(decision, state, ConversationState())
+
+        # Clave: NO handoff (handoff en intake bloquea 12 días).
+        self.assertEqual(out.action, "clarify")
+        self.assertNotEqual(out.action, "handoff")
+        self.assertEqual(out.answer, "")
+        self.assertFalse(out.has_question)
+        register_mock.assert_called_once()  # la pregunta sin respuesta sí se registra
+
+    def test_rag_miss_with_explicit_flow_still_enters_flow(self):
+        # Intención explícita de servicio + duda sin respaldo: la duda no cancela
+        # la intención. Se avisa con el fallback y se entra igual al flujo (como
+        # F-3 dentro de un flujo: avanzar + ofrecer asesor por la duda lateral).
+        runner = FlowGraphRunner()
+        decision = ReceptionDecision(
+            action="start_flow",
+            flow="Alquiler",
+            has_question=True,
+            question="¿el casco lo prestan ustedes?",
+            answer_source="rag",
+        )
+        state = {"user_id": "", "channel": ""}
+        no_answer = types.SimpleNamespace(has_answer=False, answer="", sources=[])
+
+        with patch.object(runner, "_answer_rag", return_value=no_answer), \
+             patch.object(runner, "_create_unanswered_question") as register_mock:
+            out = runner._resolve_reception_rag(decision, state, ConversationState())
+
+        self.assertEqual(out.action, "answer_and_start_flow")
+        self.assertEqual(out.flow, "Alquiler")
+        self.assertEqual(out.answer, FlowGraphRunner.RAG_FALLBACK_MESSAGE)
+        register_mock.assert_called_once()
+
+    def test_rag_hit_still_answers(self):
+        # Control: si el RAG responde, se conserva la respuesta y se sube la acción.
+        runner = FlowGraphRunner()
+        decision = ReceptionDecision(
+            action="clarify",
+            flow="",
+            has_question=True,
+            question="¿cuánto dura el proceso?",
+            answer_source="rag",
+        )
+        state = {"user_id": "", "channel": ""}
+        answer = types.SimpleNamespace(has_answer=True, answer="Pocas semanas.", sources=[])
+
+        with patch.object(runner, "_answer_rag", return_value=answer):
+            out = runner._resolve_reception_rag(decision, state, ConversationState())
+
+        self.assertEqual(out.action, "answer_and_clarify")
+        self.assertEqual(out.answer, "Pocas semanas.")
 
 
 if __name__ == "__main__":

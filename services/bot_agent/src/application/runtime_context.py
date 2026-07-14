@@ -10,14 +10,21 @@ RUNTIME_TTL_SECONDS = 60 * 60 * 24 * 14
 REPORT_TTL_SECONDS = 60 * 60 * 24 * 60
 
 
+# Etapas posibles de recordatorios de publicidad (claves ad_reminder_task:N).
+AD_REMINDER_STAGES = (1, 2, 3)
+# Contextos posibles de claves report_fired:<context>. Se enumeran para poder
+# borrarlas por clave exacta: un SCAN por patrón recorre TODO el keyspace de
+# Redis y en el camino caliente de mensajes se vuelve lento con muchos usuarios.
+REPORT_CONTEXTS = (WELCOME_REPORT_CONTEXT, AD_REPORT_CONTEXT, KEYWORD_REPORT_CONTEXT)
+
+
 def _key(prefix: str, channel: Channel | str, user_id: str) -> str:
     return scoped_key(prefix, channel, user_id)
 
 
-def _delete_pattern(pattern: str):
-    keys = list(redis_client.scan_iter(pattern))
-    if keys:
-        redis_client.delete(*keys)
+def _delete_ad_reminder_tasks(channel: Channel | str, user_id: str):
+    base = _key("ad_reminder_task", channel, user_id)
+    redis_client.delete(*[f"{base}:{stage}" for stage in AD_REMINDER_STAGES])
 
 
 def mark_report_once(channel: Channel | str, user_id: str, context: str) -> bool:
@@ -26,7 +33,8 @@ def mark_report_once(channel: Channel | str, user_id: str, context: str) -> bool
 
 
 def clear_report_markers(channel: Channel | str, user_id: str):
-    _delete_pattern(f"{_key('report_fired', channel, user_id)}:*")
+    base = _key("report_fired", channel, user_id)
+    redis_client.delete(*[f"{base}:{context}" for context in REPORT_CONTEXTS])
 
 
 def set_welcome_context(channel: Channel | str, user_id: str):
@@ -37,7 +45,7 @@ def set_welcome_context(channel: Channel | str, user_id: str):
         _key("ad_report_consumed", channel, user_id),
         _key("ad_reminder_stage", channel, user_id),
     )
-    _delete_pattern(f"{_key('ad_reminder_task', channel, user_id)}:*")
+    _delete_ad_reminder_tasks(channel, user_id)
 
 
 def consume_welcome_context(channel: Channel | str, user_id: str) -> bool:
@@ -151,7 +159,7 @@ def clear_user_runtime_context(
         _key("keyword_active_report", channel, user_id),
         _key("keyword_reminder_stage", channel, user_id),
     )
-    _delete_pattern(f"{_key('ad_reminder_task', channel, user_id)}:*")
+    _delete_ad_reminder_tasks(channel, user_id)
 
     if clear_reports:
         clear_report_markers(channel, user_id)

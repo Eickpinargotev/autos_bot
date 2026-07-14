@@ -13,7 +13,11 @@ from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY or "test")
+client = OpenAI(
+    api_key=settings.OPENAI_API_KEY or "test",
+    timeout=settings.OPENAI_TIMEOUT_SECONDS,
+    max_retries=settings.OPENAI_MAX_RETRIES,
+)
 
 
 @dataclass

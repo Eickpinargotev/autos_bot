@@ -10,7 +10,11 @@ from src.infrastructure.tasks.celery_app import send_delayed_message_sequence, s
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from openai import OpenAI
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY or "test")
+client = OpenAI(
+    api_key=settings.OPENAI_API_KEY or "test",
+    timeout=settings.OPENAI_TIMEOUT_SECONDS,
+    max_retries=settings.OPENAI_MAX_RETRIES,
+)
 
 class PublicidadService:
     @staticmethod

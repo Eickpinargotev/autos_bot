@@ -72,6 +72,13 @@ class PromptContractTests(unittest.TestCase):
     def test_reception_prompt_does_not_pre_ask_flow_qualifiers(self):
         self.assertIn("No preguntes tú esos datos", RECEPTION_AGENT_PROMPT)
 
+    def test_reception_prompt_treats_bare_menu_selection_as_explicit_intent(self):
+        # Si el bot ya ofreció opciones nombradas y el cliente responde con una
+        # sola palabra que nombra una de ellas (sin verbo), cuenta como
+        # intención explícita (start_flow), no como contexto ambiguo que siga
+        # aclarando o escale a handoff.
+        self.assertIn("Seleccionar una opción ya ofrecida es concretar", RECEPTION_AGENT_PROMPT)
+
     def test_reception_clarify_is_adaptive_not_a_fixed_phrase(self):
         # Evita el overfitting: el modelo no debe copiar un ejemplo literal de
         # pregunta de aclaración (causaba el bucle de la misma frase repetida).
