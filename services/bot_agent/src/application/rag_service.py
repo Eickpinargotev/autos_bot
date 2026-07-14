@@ -39,7 +39,15 @@ class RagService:
 
     def __init__(self):
         self.qdrant_url = settings.QDRANT_URL
-        self.openai = OpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+        self.openai = (
+            OpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                timeout=settings.OPENAI_TIMEOUT_SECONDS,
+                max_retries=settings.OPENAI_MAX_RETRIES,
+            )
+            if settings.OPENAI_API_KEY
+            else None
+        )
         self.client = None
         self._last_sync = 0.0
         try:

@@ -38,9 +38,14 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 │   └── bot_agent/              # Servicio del bot (Dockerfile, src/, tests/)
 ├── data/                       # Estado persistente local (nocodb metadata, qdrant)
 ├── docs/                       # Documentación versionada
+│   ├── operacion_escala_y_trazabilidad.md  # concurrencia, anti-duplicados, capacidad, trazado
+│   ├── seguridad.md                        # postura de seguridad + checklist de despliegue
+│   ├── gobernanza_de_prompts.md            # proceso obligatorio para crear/editar prompts
 │   ├── reglas_agente_recepcion.md
+│   ├── tabla_decision_agente.md
 │   ├── despliegue_docker_easypanel.md
 │   ├── descripcion_funcional_bot.md
+│   ├── arquitectura_general.md
 │   ├── diagramas/              # .mmd (fuentes); PDFs/SVGs se ignoran en git
 │   └── ejemplos/               # logs de conversación de ejemplo
 └── _local/                     # Notas, scripts scratch y overrides locales (ignorado por git)
@@ -56,6 +61,10 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 Requiere un archivo `.env` en la raíz (no versionado). Variables principales:
 `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `POSTGRES_USER/PASSWORD/DB`,
 `NOCODB_TOKEN`, `NOCODB_API_KEY` y las URLs `NOCODB_*` (ver los compose para la lista completa).
+
+> **Seguridad:** el webhook de sincronización RAG queda **deshabilitado** (503) hasta
+> que definas `NOCODB_RAG_WEBHOOK_TOKEN`; sin él, el RAG se actualiza igual por
+> sincronización lazy cada 5 min. Checklist completo en `docs/seguridad.md`.
 
 ### Local
 
@@ -160,6 +169,12 @@ paralelo**.
 > son de solo lectura (catálogo de `mensajes.json`), clientes thread-safe (`redis`,
 > `openai`) o aislados por hilo (el trazado de *shots* usa `contextvars`). El grafo se
 > invoca con estado por llamada y las conexiones a Postgres se crean por uso.
+
+> **Integridad por conversación:** además del debounce del buffer, cada turno corre
+> bajo un **candado por conversación** (`processing:canal:user_id`): dos mensajes del
+> mismo usuario nunca se procesan en paralelo (no se pisan el estado ni salen
+> respuestas desordenadas), sin bloquear a los demás usuarios. Detalle completo en
+> `docs/operacion_escala_y_trazabilidad.md`.
 
 > **Escalado horizontal:** si más adelante hicieran falta más réplicas del
 > `celery_worker`, el beat (`-B`) debe quedar en **una sola** réplica para no duplicar la

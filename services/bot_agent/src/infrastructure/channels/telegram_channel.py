@@ -1,3 +1,5 @@
+import asyncio
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from src.infrastructure.channels.base_channel import BaseChannel
@@ -10,7 +12,9 @@ class TelegramChannel(BaseChannel):
     def __init__(self, token: str):
         self.token = token
         self.orchestrator = ConversationOrchestrator()
-        self.app = Application.builder().token(token).build()
+        # concurrent_updates: sin esto PTB procesa las actualizaciones en serie y
+        # un solo cliente lento (NocoDB/Postgres/LLM) atasca la cola de todos.
+        self.app = Application.builder().token(token).concurrent_updates(True).build()
         self._register_handlers()
 
     def _register_handlers(self):
@@ -25,7 +29,8 @@ class TelegramChannel(BaseChannel):
         text = "Bot iniciado."
         user_id = str(update.message.chat_id)
         user_name = update.message.from_user.first_name if update.message.from_user else "Desconocido"
-        ConversationLogRepository.log_inbound(
+        await asyncio.to_thread(
+            ConversationLogRepository.log_inbound,
             client_id=user_id,
             canal=Channel.TELEGRAM,
             sender_name=user_name,
@@ -34,7 +39,9 @@ class TelegramChannel(BaseChannel):
             event_type="command",
         )
         await update.message.reply_text(text)
-        ConversationLogRepository.log_outbound(client_id=user_id, canal=Channel.TELEGRAM, text=text)
+        await asyncio.to_thread(
+            ConversationLogRepository.log_outbound, client_id=user_id, canal=Channel.TELEGRAM, text=text
+        )
 
     async def _cmd_d(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._dispatch(update, MessageType.TEXT, text="/d")
@@ -52,7 +59,12 @@ class TelegramChannel(BaseChannel):
         await self._dispatch(update, MessageType.AUDIO)
         text = "Audio recibido, procesando..."
         await update.message.reply_text(text)
-        ConversationLogRepository.log_outbound(client_id=str(update.message.chat_id), canal=Channel.TELEGRAM, text=text)
+        await asyncio.to_thread(
+            ConversationLogRepository.log_outbound,
+            client_id=str(update.message.chat_id),
+            canal=Channel.TELEGRAM,
+            text=text,
+        )
 
     async def _dispatch(self, update: Update, msg_type: MessageType, text: str = ""):
         user_id = str(update.message.chat_id)
@@ -64,11 +76,15 @@ class TelegramChannel(BaseChannel):
             message_type=msg_type,
             text=text,
         )
-        for action in self.orchestrator.handle(inbound):
+        # El orquestador hace I/O bloqueante (NocoDB, Postgres, Redis); se corre
+        # en un hilo para no congelar el event loop del bot con otros clientes.
+        actions = await asyncio.to_thread(self.orchestrator.handle, inbound)
+        for action in actions:
             if action.action == "send_now" and action.text:
                 await update.message.reply_text(action.text)
                 if not action.skip_conversation_log:
-                    ConversationLogRepository.log_outbound(
+                    await asyncio.to_thread(
+                        ConversationLogRepository.log_outbound,
                         client_id=action.user_id,
                         canal=action.channel,
                         text=action.text,

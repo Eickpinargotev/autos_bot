@@ -29,6 +29,25 @@ from src.application.fsm import process_fsm
 
 celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL)
 
+# Con broker Redis, una tarea con countdown/ETA queda "sin ack" hasta que se
+# ejecuta. Si el countdown supera el visibility_timeout (1h por defecto), Redis
+# re-entrega la tarea y el cliente recibe el mensaje DUPLICADO una vez por hora.
+# El timeout debe superar con margen el countdown más largo que agendamos
+# (recordatorios de publicidad, hasta PUB_DELAY_3_SEC).
+_max_countdown_seconds = max(
+    settings.PUB_DELAY_1_SEC,
+    settings.PUB_DELAY_2_SEC,
+    settings.PUB_DELAY_3_SEC,
+    86400,
+)
+celery_app.conf.broker_transport_options = {
+    "visibility_timeout": _max_countdown_seconds * 2,
+}
+# Nadie consulta resultados de tareas (no hay result backend); esto evita que
+# alguien lo configure a futuro y Redis se llene de claves celery-task-meta-*.
+celery_app.conf.task_ignore_result = True
+celery_app.conf.broker_connection_retry_on_startup = True
+
 # Tarea periódica de retención: una vez al día purga el historial de
 # conversaciones (NocoDB) vencido. La hora es UTC (~02:00 en Costa Rica), un
 # horario de baja actividad. Requiere que el worker corra con beat (`-B`).
@@ -39,9 +58,34 @@ celery_app.conf.beat_schedule = {
     },
 }
 
+# Candado de procesamiento por conversación. Debe superar el peor caso de un
+# turno (varias llamadas al LLM encadenadas con timeout de 30s); si el worker
+# muere a mitad de turno, el candado expira solo y la conversación no queda
+# trabada.
+_PROCESSING_LOCK_TTL_SECONDS = 120
+
+
 @celery_app.task
 def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desconocido", seq: int | None = None):
     channel_value = Channel(channel)
+
+    # Un solo turno en proceso a la vez por conversación. Sin este candado, un
+    # mensaje que llega mientras el turno anterior sigue esperando al LLM crea
+    # dos process_fsm en paralelo del MISMO usuario: el turno más lento pisa el
+    # estado del más nuevo y las respuestas salen desordenadas. Si el candado
+    # está tomado, la tarea se reagenda SIN drenar el buffer: el debounce por
+    # `seq` sigue decidiendo cuál tarea procesa la ráfaga.
+    lock_key = scoped_key("processing", channel_value, user_id)
+    if not redis_client.set(lock_key, "1", nx=True, ex=_PROCESSING_LOCK_TTL_SECONDS):
+        process_buffered_messages.apply_async((channel, user_id, user_name, seq), countdown=2)
+        return
+    try:
+        _process_buffered_messages_locked(channel_value, user_id, user_name, seq)
+    finally:
+        redis_client.delete(lock_key)
+
+
+def _process_buffered_messages_locked(channel_value: Channel, user_id: str, user_name: str, seq: int | None):
     if seq is None:
         # Compatibilidad con tareas agendadas por versiones anteriores.
         text = BufferService.get_and_clear_buffer(user_id, channel_value)

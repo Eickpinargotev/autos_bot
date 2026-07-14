@@ -79,9 +79,16 @@ Pipeline de conversación:
 
 Reglas para cambios:
 - Para cambiar **el comportamiento del flujo** (qué intención avanza, a qué nodo), edita el
-  **prompt** (`core/prompts.py`) o el **router** (`flow_router.py`). No cablees lógica en el grafo.
-- Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §6). No metas
+  **prompt** (`core/prompts.py`, siguiendo §6) o el **router** (`flow_router.py`). No cablees
+  lógica en el grafo.
+- Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §7). No metas
   texto de negocio en el código ni en los prompts.
+
+Documentación de referencia (mantenerla al día si tocas esas áreas):
+- `docs/operacion_escala_y_trazabilidad.md` — concurrencia, buffers, garantías
+  anti-duplicados/cruces, capacidad y trazado de herramientas.
+- `docs/seguridad.md` — postura de seguridad y checklist de despliegue.
+- `docs/gobernanza_de_prompts.md` — proceso completo para crear/editar prompts.
 
 Retención del historial (20 días desde la última interacción, ventana deslizante):
 - El plazo lo controla `settings.CONVERSATION_RETENTION_DAYS` (por defecto 20). Para cambiarlo,
@@ -118,7 +125,28 @@ El reto del sistema es mezclar un **flujo automático de mensajes curados** (FSM
   disparadores de keyword del negocio ("tareas"/"transporte") NO son interpretación de NL; ahí
   el match exacto es intencional.
 
-## 6. Restricciones duras (rompen si las ignoras)
+## 6. Política de edición de prompts (OBLIGATORIA)
+
+Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sistema:
+**no se editan "así no más"**. El proceso completo está en
+`docs/gobernanza_de_prompts.md`; resumen ejecutable:
+
+1. **Confirma que el bug es del prompt** y no del router, del grafo, de
+   `mensajes.json` o de la normalización de salida (`_validated_decision`,
+   `_normalize`). La mayoría de "bugs de prompt" son de otra capa.
+2. **La regla nueva se escribe por intención/contexto, nunca por frase exacta**, y va
+   dentro del bloque del caso correspondiente (secciones `═══`), respetando el orden
+   de prioridad — nunca como parche al final.
+3. **Si cambias el esquema de salida**, cambia en el mismo commit el validador en
+   código y sus tests. El código nunca confía en que el modelo cumpla el JSON.
+4. **Cubre el caso con un test** (determinista para el cableado, `@requires_llm` para
+   el juicio del LLM) y **corre la suite completa con key** — un cambio de prompt sin
+   regresiones LLM no está verificado.
+5. **Un cambio conceptual por commit**, con justificación del caso real que falla.
+6. Nada de conocimiento de negocio variable (precios, links, horarios) en el prompt:
+   eso vive en el RAG o en `mensajes.json`. Y `temperature=0` en toda decisión.
+
+## 7. Restricciones duras (rompen si las ignoras)
 
 - **`mensajes.json` vive en la RAÍZ del repo.** Ambos compose lo montan como
   `./mensajes.json:/mensajes.json:ro` en los 3 servicios. El loader es
@@ -129,8 +157,21 @@ El reto del sistema es mezclar un **flujo automático de mensajes curados** (FSM
   (p. ej. `casco`, `programar cita`, `qué pasa si pierde`). Usa ejemplos genéricos.
 - Ese mismo test exige que ciertas frases clave **existan** en los prompts. Si reescribes un
   prompt, conserva esas frases o actualiza el test de forma deliberada.
+- **Invariantes de concurrencia** (garantizan cero duplicados/cruces; detalle en
+  `docs/operacion_escala_y_trazabilidad.md`). No los debilites al tocar el pipeline:
+  - Todo estado por usuario en Redis usa `scoped_key(prefijo, canal, user_id)` —
+    nunca claves sin canal.
+  - El buffer se drena SOLO con los scripts Lua atómicos de `buffer_service.py` y el
+    debounce por `seq`.
+  - `process_buffered_messages` corre bajo el **candado por conversación**
+    (`processing:*`, tests en `tests/unit/test_processing_lock.py`): un solo turno en
+    proceso por usuario.
+  - El `visibility_timeout` de Celery debe superar el countdown más largo agendado
+    (`celery_app.py`); si agregas un delay mayor, inclúyelo en `_max_countdown_seconds`.
+- **El webhook de RAG exige `NOCODB_RAG_WEBHOOK_TOKEN`** (503 si falta). No lo
+  "arregles" abriéndolo: escribe en la base de conocimiento (ver `docs/seguridad.md`).
 
-## 7. Convenciones del repo
+## 8. Convenciones del repo
 
 - `docs/` está **versionado** (fuentes `.md`/`.mmd`; los PDF/SVG generados se ignoran).
 - `_local/` está **ignorado** por git: notas personales, scripts scratch, overrides locales.

@@ -134,6 +134,30 @@ class IntakeRagMissTests(unittest.TestCase):
         self.assertFalse(out.has_question)
         register_mock.assert_called_once()  # la pregunta sin respuesta sí se registra
 
+    def test_rag_miss_with_explicit_flow_still_enters_flow(self):
+        # Intención explícita de servicio + duda sin respaldo: la duda no cancela
+        # la intención. Se avisa con el fallback y se entra igual al flujo (como
+        # F-3 dentro de un flujo: avanzar + ofrecer asesor por la duda lateral).
+        runner = FlowGraphRunner()
+        decision = ReceptionDecision(
+            action="start_flow",
+            flow="Alquiler",
+            has_question=True,
+            question="¿el casco lo prestan ustedes?",
+            answer_source="rag",
+        )
+        state = {"user_id": "", "channel": ""}
+        no_answer = types.SimpleNamespace(has_answer=False, answer="", sources=[])
+
+        with patch.object(runner, "_answer_rag", return_value=no_answer), \
+             patch.object(runner, "_create_unanswered_question") as register_mock:
+            out = runner._resolve_reception_rag(decision, state, ConversationState())
+
+        self.assertEqual(out.action, "answer_and_start_flow")
+        self.assertEqual(out.flow, "Alquiler")
+        self.assertEqual(out.answer, FlowGraphRunner.RAG_FALLBACK_MESSAGE)
+        register_mock.assert_called_once()
+
     def test_rag_hit_still_answers(self):
         # Control: si el RAG responde, se conserva la respuesta y se sube la acción.
         runner = FlowGraphRunner()

@@ -110,6 +110,11 @@ class ConversationLogRepository:
                 record_id = ConversationLogRepository._record_id(record)
                 conversation = ConversationLogRepository._conversation_from_record(record, client_id, canal_value)
                 conversation["messages"].append(message)
+                # Ventana deslizante: cada mensaje re-escribe el JSON completo,
+                # así que sin tope el guardado se degrada con clientes muy activos.
+                max_messages = settings.CONVERSATION_LOG_MAX_MESSAGES
+                if max_messages > 0:
+                    conversation["messages"] = conversation["messages"][-max_messages:]
                 conversation["updated_at"] = ConversationLogRepository._now_iso()
                 return ConversationLogRepository.update_conversation(record_id, conversation)
 

@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     EVAL_JUDGE_MODEL: str = "gpt-4o-mini"
+    # Timeout/reintentos de las llamadas al LLM. El default del SDK es 600s con
+    # 2 reintentos: una llamada colgada retendría un hilo del worker ~30 min y
+    # con varias así se atasca la cola entera de clientes.
+    OPENAI_TIMEOUT_SECONDS: float = 30.0
+    OPENAI_MAX_RETRIES: int = 1
     POSTGRES_URL: str
     REDIS_URL: str = "redis://redis:6379/0"
     QDRANT_URL: str = "http://qdrant:6333"
@@ -15,6 +20,10 @@ class Settings(BaseSettings):
     # ÚLTIMA interacción (ventana deslizante). Pasado ese plazo de inactividad el
     # estado en Redis expira solo y la purga programada borra el log en NocoDB.
     CONVERSATION_RETENTION_DAYS: int = 20
+    # Tope de mensajes conservados por conversación en el log de NocoDB
+    # (json_mensajes). Sin tope, cada mensaje re-escribe un JSON cada vez más
+    # grande (crecimiento O(n²) en tráfico) hasta volver lento el guardado.
+    CONVERSATION_LOG_MAX_MESSAGES: int = 400
     NOCODB_INVITACIONES_URL: str = ""
     NOCODB_REPORTES_URL: str = ""
     NOCODB_CONVERSATIONS_URL: str = "http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5"

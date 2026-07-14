@@ -59,7 +59,13 @@ services:
     # AOF (appendonly): persiste cada escritura a disco. Redis guarda el estado
     # activo de la conversación (en qué paso del flujo va cada usuario); con AOF
     # una caída dura pierde ~1s en vez de hasta varios minutos (solo RDB).
-    command: redis-server --appendonly yes
+    #
+    # Política de memoria: sin maxmemory Redis crece hasta que el kernel mata el
+    # proceso (OOM) y se cae el bot entero. Con volatile-lru, al llegar al tope
+    # se desalojan SOLO claves con TTL (estados de conversación inactivos, que
+    # igual expirarían) y NUNCA las colas de Celery (no tienen TTL): degradación
+    # suave en vez de caída. Ajustable con REDIS_MAXMEMORY en el .env.
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy volatile-lru
     volumes:
       - autos_redis_data:/data
     restart: unless-stopped
@@ -120,7 +126,10 @@ services:
     #   no CPU-bound. Con hilos corren ~20 peticiones al LLM en paralelo sin gastar
     #   CPU (el GIL se libera durante la espera de red); 20 da ~2x de margen para
     #   ~200 chats/min. NO subir esto a prefork con 20 procesos: saturaría CPU/RAM.
-    command: celery -A src.infrastructure.tasks.celery_app worker -B -s /tmp/celerybeat-schedule --pool=threads --concurrency=20 --loglevel=info
+    # --statedb: persiste las tareas revocadas (recordatorios cancelados). Sin
+    #   esto, tras un reinicio del worker los recordatorios ya cancelados se
+    #   volverían a entregar y ejecutar.
+    command: celery -A src.infrastructure.tasks.celery_app worker -B -s /tmp/celerybeat-schedule --statedb=/tmp/celery-worker-state --pool=threads --concurrency=20 --loglevel=info
     restart: unless-stopped
 
   whatsapp_webhook:

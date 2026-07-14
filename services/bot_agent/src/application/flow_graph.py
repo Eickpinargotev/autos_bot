@@ -54,6 +54,10 @@ class FlowGraphRunner:
     COMPLAINT_HANDOFF_MESSAGE = "En un momento le escribirá un agente especializado para atender su caso."
     DECLINE_CLOSE_MESSAGE = "Con gusto, quedo atento si necesita algo más."
     INTAKE_CLOSE_MESSAGE = "Listo, con gusto. Estamos para ayudarle si tiene cualquier otra duda."
+    RAG_FALLBACK_MESSAGE = (
+        "Por ahora no tengo esa información disponible. "
+        "Si gusta, puedo contactar a un asesor especializado para que le ayude con esa duda."
+    )
 
     def __init__(self):
         self.router = FlowRouter()
@@ -164,7 +168,10 @@ class FlowGraphRunner:
         action = decision.action
 
         if action == "close":
-            state["replies"] = [self.INTAKE_CLOSE_MESSAGE]
+            # L3: un cierre que trae una duda respondida (RAG resuelto en
+            # _resolve_reception_rag) responde primero y luego se despide.
+            pre_close = [decision.answer] if decision.answer else []
+            state["replies"] = [*pre_close, self.INTAKE_CLOSE_MESSAGE]
             ConversationStateRepo.clear(state["channel"], state["user_id"])
             state["legacy_state"] = UserState.GENERAL
             state["intake_turn_type"] = "intake_close"
@@ -272,10 +279,30 @@ class FlowGraphRunner:
         # el handoff dispara _create_report_and_block, que BLOQUEA al cliente 12
         # días, y esa duda quizá ni era una pregunta real (afirmación de contexto
         # mal clasificada). Registramos la pregunta sin respuesta para el equipo y
-        # aclaramos SIN bloquear, igual que el fallback dentro de un flujo (F-5).
-        # El handoff queda reservado a disparadores humanos explícitos (pago,
-        # comprobante, pide asesor), que el LLM marca como action="handoff".
+        # seguimos SIN bloquear.
         self._create_unanswered_question(state, question)
+
+        # El rechazo manda (L3): si el cliente cierra pero dejó una duda sin
+        # respaldo, se avisa con el fallback y se cierra igual; no se le
+        # retiene con una aclaración que ya rechazó.
+        if decision.action == "close":
+            decision.answer = self.RAG_FALLBACK_MESSAGE
+            decision.answer_source = "prompt_rules"
+            return decision
+
+        # Si además hay intención EXPLÍCITA de un servicio, la duda sin respaldo
+        # no cancela esa intención: avisamos que un asesor verá la duda y entramos
+        # igual al flujo, como F-3 dentro de un flujo (avanzar + ofrecer asesor).
+        # Degradar a clarify aquí ignoraba lo que el cliente ya pidió.
+        if decision.action in {"start_flow", "answer_and_start_flow"} and decision.flow:
+            decision.action = "answer_and_start_flow"
+            decision.answer = self.RAG_FALLBACK_MESSAGE
+            decision.answer_source = "prompt_rules"
+            return decision
+
+        # Sin flujo concreto, aclaramos igual que el fallback en flujo (F-5). El
+        # handoff queda reservado a disparadores humanos explícitos (pago,
+        # comprobante, pide asesor), que el LLM marca como action="handoff".
         decision.action = "clarify"
         decision.answer = ""
         decision.answer_source = "none"
@@ -333,7 +360,20 @@ class FlowGraphRunner:
 
         if classification.intent == "decline":
             state["off_flow_answered"] = True
-            state["replies"] = [self.DECLINE_CLOSE_MESSAGE]
+            # L3 (tabla de decisión §7.4): "no gracias, solo dígame X" es rechazo
+            # CON duda adjunta. La duda se responde (o se registra con fallback)
+            # antes de despedirse; cerrar descartándola dejaba al cliente sin
+            # respuesta a lo único que pidió.
+            replies: list[str] = []
+            if classification.has_off_flow_question:
+                replies, _ = self._off_flow_replies(
+                    classification.off_flow_question or state["text"],
+                    stored,
+                    include_retake=False,
+                    client_id=state["user_id"],
+                    canal=state["channel"],
+                )
+            state["replies"] = [*replies, self.DECLINE_CLOSE_MESSAGE]
             ConversationStateRepo.clear(state["channel"], state["user_id"])
             state["legacy_state"] = UserState.GENERAL
             return state
@@ -355,6 +395,14 @@ class FlowGraphRunner:
             return state
 
         if classification.intent == "question":
+            return state
+
+        # L1 (tabla de decisión §7.4): el mensaje NO avanza el paso pero trae una
+        # duda lateral real. La duda se aborda igual (F-4/F-5): responderla o
+        # registrarla y ofrecer asesor. Antes se descartaba y solo se retomaba la
+        # pregunta pendiente, violando la regla "toda duda real se aborda".
+        if classification.has_off_flow_question:
+            state["off_flow_question"] = classification.off_flow_question or state["text"]
             return state
 
         if stored.pending_report:
@@ -386,8 +434,10 @@ class FlowGraphRunner:
 
     def _answer_off_flow_question(self, state: FlowGraphState) -> FlowGraphState:
         stored = state["stored"]
+        # Con intent=question el mensaje completo ES la duda; si la duda venía
+        # como lateral (L1), se responde solo esa parte, no el mensaje entero.
         state["replies"], turn_type = self._off_flow_replies(
-            state["text"],
+            state.get("off_flow_question") or state["text"],
             stored,
             include_retake=True,
             client_id=state["user_id"],
@@ -427,9 +477,7 @@ class FlowGraphRunner:
             turn_type = "rag_answer"
         else:
             self._create_unanswered_question({"user_id": client_id, "channel": canal}, question)
-            replies = [
-                "Por ahora no tengo esa información disponible. Si gusta, puedo contactar a un asesor especializado para que le ayude con esa duda.",
-            ]
+            replies = [self.RAG_FALLBACK_MESSAGE]
             turn_type = "rag_fallback"
 
         # Solo reanclamos al paso pendiente del flujo si la duda del usuario
@@ -442,7 +490,7 @@ class FlowGraphRunner:
 
     def _initial_rag_fallback(self, state: FlowGraphState, question: str) -> str:
         self._create_unanswered_question(state, question)
-        return "Por ahora no tengo esa información disponible. Si gusta, puedo contactar a un asesor especializado para que le ayude con esa duda."
+        return self.RAG_FALLBACK_MESSAGE
 
     def _answer_rag(
         self,

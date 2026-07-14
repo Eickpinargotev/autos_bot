@@ -129,8 +129,8 @@ services:
     # -B: corre el scheduler beat embebido (purga diaria del historial vencido).
     # -s: el archivo de agenda va a /tmp para no tocar el código montado.
     # --pool=threads --concurrency=20: tareas I/O-bound (esperan al LLM). Ver nota
-    #   detallada en docker-compose.yml.
-    command: celery -A src.infrastructure.tasks.celery_app worker -B -s /tmp/celerybeat-schedule --pool=threads --concurrency=20 --loglevel=info
+    #   detallada en docker-compose.yml (igual que --statedb).
+    command: celery -A src.infrastructure.tasks.celery_app worker -B -s /tmp/celerybeat-schedule --statedb=/tmp/celery-worker-state --pool=threads --concurrency=20 --loglevel=info
     restart: unless-stopped
 
   whatsapp_webhook:
@@ -182,8 +182,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: redis_cache
-    # AOF (appendonly): persiste cada escritura a disco. Ver nota en docker-compose.yml.
-    command: redis-server --appendonly yes
+    # AOF (appendonly) + maxmemory/volatile-lru: ver nota en docker-compose.yml.
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy volatile-lru
     ports:
       - "6379:6379"
     volumes:

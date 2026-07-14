@@ -409,6 +409,117 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.node, "G1")
 
     @requires_llm
+    def test_intake_bare_word_selecting_offered_option_enters_flow(self):
+        # Cuando el bot ya ofreció opciones nombradas ("teórico, clases o
+        # alquiler") y el cliente responde con una sola palabra que nombra una
+        # de esas opciones (sin verbo), es selección explícita: debe entrar al
+        # flujo, no repetir la aclaración. Caso real (capturas 2026-07-14): con
+        # DOS aclaraciones previas el anti-bucle está al límite; si el modelo
+        # volviera a aclarar, escalaría a handoff y bloquearía al cliente.
+        stored = ConversationState(
+            flow="INTAKE",
+            node="I1",
+            last_question="Hola, ¿desea información sobre examen teórico, clases de manejo o alquiler de vehículos?",
+            user_name="Cliente",
+            conversation_history=[
+                {
+                    "flow": "INTAKE",
+                    "node": "I1",
+                    "type": "intake_clarify",
+                    "user": "Hola",
+                    "bot": [
+                        "Hola, ¿cómo está? ¿Le gustaría información sobre licencias, clases de manejo o alquiler de vehículos?"
+                    ],
+                },
+                {
+                    "flow": "INTAKE",
+                    "node": "I1",
+                    "type": "intake_clarify",
+                    "user": "Sobre el teórico",
+                    "bot": [
+                        "Hola, ¿desea información sobre examen teórico, clases de manejo o alquiler de vehículos?"
+                    ],
+                },
+            ],
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+            result = self.runner.run(Channel.WHATSAPP, "50677777777", "Teorico", "Cliente")
+
+        self.assertNotEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
+        self.assertEqual(result.legacy_state, UserState.GENERAL)
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "GENERAL")
+        self.assertEqual(saved_state.node, "G1")
+        report_mock.assert_not_called()
+
+    @requires_llm
+    def test_intake_positional_menu_selection_enters_selected_flow(self):
+        # Variante natural de la selección de menú: el cliente elige por
+        # posición ("la segunda opción") en vez de nombrar el servicio. Debe
+        # entrar al flujo elegido, no volver a aclarar.
+        stored = ConversationState(
+            flow="INTAKE",
+            node="I1",
+            last_question="¿Le gustaría información sobre licencias, clases de manejo o alquiler de vehículos?",
+            user_name="Cliente",
+            conversation_history=[
+                {
+                    "flow": "INTAKE",
+                    "node": "I1",
+                    "type": "intake_clarify",
+                    "user": "Hola",
+                    "bot": [
+                        "Hola, ¿cómo está? ¿Le gustaría información sobre licencias, clases de manejo o alquiler de vehículos?"
+                    ],
+                }
+            ],
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+        report_patch, block_patch, clear_patch, _ = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch:
+            result = self.runner.run(Channel.WHATSAPP, "50677777777", "La segunda opción", "Cliente")
+
+        self.assertNotEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
+        report_mock.assert_not_called()
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "CLASES")
+        self.assertEqual(saved_state.node, "C1")
+
+    @requires_llm
+    def test_initial_practico_cita_request_enters_general_flow(self):
+        # Caso real (capturas 2026-07-14): saludo + contexto + intención explícita
+        # de sacar la cita de la prueba práctica b1, con un pedido genérico de
+        # información ("dígame qué información ocupa"). Debe entrar a GENERAL:
+        # el flujo ya pregunta por su cuenta lo que necesita. Se fuerza RAG miss
+        # para verificar que la intención explícita no se pierde ni escala.
+        get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+        report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(False),
+        ):
+            result = self.runner.run(
+                Channel.TELEGRAM,
+                "1049838038",
+                "Hola buenos días como estas profe, ya ahora si tengo 18años, vengo para que me ayude "
+                "a sacar la cita del practico b1, dígame que información ocupa y yo se la facilitó",
+                "Erick",
+            )
+
+        self.assertNotEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
+        report_mock.assert_not_called()
+        block_repo.block_user.assert_not_called()
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "GENERAL")
+        self.assertEqual(saved_state.node, "G1")
+
+    @requires_llm
     def test_initial_generic_help_with_context_clarifies_without_flow(self):
         # I-CTX: "me ayudan?" es un pedido genérico de ayuda + contexto (tiene moto,
         # no licencia). Es ambiguo (licencia, clases o alquiler) -> se aclara con
@@ -650,7 +761,9 @@ class FlowGraphRegressionTests(unittest.TestCase):
         self.assertEqual(saved_state.flow, "INTAKE")
         self.assertEqual(saved_state.node, "I1")
 
-    def test_reception_rag_question_without_answer_hands_off(self):
+    def test_reception_rag_question_without_answer_clarifies_without_blocking(self):
+        # Una duda sin respaldo en RAG y SIN flujo concreto NO deriva ni bloquea:
+        # registra la pregunta para el equipo y aclara, igual que F-5 en flujo.
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
         report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
 
@@ -658,7 +771,38 @@ class FlowGraphRegressionTests(unittest.TestCase):
             self.runner.reception,
             "decide",
             return_value=ReceptionDecision(
-                action="answer_and_start_flow",
+                action="answer_and_clarify",
+                flow="",
+                has_question=True,
+                question="duda que no está en prompt",
+                answer_source="rag",
+                confidence=0.9,
+            ),
+        ), patch.object(self.runner.rag, "answer_question", return_value=RagAnswer(False)), patch(
+            "src.application.flow_graph.UnansweredQuestionRepository.create"
+        ) as unanswered_mock:
+            result = self.runner.run(Channel.TELEGRAM, "1049838038", "Tengo una duda rara sobre mi caso", "Erick")
+
+        unanswered_mock.assert_called_once_with("duda que no está en prompt")
+        expected_clarify = self.runner.reception.clarifying_question_for("Tengo una duda rara sobre mi caso")
+        self.assertEqual(result.replies, [expected_clarify])
+        report_mock.assert_not_called()
+        block_repo.block_user.assert_not_called()
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "INTAKE")
+
+    def test_reception_rag_miss_with_explicit_flow_enters_flow_with_fallback(self):
+        # Intención explícita ("quiero alquilar") + duda sin respaldo en RAG: la
+        # duda no cancela la intención. Se antepone el fallback (asesor verá la
+        # duda) y se entra igual al flujo, sin reporte ni bloqueo.
+        get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+        report_patch, block_patch, clear_patch, block_repo = self._report_block_patches()
+
+        with get_patch, set_patch, report_patch as report_mock, block_patch, clear_patch, patch.object(
+            self.runner.reception,
+            "decide",
+            return_value=ReceptionDecision(
+                action="start_flow",
                 flow="Alquiler",
                 has_question=True,
                 question="duda que no está en prompt",
@@ -671,10 +815,146 @@ class FlowGraphRegressionTests(unittest.TestCase):
             result = self.runner.run(Channel.TELEGRAM, "1049838038", "Quiero alquilar y tengo una duda rara", "Erick")
 
         unanswered_mock.assert_called_once_with("duda que no está en prompt")
-        self.assertEqual(result.replies, [FlowGraphRunner.COMPLAINT_HANDOFF_MESSAGE])
-        report_mock.assert_called_once()
-        block_repo.block_user.assert_called_once()
-        set_mock.assert_not_called()
+        self.assertEqual(result.replies[0], FlowGraphRunner.RAG_FALLBACK_MESSAGE)
+        self.assertEqual(result.legacy_state, UserState.ALQUILER)
+        report_mock.assert_not_called()
+        block_repo.block_user.assert_not_called()
+        saved_state = set_mock.call_args.args[2]
+        self.assertEqual(saved_state.flow, "Alquiler")
+        self.assertEqual(saved_state.node, "A1")
+
+    def test_side_question_without_advance_is_answered_not_discarded(self):
+        # L1: el mensaje no avanza el paso (license en G1 no enruta) pero trae
+        # una duda lateral real. La duda debe responderse y reanclar, no
+        # descartarse retomando encima de una duda abierta.
+        stored = ConversationState(
+            flow="GENERAL",
+            node="G1",
+            last_question="Ya tiene el teórico ganado???",
+            user_name="Erick",
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+
+        with get_patch, set_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("license", "moto", True, "¿puedo pagar con sinpe?"),
+        ), patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "Sí, aceptamos sinpe móvil."),
+        ) as rag_mock:
+            result = self.runner.run(Channel.WHATSAPP, "50677777777", "es para moto, ¿puedo pagar con sinpe?", "Erick")
+
+        rag_mock.assert_called_once()
+        self.assertEqual(rag_mock.call_args.args[0], "¿puedo pagar con sinpe?")
+        self.assertEqual(result.replies[0], "Sí, aceptamos sinpe móvil.")
+        self.assertEqual(len(result.replies), 2)  # respuesta + retomar la pregunta pendiente
+        set_mock.assert_called_once()
+
+    def test_side_question_without_advance_and_rag_miss_offers_advisor_without_retake(self):
+        # L1 + F-5: duda lateral sin avance y sin respaldo → fallback de asesor,
+        # registrar la pregunta y NO reanclar (la duda sigue abierta).
+        stored = ConversationState(
+            flow="GENERAL",
+            node="G1",
+            last_question="Ya tiene el teórico ganado???",
+            user_name="Erick",
+        )
+        get_patch, set_patch, set_mock = self._repo_patches(stored)
+
+        with get_patch, set_patch, patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("license", "moto", True, "¿duda sin respaldo?"),
+        ), patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(False),
+        ), patch(
+            "src.application.flow_graph.UnansweredQuestionRepository.create"
+        ) as unanswered_mock:
+            result = self.runner.run(Channel.WHATSAPP, "50677777777", "es para moto, ¿duda sin respaldo?", "Erick")
+
+        unanswered_mock.assert_called_once_with("¿duda sin respaldo?")
+        self.assertEqual(result.replies, [FlowGraphRunner.RAG_FALLBACK_MESSAGE])
+
+    def test_decline_with_side_question_answers_before_closing(self):
+        # L3: "no gracias, solo dígame X" responde la duda y luego cierra, en
+        # vez de despedirse descartando lo único que el cliente pidió.
+        stored = ConversationState(
+            flow="GENERAL",
+            node="G3",
+            last_question="Ya tiene cita agendada para la prueba de manejo???",
+            user_name="Erick",
+        )
+        get_patch, set_patch, _ = self._repo_patches(stored)
+        clear_mock = MagicMock()
+
+        with get_patch, set_patch, patch(
+            "src.application.flow_graph.ConversationStateRepo.clear", clear_mock
+        ), patch.object(
+            self.runner.classifier,
+            "classify_reply",
+            return_value=ReplyClassification("decline", "", True, "¿cuánto vale el dictamen?"),
+        ), patch.object(
+            self.runner.rag,
+            "answer_question",
+            return_value=RagAnswer(True, "El dictamen vale 22600 colones."),
+        ):
+            result = self.runner.run(
+                Channel.WHATSAPP,
+                "50677777777",
+                "No gracias, ya no ocupo. Solo dígame cuánto vale el dictamen",
+                "Erick",
+            )
+
+        self.assertEqual(
+            result.replies,
+            ["El dictamen vale 22600 colones.", FlowGraphRunner.DECLINE_CLOSE_MESSAGE],
+        )
+        clear_mock.assert_called_once_with(Channel.WHATSAPP.value, "50677777777")
+
+    def test_intake_close_with_answered_question_replies_before_goodbye(self):
+        # L3 en intake: un cierre con duda respondida responde primero y se
+        # despide después; y con RAG miss avisa con el fallback, sin retener al
+        # cliente con una aclaración que ya rechazó.
+        for rag_answer, expected_first in [
+            (RagAnswer(True, "El teórico se agenda en línea."), "El teórico se agenda en línea."),
+            (RagAnswer(False), FlowGraphRunner.RAG_FALLBACK_MESSAGE),
+        ]:
+            with self.subTest(rag_hit=rag_answer.has_answer):
+                get_patch, set_patch, set_mock = self._repo_patches(ConversationState())
+                clear_mock = MagicMock()
+
+                with get_patch, set_patch, patch(
+                    "src.application.flow_graph.ConversationStateRepo.clear", clear_mock
+                ), patch.object(
+                    self.runner.reception,
+                    "decide",
+                    return_value=ReceptionDecision(
+                        action="close",
+                        has_question=True,
+                        question="¿cómo se agenda el teórico?",
+                        answer_source="rag",
+                    ),
+                ), patch.object(
+                    self.runner.rag, "answer_question", return_value=rag_answer
+                ), patch(
+                    "src.application.flow_graph.UnansweredQuestionRepository.create"
+                ):
+                    result = self.runner.run(
+                        Channel.WHATSAPP,
+                        "50677777777",
+                        "Ya no ocupo nada más, solo dígame cómo se agenda el teórico",
+                        "Cliente",
+                    )
+
+                self.assertEqual(
+                    result.replies,
+                    [expected_first, FlowGraphRunner.INTAKE_CLOSE_MESSAGE],
+                )
+                clear_mock.assert_called_once()
 
     def test_initial_question_with_clear_alquiler_enters_flow(self):
         get_patch, set_patch, set_mock = self._repo_patches(ConversationState())

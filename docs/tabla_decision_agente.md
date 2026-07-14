@@ -93,9 +93,8 @@ tomar el caso completo (`C` o `H`), porque entonces el humano también la atiend
 
 1. **`C` (Queja)** → `QUEJA` / handoff. Atender primero; no se responde RAG antes.
 2. **`H` (Handoff)** → handoff. Un humano revisa (incluida cualquier duda `Q`).
-3. **`D` (Rechazo)** → cerrar. *(Comportamiento actual: si además hay `Q`, hoy el
-   código cierra y NO responde la duda — ver limitación L3. La intención de diseño
-   es responder la duda y luego cerrar.)*
+3. **`D` (Rechazo)** → cerrar. Si además hay `Q`, la duda se responde (o se avisa
+   con el fallback y se registra) **antes** de cerrar (L3 resuelto).
 4. **`K` (Cambio, solo PD2)** → re-enrutar a intake con el mensaje completo.
 5. **`A` + `Q` / `A` / `Q`** → matriz principal (sección 5/6).
 6. **`G` (Saludo)** → bienvenida/retoma cálida, **sin RAG**.
@@ -117,7 +116,7 @@ respondiendo a "¿desea continuar con el proceso X?"). Esto habilita
 | I-C | `C` | `start_flow` | `QUEJA` | Queja fuerte manda. |
 | I-H | `H` (con o sin `Q`) | `handoff` | `""` | Humano revisa; la duda la atiende la persona. |
 | I-D | `D` sin `Q` | `close` | `""` | Cerrar cordialmente. |
-| I-D+Q | `D` **y** `Q` | `close` (hoy) | `""` | **Comportamiento actual:** cierra; la duda NO se responde por separado (ver L3). Diseño deseado: `answer_and_clarify`. |
+| I-D+Q | `D` **y** `Q` | `close` | `""` | La duda se resuelve por RAG y se antepone al mensaje de cierre; si el RAG no responde, se antepone el fallback (asesor) y se registra la pregunta. El rechazo manda: nunca se convierte en aclaración (L3 resuelto). |
 
 ### 5.2 Matriz principal `A` × `Q` × `prev_confirm`
 
@@ -149,10 +148,11 @@ Los casos con `Q` (I-2, I-3, I-4) asumían que el RAG responde. Pero el intake
 también resuelve el RAG en [`_resolve_reception_rag`](../services/bot_agent/src/application/flow_graph.py:217),
 y si **no** hay respuesta cambia la decisión:
 
-| Caso | `Q` | `rag_ok` | Resultado real |
-| ---- | --- | -------- | -------------- |
-| I-2/3/4 | sí | sí | Se responde la duda (como indican esas filas). |
-| **I-RAG✗** | sí | no | **`action=clarify`** (sin bloquear): se registra la pregunta sin respuesta para el equipo y se pide precisar. NO se inventa respuesta ni se inicia flujo. |
+| Caso | `Q` | `rag_ok` | `A` (flujo explícito) | Resultado real |
+| ---- | --- | -------- | --------------------- | -------------- |
+| I-2/3/4 | sí | sí | — | Se responde la duda (como indican esas filas). |
+| **I-RAG✗** | sí | no | no | **`action=clarify`** (sin bloquear): se registra la pregunta sin respuesta para el equipo y se pide precisar. NO se inventa respuesta. |
+| **I-RAG✗+A** | sí | no | sí | **`action=answer_and_start_flow`**: la duda sin respaldo NO cancela la intención explícita. Se antepone el fallback (asesor verá la duda), se registra la pregunta sin respuesta y se entra igual al flujo — espejo de F-3 dentro de un flujo (avanzar + ofrecer asesor). |
 
 > **Corrección importante (antes bloqueaba 12 días).** Esta rama hacía `action=handoff`,
 > y en intake el handoff dispara [`_create_report_and_block`](../services/bot_agent/src/application/flow_graph.py:590)
@@ -162,6 +162,11 @@ y si **no** hay respuesta cambia la decisión:
 > (con bloqueo) queda reservado a disparadores humanos explícitos que marca el LLM:
 > pago, comprobante, "quiero hablar con alguien" (CASO DERIVACIÓN A HUMANO del prompt).
 > Cubierto por [`tests/unit/test_decision_guardrails.py`](../services/bot_agent/tests/unit/test_decision_guardrails.py) (`IntakeRagMissTests`).
+>
+> **I-RAG✗+A (capturas 2026-07-14):** degradar a `clarify` cuando el cliente ya nombró
+> el servicio ("quiero alquilar y tengo una duda…") ignoraba su intención y le
+> respondía "¿desea seguir con ese proceso?" — redundante. Ahora la duda se registra,
+> se avisa con el fallback y el flujo elegido arranca igual.
 
 **Invariante clave de PD1 (raíz del caso 1):**
 `A` sin `Q` (I-1, I-5) ⇒ **`answer` debe ir vacío**. Una respuesta previa solo
@@ -183,7 +188,7 @@ Dimensiones de apoyo:
 | ---- | ------------------ | ------ |
 | F-C | `complaint` | Si `flow=QUEJA` y `pending_report` → reporte directo. Si no → mensaje de handoff + reporte. |
 | F-H | `human_handoff` | Mensaje de handoff + reporte (resumen LLM). La duda la atiende la persona. |
-| F-D | `decline` | Mensaje de cierre + limpiar estado. Si traía `Q`, hoy NO se responde (ver L3). |
+| F-D | `decline` | Si traía `Q`, responder la duda (o fallback + registrar) y LUEGO mensaje de cierre + limpiar estado (L3 resuelto). |
 | F-K | `change_intent` | Reiniciar estado conservando historial → re-ejecutar **PD1** con el mensaje. |
 | F-G | `greeting` | Retomar la pregunta pendiente, **sin RAG**. |
 
@@ -260,9 +265,9 @@ de qué tipo es.
 
 | # | Hueco | Detalle | Estado |
 | - | ----- | ------- | ------ |
-| **L1** | **Duda lateral descartada si no avanza y el intent no es `question`** | En [`_evaluate_reply`](../services/bot_agent/src/application/flow_graph.py:312), cuando el router no avanza (`R=no`), solo se atiende la duda lateral si `intent=question`. Si el intent es `positive/negative/city/license/unknown` y NO avanza pero trae `has_off_flow_question=true`, la duda se **descarta** y solo se retoma la pregunta pendiente. Contradice "`Q` siempre se aborda". | Mitigado por el prompt (debe clasificar como `question` si no responde el paso), pero **no garantizado** por código. Pendiente de decidir si se enruta a `answer_off_flow` siempre que haya `Q` sin avance. |
-| L2 | **`city` sin `value` avanza como "otra ciudad"** | Ver F-iv-city. Un `intent=city` ambiguo no pide aclarar la sede; entra al ramal de ciudad no-Liberia. | A revisar si es el comportamiento deseado. |
-| L3 | **`D` + `Q` cierra sin responder la duda** | Tanto en intake ([`_handle_intake` close](../services/bot_agent/src/application/flow_graph.py:166)) como en flujo ([`_evaluate_reply` decline](../services/bot_agent/src/application/flow_graph.py:298)), un rechazo con duda adjunta cierra y descarta la duda. No existe acción "responder y cerrar". | Pendiente decidir: ¿responder la duda antes de cerrar? |
+| **L1** | **Duda lateral descartada si no avanza y el intent no es `question`** | Cuando el router no avanza (`R=no`) pero `has_off_flow_question=true`, la duda se atiende igual: se enruta a `answer_off_flow` con la duda lateral (F-4/F-5), sea cual sea el intent. | **Resuelto (2026-07-14)** en [`_evaluate_reply`](../services/bot_agent/src/application/flow_graph.py). Tests: `test_side_question_without_advance_*` en regresión. |
+| L2 | **`city` sin `value` avanza como "otra ciudad"** | Ver F-iv-city. Un `intent=city` ambiguo no pide aclarar la sede; entra al ramal de ciudad no-Liberia. | A revisar si es el comportamiento deseado (decisión de negocio). |
+| L3 | **`D` + `Q` cerraba sin responder la duda** | Un rechazo con duda adjunta ahora responde la duda (RAG) o antepone el fallback y registra la pregunta, y LUEGO cierra. En intake, el RAG-miss de un `close` nunca degrada a `clarify`: el rechazo manda. | **Resuelto (2026-07-14)** en `_handle_intake` (close), `_evaluate_reply` (decline) y `_resolve_reception_rag`. Tests: `test_decline_with_side_question_answers_before_closing`, `test_intake_close_with_answered_question_replies_before_goodbye`. |
 
 ---
 
