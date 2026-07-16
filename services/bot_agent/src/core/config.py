@@ -4,7 +4,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    # gpt-4.1-mini: sigue mejor instrucciones largas (playbooks + catálogo) y
+    # es el modelo de decisión del agente único. temperature=0 en decisiones.
+    OPENAI_MODEL: str = "gpt-4.1-mini"
     EVAL_JUDGE_MODEL: str = "gpt-4o-mini"
     # Timeout/reintentos de las llamadas al LLM. El default del SDK es 600s con
     # 2 reintentos: una llamada colgada retendría un hilo del worker ~30 min y
@@ -34,6 +36,17 @@ class Settings(BaseSettings):
     NOCODB_RAG_WEBHOOK_TOKEN: str = ""
     NOCODB_TOKEN: str = ""
     RAG_CONVERSATION_HISTORY_LIMIT: int = 5
+    # Historial que ve el agente único por turno. Los fragmentos se guardan
+    # como etiquetas [[frag:ID]] (no texto completo), así que cabe más contexto
+    # sin inflar Redis ni el prompt.
+    AGENT_HISTORY_LIMIT: int = 12
+    # Recordatorios inteligentes: tras responder, si el cliente no contesta en
+    # FOLLOWUP_FIRST_DELAY_SECONDS se evalúa un recordatorio con LLM; los
+    # siguientes niveles esperan FOLLOWUP_NEXT_DELAY_SECONDS. Nunca se envían
+    # más de FOLLOWUP_MAX_REMINDERS sin respuesta del cliente (anti-bucle).
+    FOLLOWUP_FIRST_DELAY_SECONDS: int = 40
+    FOLLOWUP_NEXT_DELAY_SECONDS: int = 7200
+    FOLLOWUP_MAX_REMINDERS: int = 2
     RAG_EMBEDDING_MODEL: str = "text-embedding-3-small"
     RAG_SYNC_TTL_SECONDS: int = 300
     GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE: str = "https://drive.google.com/uc?export=download&id={image_id}"

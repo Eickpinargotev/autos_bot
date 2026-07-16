@@ -1,8 +1,8 @@
-from src.application.flow_graph import FlowGraphRunner, FlowProcessingResult
+from src.application.agent_pipeline import AgentPipeline, FlowProcessingResult
 from src.domain.entities import Channel, UserState
 
 
-_runner = FlowGraphRunner()
+_pipeline = AgentPipeline()
 
 
 def process_fsm(
@@ -12,4 +12,6 @@ def process_fsm(
     channel: Channel | str = Channel.TELEGRAM,
     user_name: str = "Desconocido",
 ) -> FlowProcessingResult:
-    return _runner.run(channel, user_id, text, user_name=user_name)
+    # Nombre histórico: el punto de entrada del turno conversacional. Desde el
+    # modelo único ya no hay máquina de estados; delega en el AgentPipeline.
+    return _pipeline.run(channel, user_id, text, user_name=user_name)

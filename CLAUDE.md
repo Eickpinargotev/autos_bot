@@ -40,19 +40,18 @@ docker compose -f docker-compose.local.yml run --rm bot_agent pytest tests/unit 
 
 Hay **tres niveles** de tests; respétalos al escribir nuevos:
 
-1. **Deterministas** (preferidos): mockean el LLM (`reception.decide`, `classify_reply`,
-   `rag.answer_question`). Corren con o sin key. Para lógica de flujo/router usa SIEMPRE este
-   estilo (regla del proyecto: *no depender de OpenAI real en tests determinísticos*).
+1. **Deterministas** (preferidos): mockean el LLM (`agent.decide`, `followup.decide`,
+   `rag.answer_question`). Corren con o sin key. Para lógica de pipeline/guardrails usa
+   SIEMPRE este estilo (regla del proyecto: *no depender de OpenAI real en tests
+   determinísticos*). Ver `tests/unit/test_agent_pipeline.py` y `test_smart_reminder.py`.
 2. **Integración con LLM real**: decóralos con `@requires_llm` (definido en
-   `tests/regression/test_flow_graph_regressions.py`), que hace skip si no hay key. Úsalos
-   solo cuando el objetivo sea verificar el juicio del LLM, no el cableado del grafo.
-3. **Juez LLM** (`SemanticJudge`): corre solo con `RUN_LLM_EVALS=1` + key
-   (`SemanticJudge.enabled()`).
+   `tests/regression/test_unified_agent_llm.py`), que hace skip si no hay key. Úsalos
+   solo cuando el objetivo sea verificar el juicio del LLM, no el cableado del pipeline.
 
-- Las llamadas de **clasificación/recepción/juez** usan `temperature=0` (decisiones
+- Las llamadas de **decisión del agente y recordatorio** usan `temperature=0` (decisiones
   deterministas). No subas la temperatura en esas tareas; mantenlas estables. La generación
   de texto libre (RAG, publicidad) puede usar otra temperatura.
-- Comandos: ver `README.md` (sección Tests) y `tests/conversation_evals/README.md`.
+- Comandos: ver `README.md` (sección Tests).
 
 ## 3. Los dos docker-compose (no romper ninguno)
 
@@ -70,17 +69,19 @@ Hay **tres niveles** de tests; respétalos al escribir nuevos:
 
 Capas en `services/bot_agent/src/`: `domain/`, `application/`, `infrastructure/`, `core/`.
 
-Pipeline de conversación:
-1. `application/reception_agent.py` — intake con LLM para usuarios nuevos/sin flujo.
-2. `application/response_classifier.py` — clasifica la respuesta del usuario dentro de un
-   flujo activo (intent + value + pregunta lateral), vía LLM.
-3. `application/flow_router.py` — enrutamiento **determinista** (estado → siguiente nodo).
-4. `application/flow_graph.py` — orquestación con LangGraph (LangGraph StateGraph).
+Pipeline de conversación (**modelo único**, ver `docs/modelo_unico.md`):
+1. `application/unified_agent.py` — UNA decisión LLM por turno (`gpt-4.1-mini`,
+   `temperature=0`): acción (`reply|handoff|close|city_invitation`), mensajes con etiquetas
+   `[[frag:ID]]`/`[[rag]]`, pendiente y reporte. También `FollowupAgent` (recordatorios).
+2. `application/agent_pipeline.py` — guardrails **deterministas**: expansión de fragmentos
+   literales y RAG, anti-bucle, reporte + bloqueo en handoff, estado e historial.
+3. `application/fragment_catalog.py` — fragmentos literales derivados de `mensajes.json`
+   (variantes `_1` por registro de keyword resueltas por código).
 
 Reglas para cambios:
-- Para cambiar **el comportamiento del flujo** (qué intención avanza, a qué nodo), edita el
-  **prompt** (`core/prompts.py`, siguiendo §6) o el **router** (`flow_router.py`). No cablees
-  lógica en el grafo.
+- Para cambiar **el comportamiento del agente** (qué intención hace qué, playbooks), edita el
+  **prompt** (`core/prompts.py`, siguiendo §6). Los efectos duros (bloqueos, reportes,
+  anti-bucle, expansión) viven en `agent_pipeline.py`; no los muevas al prompt.
 - Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §7). No metas
   texto de negocio en el código ni en los prompts.
 
@@ -153,7 +154,7 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
   `src/application/message_catalog.py` (busca primero `/mensajes.json`). No lo muevas ni
   dupliques.
 - **Los prompts deben ser genéricos.** El test `tests/unit/test_prompt_contracts.py` prohíbe
-  términos específicos del catálogo en `REPLY_EVALUATION_PROMPT` y `RECEPTION_AGENT_PROMPT`
+  términos específicos del catálogo en `UNIFIED_AGENT_PROMPT` y `FOLLOWUP_AGENT_PROMPT`
   (p. ej. `casco`, `programar cita`, `qué pasa si pierde`). Usa ejemplos genéricos.
 - Ese mismo test exige que ciertas frases clave **existan** en los prompts. Si reescribes un
   prompt, conserva esas frases o actualiza el test de forma deliberada.

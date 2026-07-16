@@ -1,0 +1,126 @@
+"""Medidas de seguridad del recordatorio inteligente (anti-bucle).
+
+El LLM solo redacta; las condiciones duras (buffer pendiente, bloqueado,
+nada pendiente, tope de recordatorios, tarea obsoleta) las decide el código
+y se prueban aquí de forma determinista.
+"""
+
+import os
+import unittest
+from contextlib import ExitStack
+from unittest.mock import MagicMock, patch
+
+
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
+os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/test")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
+os.environ.setdefault("NOCODB_INVITACIONES_URL", "http://nocodb.test/invitaciones")
+os.environ.setdefault("NOCODB_REPORTES_URL", "http://nocodb.test/reportes")
+os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "")
+os.environ.setdefault("OPENAI_API_KEY", "")
+
+from src.core.config import settings
+from src.infrastructure.repositories.conversation_state_repo import ConversationState
+from src.infrastructure.tasks import celery_app as tasks
+
+
+def _pending_state(level: int = 0) -> ConversationState:
+    return ConversationState(
+        flow="AGENT",
+        last_question="¿Pudo llenar el formulario de reservación?",
+        awaiting_reply=True,
+        reminder_level=level,
+        conversation_history=[{"flow": "AGENT", "node": "", "type": "agent_reply", "user": "ok", "bot": ["[[frag:GENERAL.G16]]"]}],
+    )
+
+
+class SmartReminderHarness(ExitStack):
+    def __init__(self, state: ConversationState, *, buffer_pending=False, blocked=False, followup=None):
+        super().__init__()
+        self.state = state
+        self.buffer_pending = buffer_pending
+        self.blocked = blocked
+        self.followup_decision = followup or MagicMock(send=True, message="📌 Hola!!! ¿Pudo llenar el formulario?")
+
+    def __enter__(self):
+        super().__enter__()
+        self.enter_context(patch.object(tasks.BufferService, "has_pending", return_value=self.buffer_pending))
+        blocked_repo = MagicMock()
+        blocked_repo.is_blocked.return_value = self.blocked
+        self.enter_context(patch.object(tasks, "PostgresUserRepo", return_value=blocked_repo))
+        self.enter_context(patch.object(tasks.ConversationStateRepo, "get", return_value=self.state))
+        self.set_mock = self.enter_context(patch.object(tasks.ConversationStateRepo, "set"))
+        self.send_mock = self.enter_context(patch.object(tasks.ChannelSenderRegistry, "send"))
+        followup_agent = MagicMock()
+        followup_agent.decide.return_value = self.followup_decision
+        self.followup_cls = self.enter_context(
+            patch("src.application.unified_agent.FollowupAgent", return_value=followup_agent)
+        )
+        self.apply_async = self.enter_context(patch.object(tasks.send_smart_reminder, "apply_async"))
+        self.save_task = self.enter_context(patch.object(tasks.ReminderService, "save_task"))
+        return self
+
+
+class SmartReminderGuardrailTests(unittest.TestCase):
+    def test_skips_when_user_reply_is_buffered(self):
+        with SmartReminderHarness(_pending_state(), buffer_pending=True) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+        h.send_mock.assert_not_called()
+        h.followup_cls.assert_not_called()
+
+    def test_skips_when_user_is_blocked(self):
+        with SmartReminderHarness(_pending_state(), blocked=True) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+        h.send_mock.assert_not_called()
+
+    def test_skips_when_nothing_is_pending(self):
+        state = ConversationState(flow="AGENT", awaiting_reply=False, last_question="")
+        with SmartReminderHarness(state) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+        h.send_mock.assert_not_called()
+
+    def test_skips_when_reminder_cap_reached(self):
+        with SmartReminderHarness(_pending_state(level=settings.FOLLOWUP_MAX_REMINDERS)) as h:
+            tasks.send_smart_reminder("whatsapp", "506", settings.FOLLOWUP_MAX_REMINDERS + 1)
+        h.send_mock.assert_not_called()
+
+    def test_skips_stale_task_for_already_sent_level(self):
+        with SmartReminderHarness(_pending_state(level=1)) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+        h.send_mock.assert_not_called()
+
+    def test_respects_llm_decision_not_to_remind(self):
+        quiet = MagicMock(send=False, message="")
+        with SmartReminderHarness(_pending_state(), followup=quiet) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+        h.send_mock.assert_not_called()
+        h.set_mock.assert_not_called()
+
+
+class SmartReminderSendTests(unittest.TestCase):
+    def test_sends_updates_state_and_schedules_next_level(self):
+        state = _pending_state()
+        with SmartReminderHarness(state) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+
+        h.send_mock.assert_called_once()
+        saved = h.set_mock.call_args.args[2]
+        self.assertEqual(saved.reminder_level, 1)
+        self.assertEqual(saved.conversation_history[-1]["type"], "smart_reminder")
+        h.apply_async.assert_called_once()
+        args, kwargs = h.apply_async.call_args
+        self.assertEqual(args[0][2], 2)
+        self.assertEqual(kwargs["countdown"], settings.FOLLOWUP_NEXT_DELAY_SECONDS)
+        h.save_task.assert_called_once()
+
+    def test_last_allowed_level_does_not_reschedule(self):
+        state = _pending_state(level=settings.FOLLOWUP_MAX_REMINDERS - 1)
+        with SmartReminderHarness(state) as h:
+            tasks.send_smart_reminder("whatsapp", "506", settings.FOLLOWUP_MAX_REMINDERS)
+
+        h.send_mock.assert_called_once()
+        h.apply_async.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -11,8 +11,9 @@ os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "http://nocodb.test/conversati
 os.environ.setdefault("NOCODB_TOKEN", "test-token")
 
 from src.domain.entities import Channel
-from src.application.reception_agent import ReceptionAgent
+from src.application.unified_agent import UnifiedAgent
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
+from src.infrastructure.repositories.conversation_state_repo import ConversationState
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
 
@@ -110,27 +111,27 @@ class ConversationToolLoggingTests(unittest.TestCase):
         self.assertTrue(kwargs["input_data"]["question"].endswith("...[truncated]"))
         self.assertEqual(kwargs["output_data"]["items"][-1]["_truncated_items"], 2)
 
-    def test_reception_decide_logs_error_when_llm_falls_back(self):
+    def test_agent_decide_logs_error_when_llm_falls_back(self):
         with patch(
             "src.infrastructure.logging.tool_call_logger.ConversationLogRepository.log_tool_event",
             return_value=True,
         ) as log_mock, patch(
-            "src.application.reception_agent.settings.OPENAI_API_KEY",
+            "src.application.unified_agent.settings.OPENAI_API_KEY",
             "test-key",
         ), patch(
-            "src.application.reception_agent.client.chat.completions.create",
+            "src.application.unified_agent.client.chat.completions.create",
             side_effect=RuntimeError("openai failed"),
         ):
-            decision = ReceptionAgent().decide(
+            decision = UnifiedAgent().decide(
                 "Hola, quiero información",
-                [],
+                ConversationState(),
                 client_id="5061",
                 canal=Channel.WHATSAPP,
             )
 
         self.assertTrue(decision.action)
         kwargs = log_mock.call_args.kwargs
-        self.assertEqual(kwargs["tool_name"], "reception.decide")
+        self.assertEqual(kwargs["tool_name"], "agent.decide")
         self.assertEqual(kwargs["status"], "error")
         self.assertIn("openai failed", kwargs["error"])
 

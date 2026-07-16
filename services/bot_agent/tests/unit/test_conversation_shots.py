@@ -12,7 +12,7 @@ os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "")
 os.environ.setdefault("NOCODB_CONVERSATION_SHOTS_URL", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
-from src.application.flow_graph import FlowProcessingResult
+from src.application.agent_pipeline import FlowProcessingResult
 from src.domain.entities import Channel, UserState
 from src.infrastructure.evals.conversation_shots import (
     ConversationShotBuilder,
@@ -160,19 +160,35 @@ class ConversationShotTests(unittest.TestCase):
         self.assertEqual(shot["state_before"]["flow"], "GENERAL")
         self.assertEqual(shot["state_after"]["node"], "G35")
 
-    def test_flow_reminder_does_not_save_conversation_shot(self):
+    def test_smart_reminder_does_not_save_conversation_shot(self):
+        state = ConversationState(
+            last_question="¿Pudo llenar el formulario?",
+            awaiting_reply=True,
+            reminder_level=0,
+        )
+        blocked_repo = MagicMock()
+        blocked_repo.is_blocked.return_value = False
+        followup = MagicMock()
+        followup.decide.return_value = MagicMock(send=True, message="📌 Hola!!! ¿Pudo llenar el formulario?")
         with patch(
-            "src.infrastructure.tasks.celery_app.get_node_data",
-            return_value={"recordatorio": {"mensajes": ["recordatorio"], "reporte": "x"}},
+            "src.infrastructure.tasks.celery_app.BufferService.has_pending", return_value=False
+        ), patch(
+            "src.infrastructure.tasks.celery_app.PostgresUserRepo", return_value=blocked_repo
         ), patch("src.infrastructure.tasks.celery_app.ChannelSenderRegistry.send"), patch(
             "src.infrastructure.tasks.celery_app.ConversationStateRepo.get",
-            return_value=ConversationState(),
+            return_value=state,
         ), patch("src.infrastructure.tasks.celery_app.ConversationStateRepo.set"), patch(
+            "src.application.unified_agent.FollowupAgent", return_value=followup
+        ), patch(
+            "src.infrastructure.tasks.celery_app.ReminderService.save_task"
+        ), patch(
+            "src.infrastructure.tasks.celery_app.send_smart_reminder.apply_async"
+        ), patch(
             "src.infrastructure.tasks.celery_app.ConversationShotRepository.save"
         ) as save_mock:
-            from src.infrastructure.tasks.celery_app import send_flow_reminder
+            from src.infrastructure.tasks.celery_app import send_smart_reminder
 
-            send_flow_reminder("whatsapp", "5061", "GENERAL", "G1")
+            send_smart_reminder("whatsapp", "5061", 1)
 
         save_mock.assert_not_called()
 

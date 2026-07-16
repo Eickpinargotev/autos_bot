@@ -1,110 +1,74 @@
 import unittest
 
-from src.core.prompts import RECEPTION_AGENT_PROMPT, REPLY_EVALUATION_PROMPT
+from src.core.prompts import FOLLOWUP_AGENT_PROMPT, UNIFIED_AGENT_PROMPT
 
 
-class PromptContractTests(unittest.TestCase):
-    def test_reception_prompt_routes_by_intent_and_questions(self):
-        self.assertIn('usa action="start_flow" sin hacer preguntas extra', RECEPTION_AGENT_PROMPT)
-        self.assertIn("No hagas preguntas previas que dupliquen preguntas del flujo formal", RECEPTION_AGENT_PROMPT)
-        self.assertIn("duda informativa", RECEPTION_AGENT_PROMPT)
+class UnifiedAgentPromptContractTests(unittest.TestCase):
+    """Contratos del prompt del agente único.
 
-    def test_reception_prompt_confirms_before_flow_when_initial_message_has_real_question(self):
-        self.assertIn("mezcla intención comercial con una duda informativa real", RECEPTION_AGENT_PROMPT)
-        self.assertIn("no inicies el flujo todavía", RECEPTION_AGENT_PROMPT)
-        self.assertIn('action="answer_and_clarify"', RECEPTION_AGENT_PROMPT)
-        self.assertIn('action="start_flow"', RECEPTION_AGENT_PROMPT)
-        self.assertIn('usa action="close"', RECEPTION_AGENT_PROMPT)
-        self.assertIn("la cortesía no cancela la confirmación", RECEPTION_AGENT_PROMPT)
+    Frases clave que el pipeline y los guardrails asumen presentes. Si se
+    reescribe el prompt hay que conservarlas o actualizar este test de forma
+    deliberada (CLAUDE.md §6/§7).
+    """
 
-    def test_reception_prompt_keeps_prompt_rules_out_of_business_knowledge(self):
-        self.assertIn("No uses prompt_rules para conocimiento operativo o de negocio", RECEPTION_AGENT_PROMPT)
-        self.assertIn('usa answer_source="rag"', RECEPTION_AGENT_PROMPT)
+    def test_prompt_defines_actions_and_tokens(self):
+        self.assertIn('"action": "reply|handoff|close|city_invitation"', UNIFIED_AGENT_PROMPT)
+        self.assertIn("[[frag:ID]]", UNIFIED_AGENT_PROMPT)
+        self.assertIn("[[rag]]", UNIFIED_AGENT_PROMPT)
+        self.assertIn("Nunca reescribas, resumas ni parafrasees el contenido de un fragmento", UNIFIED_AGENT_PROMPT)
 
-    def test_reception_prompt_treats_greetings_without_handoff_or_rag(self):
-        self.assertIn("solo un saludo o cortesía", RECEPTION_AGENT_PROMPT)
-        self.assertIn("un saludo no es una pregunta informativa", RECEPTION_AGENT_PROMPT)
+    def test_prompt_priorities_cover_escalation_and_handoff(self):
+        self.assertIn("QUEJA FUERTE O INSATISFACCIÓN", UNIFIED_AGENT_PROMPT)
+        self.assertIn("CASO PARA HUMANO", UNIFIED_AGENT_PROMPT)
+        self.assertIn("REPORTE PENDIENTE", UNIFIED_AGENT_PROMPT)
+        self.assertIn("agente especializado", UNIFIED_AGENT_PROMPT)
+        self.assertIn("Pregúntate qué diría un empleado real", UNIFIED_AGENT_PROMPT)
 
-    def test_reply_prompt_distinguishes_intent_from_side_questions(self):
-        self.assertIn("Las expresiones de intención comercial o solicitud de ayuda", REPLY_EVALUATION_PROMPT)
-        self.assertIn("clasifica la respuesta principal del flujo", REPLY_EVALUATION_PROMPT)
-        self.assertIn("duda real que requiere una respuesta independiente", REPLY_EVALUATION_PROMPT)
-        self.assertIn("intent decline", REPLY_EVALUATION_PROMPT)
-        self.assertIn("intent change_intent", REPLY_EVALUATION_PROMPT)
+    def test_prompt_forbids_inventing_business_data(self):
+        self.assertIn("No inventes NUNCA precios, enlaces, horarios", UNIFIED_AGENT_PROMPT)
 
-    def test_reply_prompt_delegates_greeting_and_handoff_to_the_model(self):
-        self.assertIn("intent greeting", REPLY_EVALUATION_PROMPT)
-        self.assertIn("intent human_handoff", REPLY_EVALUATION_PROMPT)
-        self.assertIn("Nunca trates un saludo o una simple cortesía como pregunta", REPLY_EVALUATION_PROMPT)
-        self.assertIn("human_handoff|greeting|unknown", REPLY_EVALUATION_PROMPT)
+    def test_prompt_requires_history_awareness(self):
+        # El corazón del modelo único: no repreguntar datos ya dados y poder
+        # saltar pasos (el caso "quiero alquilar una moto").
+        self.assertIn("NUNCA vuelvas a preguntar un dato que el cliente ya dio", UNIFIED_AGENT_PROMPT)
+        self.assertIn("sáltate los pasos ya resueltos", UNIFIED_AGENT_PROMPT)
 
-    def test_prompt_contract_avoids_log_specific_terms(self):
-        combined = f"{RECEPTION_AGENT_PROMPT}\n{REPLY_EVALUATION_PROMPT}"
-        self.assertNotIn("casco", combined.lower())
-        self.assertNotIn("programar cita", combined.lower())
-        self.assertNotIn("qué pasa si pierde", combined.lower())
+    def test_prompt_has_anti_loop_rule(self):
+        self.assertIn("No repitas la misma aclaración", UNIFIED_AGENT_PROMPT)
 
-    def test_reception_prompt_exposes_rag_scope_and_handoff_boundary(self):
-        # El prompt no debe estar "ciego": conoce qué temas cubre el RAG (categorías,
-        # no datos) y cuándo derivar a un humano por estar fuera de alcance.
-        self.assertIn("ALCANCE DEL CONOCIMIENTO", RECEPTION_AGENT_PROMPT)
-        self.assertIn("Temas que el RAG SÍ puede responder", RECEPTION_AGENT_PROMPT)
-        self.assertIn("Fuera de alcance", RECEPTION_AGENT_PROMPT)
-        self.assertIn("multas de tránsito", RECEPTION_AGENT_PROMPT)
-        # Los tres modos de atención: ejecutar (flujo) / responder (rag) / derivar.
-        self.assertIn("answer_source=rag", RECEPTION_AGENT_PROMPT)
-        self.assertIn("Mencionar el tema NO es querer ejecutarlo", RECEPTION_AGENT_PROMPT)
+    def test_prompt_avoids_intent_by_exact_phrase(self):
+        self.assertIn("nunca por palabras sueltas ni frases exactas", UNIFIED_AGENT_PROMPT)
 
-    def test_reply_prompt_references_known_topics_for_side_questions(self):
-        self.assertIn("Como referencia de qué es una duda informativa real", REPLY_EVALUATION_PROMPT)
-
-    def test_reception_prompt_distinguishes_win_from_theory_exam(self):
-        # Aprobar el TEÓRICO es parte del proceso (GENERAL), no WIN (que es la
-        # prueba de manejo / examen práctico final). Evita el misrouting a WIN.
-        self.assertIn("Aprobar el examen TEÓRICO no es WIN", RECEPTION_AGENT_PROMPT)
-
-    def test_reception_prompt_knows_admin_tramites_have_no_flow(self):
-        # renovación/homologación/etc. no tienen nodo de entrada en el router:
-        # se responden por RAG y se derivan a humano para ejecutar.
-        self.assertIn("NO tienen flujo", RECEPTION_AGENT_PROMPT)
-        self.assertIn("No los fuerces dentro de GENERAL", RECEPTION_AGENT_PROMPT)
-
-    def test_reception_prompt_does_not_pre_ask_flow_qualifiers(self):
-        self.assertIn("No preguntes tú esos datos", RECEPTION_AGENT_PROMPT)
-
-    def test_reception_prompt_treats_bare_menu_selection_as_explicit_intent(self):
-        # Si el bot ya ofreció opciones nombradas y el cliente responde con una
-        # sola palabra que nombra una de ellas (sin verbo), cuenta como
-        # intención explícita (start_flow), no como contexto ambiguo que siga
-        # aclarando o escale a handoff.
-        self.assertIn("Seleccionar una opción ya ofrecida es concretar", RECEPTION_AGENT_PROMPT)
-
-    def test_reception_clarify_is_adaptive_not_a_fixed_phrase(self):
-        # Evita el overfitting: el modelo no debe copiar un ejemplo literal de
-        # pregunta de aclaración (causaba el bucle de la misma frase repetida).
-        self.assertIn("No copies una frase fija", RECEPTION_AGENT_PROMPT)
-        self.assertIn("NO repitas la misma pregunta", RECEPTION_AGENT_PROMPT)
-        # El ejemplo literal que el modelo loro-repetía ya no debe estar como guion.
-        self.assertNotIn(
-            "¿está buscando ayuda con su licencia, dictamen médico, clases de manejo o alquiler de vehículo?",
-            RECEPTION_AGENT_PROMPT,
-        )
+    def test_prompt_keeps_playbooks_by_intention(self):
+        for playbook in ("LICENCIA", "ALQUILER", "CLASES", "DICTAMEN", "WIN", "CURSO TEÓRICO POR CIUDAD"):
+            self.assertIn(playbook, UNIFIED_AGENT_PROMPT)
 
     def test_prompts_keep_scope_generic_without_catalog_values(self):
-        # El mapa de alcance debe ser de CATEGORÍAS, nunca datos del catálogo
-        # (precios, sinpe, links, marcas de vehículo). Refuerza CLAUDE.md §6.
-        combined = f"{RECEPTION_AGENT_PROMPT}\n{REPLY_EVALUATION_PROMPT}".lower()
-        for leaked in ("60023618", "colones", "https://", "smart", "spark", "calendly"):
+        # El conocimiento de negocio variable (precios, sinpe, links, marcas)
+        # vive en mensajes.json y el RAG, nunca en la constante del prompt.
+        combined = f"{UNIFIED_AGENT_PROMPT}\n{FOLLOWUP_AGENT_PROMPT}".lower()
+        for leaked in ("60023618", "61103205", "colones", "https://", "smart", "spark", "calendly", "casco"):
             self.assertNotIn(leaked, combined)
 
     def test_prompts_keep_instructions_separate_from_turn_data(self):
-        # Las instrucciones son estáticas (van en el mensaje system, cacheables);
-        # los datos del turno llegan como JSON en el mensaje del usuario. Por eso
-        # los prompts NO deben interpolar datos del turno (placeholders .format).
-        for prompt in (RECEPTION_AGENT_PROMPT, REPLY_EVALUATION_PROMPT):
-            for placeholder in ("{mensaje}", "{flujo}", "{nodo}", "{pregunta}", "{conversation_history}"):
+        # Instrucciones estáticas (system, cacheables); datos del turno como
+        # JSON en el mensaje del usuario. Sin placeholders .format.
+        for prompt in (UNIFIED_AGENT_PROMPT, FOLLOWUP_AGENT_PROMPT):
+            for placeholder in ("{mensaje}", "{historial}", "{pendiente}", "{conversation_history}"):
                 self.assertNotIn(placeholder, prompt)
             self.assertIn("llegan como JSON en el mensaje del usuario", prompt)
+
+
+class FollowupPromptContractTests(unittest.TestCase):
+    def test_prompt_defines_output_and_restraint(self):
+        self.assertIn('{"send": true|false', FOLLOWUP_AGENT_PROMPT)
+        self.assertIn("CUÁNDO NO ENVIAR", FOLLOWUP_AGENT_PROMPT)
+        self.assertIn("no lo presiones", FOLLOWUP_AGENT_PROMPT)
+        self.assertIn("No inventes datos", FOLLOWUP_AGENT_PROMPT)
+
+    def test_prompt_keeps_house_style(self):
+        self.assertIn("📌 Hola!!!", FOLLOWUP_AGENT_PROMPT)
+        self.assertIn("Máximo una pregunta", FOLLOWUP_AGENT_PROMPT)
 
 
 if __name__ == "__main__":

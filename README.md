@@ -1,6 +1,6 @@
 # AUTOS — Bot de recepción (escuela de manejo)
 
-Agente conversacional de recepción para Telegram/WhatsApp construido con **LangGraph**.
+Agente conversacional de recepción para Telegram/WhatsApp basado en un **agente único con LLM** (ver `docs/modelo_unico.md`).
 Interpreta lenguaje natural (sin regex ni listas de palabras clave), responde con RAG sobre
 una base de conocimiento y registra las conversaciones en NocoDB.
 
@@ -210,19 +210,13 @@ docker compose -f docker-compose.local.yml run --rm bot_agent pytest
 docker compose -f docker-compose.local.yml run --rm bot_agent pytest tests/unit
 ```
 
-Hay **tres niveles** de tests:
+Hay **dos niveles** de tests:
 
 1. **Deterministas** (la mayoría): mockean el LLM. Corren siempre, con o sin key.
-2. **Integración con LLM real** (`@requires_llm` en `tests/regression`): ejercitan el
-   clasificador/recepción reales. Con `OPENAI_API_KEY` se ejecutan; **sin key se saltan**
-   (no fallan). Las llamadas de clasificación/recepción usan `temperature=0` para ser
-   estables.
-3. **Juez LLM semántico** (`tests/conversation_evals/test_llm_judge_evals.py`): evalúa la
-   calidad de la respuesta con un LLM como juez. Solo corre con `RUN_LLM_EVALS=1` + key:
-
-   ```bash
-   docker compose -f docker-compose.local.yml run --rm -e RUN_LLM_EVALS=1 bot_agent pytest
-   ```
+2. **Integración con LLM real** (`@requires_llm` en
+   `tests/regression/test_unified_agent_llm.py`): ejercitan el juicio real del agente
+   único. Con `OPENAI_API_KEY` se ejecutan; **sin key se saltan** (no fallan). Las
+   llamadas de decisión usan `temperature=0` para ser estables.
 
 > Para forzar el modo sin LLM (solo deterministas), pasa `-e OPENAI_API_KEY=`:
 > `docker compose -f docker-compose.local.yml run --rm -e OPENAI_API_KEY= bot_agent pytest`

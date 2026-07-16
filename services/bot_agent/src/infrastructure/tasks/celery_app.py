@@ -38,6 +38,8 @@ _max_countdown_seconds = max(
     settings.PUB_DELAY_1_SEC,
     settings.PUB_DELAY_2_SEC,
     settings.PUB_DELAY_3_SEC,
+    settings.FOLLOWUP_FIRST_DELAY_SECONDS,
+    settings.FOLLOWUP_NEXT_DELAY_SECONDS,
     86400,
 )
 celery_app.conf.broker_transport_options = {
@@ -122,7 +124,7 @@ def _process_buffered_messages_locked(channel_value: Channel, user_id: str, user
             ChannelSenderRegistry.send(channel_value, user_id, msg)
 
     if result.reminder:
-        schedule_flow_reminder_for_result(channel_value, user_id, result.reminder)
+        schedule_smart_reminder_for_result(channel_value, user_id, result.reminder)
 
 
 def _save_conversation_shot(
@@ -201,43 +203,67 @@ def cancel_ad_reminder_stage(channel: str, user_id: str, stage: int):
         celery_app.control.revoke(task_id, terminate=True)
         redis_client.delete(f"{scoped_key('ad_reminder_task', channel, user_id)}:{stage}")
 
-def schedule_flow_reminder_for_result(channel: Channel | str, user_id: str, reminder: dict):
-    task = send_flow_reminder.apply_async(
-        (Channel(channel).value if isinstance(channel, str) else channel.value, user_id, reminder["flow"], reminder["node"], reminder.get("level", 1)),
-        countdown=reminder.get("seconds", 7200),
+def schedule_smart_reminder_for_result(channel: Channel | str, user_id: str, reminder: dict):
+    channel_value = Channel(channel).value if isinstance(channel, str) else channel.value
+    task = send_smart_reminder.apply_async(
+        (channel_value, user_id, reminder.get("level", 1)),
+        countdown=reminder.get("seconds", settings.FOLLOWUP_FIRST_DELAY_SECONDS),
     )
     ReminderService.save_task(channel, user_id, task.id)
 
 @celery_app.task
-def send_flow_reminder(channel: str, user_id: str, flow: str, node: str, reminder_level: int = 1):
+def send_smart_reminder(channel: str, user_id: str, level: int = 1):
+    """Recordatorio inteligente: retoma la conversación si quedó algo pendiente.
+
+    El LLM decide si conviene recordar y redacta el mensaje; el código aplica
+    las medidas de seguridad duras (anti-bucle): buffer pendiente, cliente
+    bloqueado, nada pendiente, tope de recordatorios o tarea obsoleta.
+    """
     # El usuario pudo responder justo cuando vence el recordatorio: su mensaje
     # sigue en el buffer (aún sin procesar), pero ya respondió. No enviamos el
-    # recordatorio ni reprogramamos: el process_buffered_messages pendiente
-    # cancelará/reprogramará los recordatorios según el nuevo estado.
+    # recordatorio: el process_buffered_messages pendiente cancelará/reagendará
+    # según el nuevo estado.
     if BufferService.has_pending(user_id, channel):
         return
 
-    node_data = get_node_data(flow, node)
-    reminder = _reminder_at_level(node_data.get("recordatorio"), reminder_level)
-    if not reminder:
+    if PostgresUserRepo().is_blocked(user_id, channel=channel):
         return
 
-    messages = reminder.get("mensajes", [])
-    for msg in messages:
-        ChannelSenderRegistry.send(channel, user_id, msg)
-
     state = ConversationStateRepo.get(channel, user_id)
-    state.pending_report = reminder.get("reporte", "")
-    state.last_messages = messages
-    state.last_question = state.last_question or _extract_last_question(messages)
-    state.reminder_level = reminder_level
+    if not state.awaiting_reply or not state.last_question:
+        return
+    if state.reminder_level >= settings.FOLLOWUP_MAX_REMINDERS:
+        return
+    if state.reminder_level >= level:
+        return  # Tarea vieja: este nivel ya se envió.
+
+    from src.application.unified_agent import FollowupAgent
+
+    decision = FollowupAgent().decide(state, client_id=user_id, canal=channel)
+    if not decision.send or not decision.message:
+        return
+
+    ChannelSenderRegistry.send(channel, user_id, decision.message)
+
+    state.reminder_level = level
+    state.last_messages = [decision.message]
+    state.conversation_history = [
+        *state.conversation_history,
+        {
+            "flow": "AGENT",
+            "node": "",
+            "type": "smart_reminder",
+            "user": "",
+            "bot": [decision.message],
+            "pending": state.last_question,
+        },
+    ][-settings.AGENT_HISTORY_LIMIT:]
     ConversationStateRepo.set(channel, user_id, state)
 
-    next_reminder = reminder.get("recordatorio")
-    if next_reminder:
-        task = send_flow_reminder.apply_async(
-            (channel, user_id, flow, node, reminder_level + 1),
-            countdown=next_reminder.get("segundos", 7200),
+    if level < settings.FOLLOWUP_MAX_REMINDERS:
+        task = send_smart_reminder.apply_async(
+            (channel, user_id, level + 1),
+            countdown=settings.FOLLOWUP_NEXT_DELAY_SECONDS,
         )
         ReminderService.save_task(channel, user_id, task.id)
 
@@ -254,21 +280,6 @@ def create_flow_report_and_block(channel: str, user_id: str, report_reason: str)
     from src.application.runtime_context import clear_user_runtime_context
 
     clear_user_runtime_context(channel, user_id, cancel_scheduled=False, clear_reports=False)
-
-def _reminder_at_level(reminder: dict | None, level: int) -> dict | None:
-    current = reminder
-    current_level = 1
-    while current and current_level < level:
-        current = current.get("recordatorio")
-        current_level += 1
-    return current
-
-def _extract_last_question(messages: list[str]) -> str:
-    for msg in reversed(messages):
-        for line in reversed([line.strip() for line in msg.splitlines() if line.strip()]):
-            if "?" in line or "¿" in line:
-                return line
-    return messages[-1] if messages else ""
 
 @celery_app.task
 def schedule_ad_programmed_messages(channel: str, user_id: str, dia: str, valor: str, hora: str, enlace: str):
