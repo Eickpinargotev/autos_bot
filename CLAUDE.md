@@ -73,8 +73,9 @@ Pipeline de conversación (**modelo único**, ver `docs/modelo_unico.md`):
 1. `application/unified_agent.py` — UNA decisión LLM por turno (`gpt-4.1-mini`,
    `temperature=0`): acción (`reply|handoff|close|city_invitation`), mensajes con etiquetas
    `[[frag:ID]]`/`[[rag]]`, pendiente y reporte. También `FollowupAgent` (recordatorios).
-2. `application/agent_pipeline.py` — guardrails **deterministas**: expansión de fragmentos
-   literales y RAG, anti-bucle, reporte + bloqueo en handoff, estado e historial.
+2. `application/agent_pipeline.py` — StateGraph de **LangGraph** con guardrails
+   **deterministas** en sus nodos: expansión de fragmentos literales y RAG, anti-bucle,
+   reporte + bloqueo en handoff, estado e historial.
 3. `application/fragment_catalog.py` — fragmentos literales derivados de `mensajes.json`
    (variantes `_1` por registro de keyword resueltas por código).
 

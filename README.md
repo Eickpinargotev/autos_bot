@@ -1,6 +1,6 @@
 # AUTOS — Bot de recepción (escuela de manejo)
 
-Agente conversacional de recepción para Telegram/WhatsApp basado en un **agente único con LLM** (ver `docs/modelo_unico.md`).
+Agente conversacional de recepción para Telegram/WhatsApp: un **agente único con LLM** orquestado con **LangGraph** (ver `docs/modelo_unico.md`).
 Interpreta lenguaje natural (sin regex ni listas de palabras clave), responde con RAG sobre
 una base de conocimiento y registra las conversaciones en NocoDB.
 

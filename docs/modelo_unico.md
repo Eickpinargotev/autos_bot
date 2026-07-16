@@ -1,8 +1,18 @@
 # Modelo único: agente conversacional sin FSM
 
 Esta rama reemplaza la máquina de estados (recepción → clasificador → router →
-grafo) por **un agente único**: una sola decisión LLM por turno (`gpt-4.1-mini`,
-`temperature=0`) con guardrails deterministas en código.
+grafo de nodos de negocio) por **un agente único**: una sola decisión LLM por
+turno (`gpt-4.1-mini`, `temperature=0`) con guardrails deterministas en código.
+La orquestación del turno sigue siendo un **StateGraph de LangGraph**, pero con
+UN punto de decisión en lugar de un grafo de estados de negocio:
+
+```
+load_state → decide ──┬─ city_invitation ─→ END
+                      └─ expand (fragmentos/RAG + anti-bucle)
+                             ├─ reply   ─→ END
+                             ├─ handoff ─→ END
+                             └─ close   ─→ END
+```
 
 Motivación: el FSM obligaba a todos los clientes a pasar por la misma secuencia
 de preguntas aunque ya hubieran dado los datos ("quiero alquilar una moto"
@@ -28,8 +38,8 @@ Los flujos NO se perdieron; cambiaron de forma:
    instrucciones estáticas + catálogo de fragmentos (cacheable); los datos del
    turno (mensaje, historial, pendiente, reporte_pendiente, recordatorios)
    viajan como JSON en el mensaje del usuario. Salida validada por código.
-2. `application/agent_pipeline.py` — `AgentPipeline.run()`: ejecuta la decisión
-   con guardrails deterministas:
+2. `application/agent_pipeline.py` — `AgentPipeline.run()`: grafo LangGraph que
+   ejecuta la decisión con guardrails deterministas en sus nodos:
    - Expande `[[frag:ID]]` al texto literal (resuelve variantes `_1` por
      registro de keyword, como hacía el router).
    - Expande `[[rag]]` con `RagService`; si el RAG no tiene respaldo, envía el

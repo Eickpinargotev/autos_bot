@@ -1,14 +1,24 @@
-"""Pipeline del agente único (modelo único).
+"""Pipeline del agente único (modelo único), orquestado con LangGraph.
 
-Reemplaza al grafo FSM: un solo turno = una decisión del LLM + guardrails
-deterministas en código. El LLM decide QUÉ hacer (con los playbooks y el
-catálogo como contexto); el código garantiza los efectos (fragmentos
-literales, RAG, reporte + bloqueo, anti-bucle, estado, recordatorio).
+Reemplaza al grafo FSM por un grafo mínimo de UN punto de decisión: el LLM
+decide QUÉ hacer (con los playbooks y el catálogo como contexto) y los nodos
+deterministas garantizan los efectos (fragmentos literales, RAG, anti-bucle,
+reporte + bloqueo, estado, recordatorio).
+
+Grafo por turno:
+
+    load_state → decide ──┬─ city_invitation ─→ END
+                          └─ expand (fragmentos/RAG + anti-bucle)
+                                 ├─ reply   ─→ END
+                                 ├─ handoff ─→ END
+                                 └─ close   ─→ END
 """
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypedDict
+
+from langgraph.graph import END, StateGraph
 
 from src.application.fragment_catalog import get_fragment, resolve_variant
 from src.application.rag_service import RagService
@@ -42,6 +52,19 @@ class _ExpandedTurn:
     rag_missed: bool = False
 
 
+class AgentGraphState(TypedDict, total=False):
+    channel: str
+    user_id: str
+    user_name: str
+    text: str
+    stored: ConversationState
+    decision: AgentDecision
+    turn: _ExpandedTurn
+    replies: list[str]
+    reminder: dict[str, Any] | None
+    legacy_state: UserState
+
+
 class AgentPipeline:
     HANDOFF_DEFAULT_MESSAGE = "En un momento le escribirá un agente especializado para atender su caso."
     CLOSE_DEFAULT_MESSAGE = "Con gusto, quedo atento si necesita algo más."
@@ -57,6 +80,7 @@ class AgentPipeline:
     def __init__(self):
         self.agent = UnifiedAgent()
         self.rag = RagService()
+        self.graph = self._build_graph()
 
     def run(
         self,
@@ -66,34 +90,164 @@ class AgentPipeline:
         user_name: str = "Desconocido",
     ) -> FlowProcessingResult:
         channel_value = channel.value if isinstance(channel, Channel) else channel
-        stored = ConversationStateRepo.get(channel_value, user_id)
-        if user_name and user_name != "Desconocido":
+        result = self.graph.invoke({
+            "channel": channel_value,
+            "user_id": user_id,
+            "user_name": user_name,
+            "text": text,
+        })
+        return FlowProcessingResult(
+            legacy_state=result.get("legacy_state", UserState.GENERAL),
+            replies=result.get("replies", []),
+            reminder=result.get("reminder"),
+        )
+
+    # ------------------------------------------------------------------
+    # Construcción del grafo
+    # ------------------------------------------------------------------
+
+    def _build_graph(self):
+        graph = StateGraph(AgentGraphState)
+        graph.add_node("load_state", self._load_state)
+        graph.add_node("decide", self._decide)
+        graph.add_node("expand", self._expand)
+        graph.add_node("reply", self._reply)
+        graph.add_node("handoff", self._handoff)
+        graph.add_node("close", self._close)
+        graph.add_node("city_invitation", self._city_invitation)
+
+        graph.set_entry_point("load_state")
+        graph.add_edge("load_state", "decide")
+        graph.add_conditional_edges(
+            "decide",
+            self._after_decide,
+            {"city_invitation": "city_invitation", "expand": "expand"},
+        )
+        graph.add_conditional_edges(
+            "expand",
+            self._after_expand,
+            {"reply": "reply", "handoff": "handoff", "close": "close"},
+        )
+        for terminal in ("reply", "handoff", "close", "city_invitation"):
+            graph.add_edge(terminal, END)
+        return graph.compile()
+
+    def _after_decide(self, state: AgentGraphState) -> str:
+        if state["decision"].action == "city_invitation":
+            return "city_invitation"
+        return "expand"
+
+    def _after_expand(self, state: AgentGraphState) -> str:
+        action = state["decision"].action
+        if action in {"handoff", "close"}:
+            return action
+        return "reply"
+
+    # ------------------------------------------------------------------
+    # Nodos
+    # ------------------------------------------------------------------
+
+    def _load_state(self, state: AgentGraphState) -> AgentGraphState:
+        stored = ConversationStateRepo.get(state["channel"], state["user_id"])
+        user_name = state.get("user_name") or "Desconocido"
+        if user_name != "Desconocido":
             stored.user_name = user_name
+        return {"stored": stored}
 
-        decision = self.agent.decide(text, stored, client_id=user_id, canal=channel_value)
+    def _decide(self, state: AgentGraphState) -> AgentGraphState:
+        decision = self.agent.decide(
+            state["text"],
+            state["stored"],
+            client_id=state["user_id"],
+            canal=state["channel"],
+        )
+        return {"decision": decision}
 
-        if decision.action == "city_invitation":
-            return self._handle_city_invitation(channel_value, user_id, text, user_name, stored, decision)
-
-        turn = self._expand_messages(decision, stored, user_id, channel_value)
+    def _expand(self, state: AgentGraphState) -> AgentGraphState:
+        decision = state["decision"]
+        turn = self._expand_messages(decision, state["stored"], state["user_id"], state["channel"])
 
         # Anti-bucle determinista: si el turno reproduce exactamente lo que el
         # bot ya dijo en un turno reciente, no lo repetimos una tercera vez;
         # lo atiende una persona.
-        if decision.action == "reply" and self._is_repeating(turn.history_messages, stored):
+        if decision.action == "reply" and self._is_repeating(turn.history_messages, state["stored"]):
             decision = AgentDecision(action="handoff", messages=[], report=self.LOOP_REPORT)
             turn = _ExpandedTurn(
                 replies=[self.HANDOFF_DEFAULT_MESSAGE],
                 history_messages=[self.HANDOFF_DEFAULT_MESSAGE],
             )
+        return {"decision": decision, "turn": turn}
 
-        if decision.action == "handoff":
-            return self._handle_handoff(channel_value, user_id, text, user_name, stored, decision, turn)
+    def _reply(self, state: AgentGraphState) -> AgentGraphState:
+        stored = state["stored"]
+        decision = state["decision"]
+        turn = state["turn"]
 
-        if decision.action == "close":
-            return self._handle_close(channel_value, user_id, text, stored, turn)
+        # El reporte del fragmento recién enviado manda; si no hubo, se
+        # conserva el que ya estaba pendiente (una duda lateral no lo borra).
+        pending_report = turn.fragment_report or stored.pending_report
+        pending = decision.pending if not turn.rag_missed else (decision.pending or stored.last_question)
 
-        return self._handle_reply(channel_value, user_id, text, user_name, stored, decision, turn)
+        user_name = state.get("user_name") or "Desconocido"
+        new_state = ConversationState(
+            flow=AGENT_FLOW,
+            node="",
+            last_question=pending,
+            awaiting_reply=bool(pending or pending_report),
+            pending_report=pending_report,
+            last_messages=turn.replies,
+            user_name=user_name if user_name != "Desconocido" else stored.user_name,
+            reminder_level=0,
+            conversation_history=self._append_history(
+                stored.conversation_history, state["text"], turn.history_messages, "agent_reply", pending
+            ),
+        )
+        ConversationStateRepo.set(state["channel"], state["user_id"], new_state)
+
+        # El recordatorio inteligente solo se agenda si quedó un paso pendiente
+        # y la duda del cliente no quedó abierta (RAG sin respaldo).
+        reminder = None
+        if pending and not turn.rag_missed:
+            reminder = {"level": 1, "seconds": settings.FOLLOWUP_FIRST_DELAY_SECONDS}
+        return {"replies": turn.replies, "reminder": reminder, "legacy_state": UserState.GENERAL}
+
+    def _handoff(self, state: AgentGraphState) -> AgentGraphState:
+        decision = state["decision"]
+        turn = state["turn"]
+        replies = turn.replies or [self.HANDOFF_DEFAULT_MESSAGE]
+        reason = decision.report or f"El agente derivó a un asesor: {state['text'][:240]}"
+        self._create_report_and_block(state["channel"], state["user_id"], state.get("user_name") or "", state["stored"], reason)
+        return {"replies": replies, "legacy_state": UserState.GENERAL}
+
+    def _close(self, state: AgentGraphState) -> AgentGraphState:
+        turn = state["turn"]
+        replies = turn.replies or [self.CLOSE_DEFAULT_MESSAGE]
+        ConversationStateRepo.clear(state["channel"], state["user_id"])
+        return {"replies": replies, "legacy_state": UserState.GENERAL}
+
+    def _city_invitation(self, state: AgentGraphState) -> AgentGraphState:
+        from src.application.publicidad_service import PublicidadService
+
+        city_text = state["decision"].city or state["text"]
+        user_name = state.get("user_name") or "Desconocido"
+        sent = ToolCallLogger.record(
+            client_id=state["user_id"],
+            canal=state["channel"],
+            tool_name="publicidad.handle_invitation_by_city",
+            input_data={"city_text": city_text, "user_name": user_name},
+            output_mapper=lambda result: {"sent": bool(result)},
+            text_mapper=lambda result: f"Publicidad por ciudad enviada: {bool(result)}",
+            call=lambda: PublicidadService.handle_invitation_by_city(
+                state["user_id"], city_text, user_name, Channel(state["channel"])
+            ),
+        )
+        if sent:
+            ConversationStateRepo.clear(state["channel"], state["user_id"])
+            return {"replies": [], "legacy_state": UserState.PUBLICIDAD}
+
+        reason = f"Ciudad '{city_text}' no se encontró en la lista de invitaciones."
+        self._create_report_and_block(state["channel"], state["user_id"], user_name, state["stored"], reason)
+        return {"replies": [self.HANDOFF_DEFAULT_MESSAGE], "legacy_state": UserState.GENERAL}
 
     # ------------------------------------------------------------------
     # Expansión de mensajes: fragmentos literales y RAG
@@ -256,103 +410,8 @@ class AgentPipeline:
         return False
 
     # ------------------------------------------------------------------
-    # Acciones
+    # Efectos compartidos
     # ------------------------------------------------------------------
-
-    def _handle_reply(
-        self,
-        channel_value: str,
-        user_id: str,
-        text: str,
-        user_name: str,
-        stored: ConversationState,
-        decision: AgentDecision,
-        turn: _ExpandedTurn,
-    ) -> FlowProcessingResult:
-        # El reporte del fragmento recién enviado manda; si no hubo, se
-        # conserva el que ya estaba pendiente (una duda lateral no lo borra).
-        pending_report = turn.fragment_report or stored.pending_report
-        # Si la duda quedó sin respaldo, no reanclamos: el "pendiente" anterior
-        # se conserva pero no se agenda recordatorio inmediato agresivo.
-        pending = decision.pending if not turn.rag_missed else (decision.pending or stored.last_question)
-
-        new_state = ConversationState(
-            flow=AGENT_FLOW,
-            node="",
-            last_question=pending,
-            awaiting_reply=bool(pending or pending_report),
-            pending_report=pending_report,
-            last_messages=turn.replies,
-            user_name=user_name if user_name != "Desconocido" else stored.user_name,
-            reminder_level=0,
-            conversation_history=self._append_history(
-                stored.conversation_history, text, turn.history_messages, "agent_reply", pending
-            ),
-        )
-        ConversationStateRepo.set(channel_value, user_id, new_state)
-
-        reminder = None
-        if pending and not turn.rag_missed:
-            reminder = {"level": 1, "seconds": settings.FOLLOWUP_FIRST_DELAY_SECONDS}
-        return FlowProcessingResult(UserState.GENERAL, replies=turn.replies, reminder=reminder)
-
-    def _handle_handoff(
-        self,
-        channel_value: str,
-        user_id: str,
-        text: str,
-        user_name: str,
-        stored: ConversationState,
-        decision: AgentDecision,
-        turn: _ExpandedTurn,
-    ) -> FlowProcessingResult:
-        replies = turn.replies or [self.HANDOFF_DEFAULT_MESSAGE]
-        reason = decision.report or f"El agente derivó a un asesor: {text[:240]}"
-        self._create_report_and_block(channel_value, user_id, user_name, stored, reason)
-        return FlowProcessingResult(UserState.GENERAL, replies=replies)
-
-    def _handle_close(
-        self,
-        channel_value: str,
-        user_id: str,
-        text: str,
-        stored: ConversationState,
-        turn: _ExpandedTurn,
-    ) -> FlowProcessingResult:
-        replies = turn.replies or [self.CLOSE_DEFAULT_MESSAGE]
-        ConversationStateRepo.clear(channel_value, user_id)
-        return FlowProcessingResult(UserState.GENERAL, replies=replies)
-
-    def _handle_city_invitation(
-        self,
-        channel_value: str,
-        user_id: str,
-        text: str,
-        user_name: str,
-        stored: ConversationState,
-        decision: AgentDecision,
-    ) -> FlowProcessingResult:
-        from src.application.publicidad_service import PublicidadService
-
-        city_text = decision.city or text
-        sent = ToolCallLogger.record(
-            client_id=user_id,
-            canal=channel_value,
-            tool_name="publicidad.handle_invitation_by_city",
-            input_data={"city_text": city_text, "user_name": user_name},
-            output_mapper=lambda result: {"sent": bool(result)},
-            text_mapper=lambda result: f"Publicidad por ciudad enviada: {bool(result)}",
-            call=lambda: PublicidadService.handle_invitation_by_city(
-                user_id, city_text, user_name, Channel(channel_value)
-            ),
-        )
-        if sent:
-            ConversationStateRepo.clear(channel_value, user_id)
-            return FlowProcessingResult(UserState.PUBLICIDAD, replies=[])
-
-        reason = f"Ciudad '{city_text}' no se encontró en la lista de invitaciones."
-        self._create_report_and_block(channel_value, user_id, user_name, stored, reason)
-        return FlowProcessingResult(UserState.GENERAL, replies=[self.HANDOFF_DEFAULT_MESSAGE])
 
     def _create_report_and_block(
         self,
@@ -364,7 +423,7 @@ class AgentPipeline:
     ):
         channel = Channel(channel_value)
         ReportRepository.create_report(
-            nombre=(user_name if user_name != "Desconocido" else stored.user_name),
+            nombre=(user_name if user_name and user_name != "Desconocido" else stored.user_name),
             numero=user_id,
             problema=f"[{channel.value}] {reason}",
             link_whatsapp=f"https://wa.me/{user_id}",
@@ -374,10 +433,6 @@ class AgentPipeline:
         from src.application.runtime_context import clear_user_runtime_context
 
         clear_user_runtime_context(channel, user_id, cancel_scheduled=False, clear_reports=False)
-
-    # ------------------------------------------------------------------
-    # Historial
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _append_history(

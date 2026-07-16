@@ -1,4 +1,5 @@
 openai
+langgraph
 fastapi
 httpx
 psycopg2-binary

@@ -57,8 +57,19 @@ class FollowupDecision:
     message: str = ""
 
 
+_system_prompt_cache: str | None = None
+
+
 def _system_prompt() -> str:
-    return f"{UNIFIED_AGENT_PROMPT}\n\n═══ CATÁLOGO DE FRAGMENTOS ═══\n\n{catalog_for_prompt()}"
+    # Instrucciones + catálogo son estables durante la vida del proceso: se
+    # renderizan una sola vez. Al ser idéntico en cada llamada, el proveedor
+    # además lo sirve con prompt caching.
+    global _system_prompt_cache
+    if _system_prompt_cache is None:
+        _system_prompt_cache = (
+            f"{UNIFIED_AGENT_PROMPT}\n\n═══ CATÁLOGO DE FRAGMENTOS ═══\n\n{catalog_for_prompt()}"
+        )
+    return _system_prompt_cache
 
 
 class UnifiedAgent:

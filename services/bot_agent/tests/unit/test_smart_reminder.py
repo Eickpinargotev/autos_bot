@@ -97,6 +97,31 @@ class SmartReminderGuardrailTests(unittest.TestCase):
         h.set_mock.assert_not_called()
 
 
+class SmartReminderRaceTests(unittest.TestCase):
+    def test_skips_if_user_wrote_while_llm_was_thinking(self):
+        # El buffer estaba vacío al inicio, pero el cliente escribió durante la
+        # llamada al LLM: el segundo chequeo debe abortar el envío.
+        with SmartReminderHarness(_pending_state()) as h:
+            h.enter_context(
+                patch.object(tasks.BufferService, "has_pending", side_effect=[False, True])
+            )
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+        h.send_mock.assert_not_called()
+        h.set_mock.assert_not_called()
+
+    def test_skips_if_state_changed_while_llm_was_thinking(self):
+        # Otro turno procesó y cambió lo pendiente: el recordatorio quedó viejo.
+        stale = _pending_state()
+        fresh = _pending_state()
+        fresh.last_question = "Otra cosa distinta quedó pendiente"
+        with SmartReminderHarness(stale) as h:
+            h.enter_context(
+                patch.object(tasks.ConversationStateRepo, "get", side_effect=[stale, fresh])
+            )
+            tasks.send_smart_reminder("whatsapp", "506", 1)
+        h.send_mock.assert_not_called()
+
+
 class SmartReminderSendTests(unittest.TestCase):
     def test_sends_updates_state_and_schedules_next_level(self):
         state = _pending_state()

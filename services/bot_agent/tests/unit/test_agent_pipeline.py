@@ -82,6 +82,14 @@ class PipelineHarness(ExitStack):
         return self.set_mock.call_args.args[2]
 
 
+class GraphOrchestrationTests(unittest.TestCase):
+    def test_pipeline_is_orchestrated_with_langgraph(self):
+        decision = AgentDecision(action="reply", messages=["hola"], pending="")
+        with PipelineHarness(ConversationState(), decision) as h:
+            self.assertTrue(hasattr(h.pipeline.graph, "invoke"))
+            self.assertEqual(type(h.pipeline.graph).__name__, "CompiledStateGraph")
+
+
 class AgentReplyTests(unittest.TestCase):
     def test_fragment_tag_expands_to_literal_messages(self):
         decision = AgentDecision(

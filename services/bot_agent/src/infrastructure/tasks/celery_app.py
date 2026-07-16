@@ -243,6 +243,20 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
     if not decision.send or not decision.message:
         return
 
+    # La llamada al LLM tarda segundos: el cliente pudo escribir en ese lapso.
+    # Se re-verifica el buffer y que el estado no haya cambiado antes de enviar,
+    # para no cruzar un recordatorio con una conversación ya avanzada.
+    if BufferService.has_pending(user_id, channel):
+        return
+    current = ConversationStateRepo.get(channel, user_id)
+    if (
+        current.last_question != state.last_question
+        or current.reminder_level != state.reminder_level
+        or not current.awaiting_reply
+    ):
+        return
+    state = current
+
     ChannelSenderRegistry.send(channel, user_id, decision.message)
 
     state.reminder_level = level
