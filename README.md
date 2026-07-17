@@ -214,9 +214,13 @@ Hay **dos niveles** de tests:
 
 1. **Deterministas** (la mayoría): mockean el LLM. Corren siempre, con o sin key.
 2. **Integración con LLM real** (`@requires_llm` en
-   `tests/regression/test_unified_agent_llm.py`): ejercitan el juicio real del agente
-   único. Con `OPENAI_API_KEY` se ejecutan; **sin key se saltan** (no fallan). Las
-   llamadas de decisión usan `temperature=0` para ser estables.
+   `tests/regression/test_unified_agent_llm.py`): ejercitan el juicio real de los
+   agentes y **consumen tokens de OpenAI**, así que están apagadas por defecto
+   (se saltan). Se habilitan solo bajo demanda:
+
+   ```bash
+   docker compose -f docker-compose.local.yml run --rm -e RUN_LLM_TESTS=1 bot_agent pytest tests/regression
+   ```
 
 > Para forzar el modo sin LLM (solo deterministas), pasa `-e OPENAI_API_KEY=`:
 > `docker compose -f docker-compose.local.yml run --rm -e OPENAI_API_KEY= bot_agent pytest`

@@ -20,9 +20,12 @@ from src.application.unified_agent import FollowupAgent, SpecialistAgent, Superv
 from src.infrastructure.repositories.conversation_state_repo import ConversationState
 
 
+# Estas pruebas consumen tokens de OpenAI: NO corren en la suite normal.
+# Se habilitan explícitamente (y solo cuando el dueño lo pida):
+#   docker compose -f docker-compose.local.yml run --rm -e RUN_LLM_TESTS=1 bot_agent pytest tests/regression
 requires_llm = pytest.mark.skipif(
-    not settings.OPENAI_API_KEY,
-    reason="Requiere OPENAI_API_KEY para verificar el juicio del LLM",
+    not settings.OPENAI_API_KEY or os.environ.get("RUN_LLM_TESTS") != "1",
+    reason="Pruebas con LLM real (consumen tokens): habilitar con RUN_LLM_TESTS=1",
 )
 
 

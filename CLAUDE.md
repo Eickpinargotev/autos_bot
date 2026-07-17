@@ -45,8 +45,11 @@ Hay **tres niveles** de tests; respétalos al escribir nuevos:
    SIEMPRE este estilo (regla del proyecto: *no depender de OpenAI real en tests
    determinísticos*). Ver `tests/unit/test_agent_pipeline.py` y `test_smart_reminder.py`.
 2. **Integración con LLM real**: decóralos con `@requires_llm` (definido en
-   `tests/regression/test_unified_agent_llm.py`), que hace skip si no hay key. Úsalos
-   solo cuando el objetivo sea verificar el juicio del LLM, no el cableado del pipeline.
+   `tests/regression/test_unified_agent_llm.py`). Úsalos solo cuando el objetivo sea
+   verificar el juicio del LLM, no el cableado del pipeline. **Consumen tokens de
+   OpenAI del dueño**: están apagados por defecto (skip) y solo corren con
+   `RUN_LLM_TESTS=1`, ÚNICAMENTE cuando el usuario lo pida de forma explícita.
+   Lo mismo aplica a scripts de humo con LLM real: no los corras sin pedido expreso.
 
 - Las llamadas de **decisión del agente y recordatorio** usan `temperature=0` (decisiones
   deterministas). No subas la temperatura en esas tareas; mantenlas estables. La generación
