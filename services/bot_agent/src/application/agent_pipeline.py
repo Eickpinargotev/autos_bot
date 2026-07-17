@@ -288,7 +288,49 @@ class AgentPipeline:
                 continue
             self._expand_fragments(message, user_id, channel_value, turn, allowed)
         self._dedupe_turn(turn)
+        self._reassemble_transcribed_fragment(turn, allowed, user_id, channel_value)
         return turn
+
+    @staticmethod
+    def _normalized_text(parts: list[str]) -> str:
+        return " ".join(" ".join(parts).split()).strip().lower()
+
+    def _reassemble_transcribed_fragment(
+        self,
+        turn: _ExpandedTurn,
+        allowed: set[str],
+        user_id: str,
+        channel_value: str,
+    ):
+        """Repara la transcripción de un fragmento (guardrail determinista).
+
+        Si el modelo escribió el CONTENIDO de un fragmento de su catálogo como
+        texto propio (a veces partido en varios mensajes) en vez de usar la
+        etiqueta, el turno completo coincide con el texto literal del
+        fragmento. Se reemplaza por el fragmento real: se recupera la variante
+        por keyword, el metadato `reporte` y la etiqueta compacta en el
+        historial.
+        """
+        if not turn.replies or turn.rag_missed:
+            return
+        if any(h.startswith("[[frag:") for h in turn.history_messages):
+            return  # Ya hubo expansión legítima este turno.
+        current = self._normalized_text(turn.replies)
+        if not current:
+            return
+        for base_id in allowed:
+            base = get_fragment(base_id)
+            if not base or not base.messages:
+                continue
+            if self._normalized_text(base.messages) != current:
+                continue
+            fragment_id = resolve_variant(base_id, user_id, channel_value)
+            fragment = get_fragment(fragment_id) or base
+            turn.replies = list(fragment.messages)
+            turn.history_messages = [f"[[frag:{fragment_id}]]"]
+            if fragment.report:
+                turn.fragment_report = fragment.report
+            return
 
     @staticmethod
     def _dedupe_turn(turn: _ExpandedTurn):

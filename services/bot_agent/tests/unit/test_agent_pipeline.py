@@ -229,6 +229,42 @@ class FragmentGuardrailTests(unittest.TestCase):
         self.assertEqual(result.replies, variant.messages)
         self.assertIn("[[frag:DICTAMEN.D1_1]]", h.saved_state.conversation_history[-1]["bot"])
 
+    def test_transcribed_fragment_is_reassembled_into_the_literal_one(self):
+        # Bug real: el modelo escribió el contenido de GENERAL.G1 partido en
+        # varios mensajes en vez de usar la etiqueta. El guardrail lo detecta
+        # y lo reemplaza por el fragmento literal (2 mensajes, etiqueta en el
+        # historial).
+        g1 = get_fragment("GENERAL.G1")
+        transcribed = AgentDecision(
+            action="reply",
+            messages=[
+                "Hola!!!",
+                "Gracias por tu mensaje",
+                "Mi nombre es Enrique Guzmán y estaré pendiente de su proceso de obtención de licencias",
+                "Ya tiene el teórico ganado???",
+            ],
+            pending="Si ya tiene el teórico ganado",
+        )
+        with PipelineHarness(ConversationState(active_agent="GENERAL"), specialist=transcribed) as h:
+            result = h.run(text="vengo a sacar la cita del práctico b1")
+
+        self.assertEqual(result.replies, g1.messages)
+        self.assertEqual(h.saved_state.conversation_history[-1]["bot"], ["[[frag:GENERAL.G1]]"])
+
+    def test_transcription_reassembly_respects_keyword_variant(self):
+        d1 = get_fragment("DICTAMEN.D1")
+        transcribed = AgentDecision(action="reply", messages=list(d1.messages), pending="El formulario")
+        with patch(
+            "src.infrastructure.repositories.keyword_registry_repository.KeywordRegistryRepository.exists",
+            return_value=True,
+        ):
+            with PipelineHarness(ConversationState(active_agent="DICTAMEN"), specialist=transcribed) as h:
+                result = h.run(text="quiero el dictamen")
+
+        # Transcribió el D1 base, pero el cliente está registrado: se envía la
+        # variante D1_1 con su sinpe correcto.
+        self.assertEqual(result.replies, get_fragment("DICTAMEN.D1_1").messages)
+
     def test_unknown_fragment_tag_is_dropped_without_crashing(self):
         decision = AgentDecision(action="reply", messages=["[[frag:NO.EXISTE]]", "¿Moto o carro?"], pending="Tipo")
         with PipelineHarness(ConversationState(active_agent="ALQUILER"), specialist=decision) as h:
