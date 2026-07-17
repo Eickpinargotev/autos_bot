@@ -45,7 +45,7 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
       - EVAL_JUDGE_MODEL=${EVAL_JUDGE_MODEL:-gpt-4o-mini}
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
       - NOCODB_URL=http://nocodb:8080
@@ -93,7 +93,7 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
       - EVAL_JUDGE_MODEL=${EVAL_JUDGE_MODEL:-gpt-4o-mini}
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
       - REDIS_URL=redis://redis:6379/0
@@ -142,7 +142,7 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
       - EVAL_JUDGE_MODEL=${EVAL_JUDGE_MODEL:-gpt-4o-mini}
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
       - REDIS_URL=redis://redis:6379/0
