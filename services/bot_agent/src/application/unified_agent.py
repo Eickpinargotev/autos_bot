@@ -51,10 +51,12 @@ def _decision_llm_kwargs() -> dict:
     """Parámetros extra de las llamadas de DECISIÓN.
 
     Los agentes deciden sin razonamiento (reasoning_effort="none"): respuestas
-    directas y sin tokens de reasoning facturados. Si OPENAI_MODEL se cambia a
-    un modelo que no acepte el parámetro, se deja OPENAI_REASONING_EFFORT="".
+    directas y sin tokens de reasoning facturados. El parámetro solo se envía
+    a modelos que lo aceptan (familia gpt-5): si el despliegue quedara con un
+    OPENAI_MODEL viejo (p. ej. gpt-4o-mini), enviarlo haría fallar TODAS las
+    llamadas y el bot respondería siempre con el fallback genérico.
     """
-    if settings.OPENAI_REASONING_EFFORT:
+    if settings.OPENAI_REASONING_EFFORT and settings.OPENAI_MODEL.startswith("gpt-5"):
         return {"reasoning_effort": settings.OPENAI_REASONING_EFFORT}
     return {}
 

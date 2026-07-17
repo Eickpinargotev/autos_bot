@@ -57,6 +57,25 @@ class SupervisorRoutingTests(unittest.TestCase):
         decision = SupervisorAgent().decide("les cuento que aprobé mi prueba de manejo!!!", ConversationState())
         self.assertIn("[[frag:WIN.W1]]", _joined(decision))
 
+    def test_specific_cita_request_is_routed_not_clarified(self):
+        # Transcript real (2026-07-16): el cliente nombró exactamente lo que
+        # quería (cita del práctico B1) y recibió la aclaración genérica.
+        # Con intención clara NUNCA se re-pregunta: se enruta.
+        msg = (
+            "hola, buenos dias como esta profe, ya ahora si tengo 18 años, vengo para que "
+            "me ayude a sacar la cita del practico b1, digame que información ocupa y yo se la facilito"
+        )
+        decision = SupervisorAgent().decide(msg, ConversationState())
+        self.assertEqual(decision.action, "route")
+        self.assertEqual(decision.target, "GENERAL")
+
+        specialist = SpecialistAgent("GENERAL").decide(msg, ConversationState())
+        self.assertEqual(specialist.action, "reply")
+        # Guía con el material del proceso (requisito teórico / formulario de
+        # cita), no con otra aclaración genérica, y deja el paso pendiente.
+        self.assertIn("[[frag:GENERAL.G", _joined(specialist))
+        self.assertTrue(specialist.pending)
+
     def test_angry_customer_is_handed_off_with_a_human_message(self):
         decision = SupervisorAgent().decide(
             "Me siento estafado, pagué y nadie me resuelve nada. Quiero mi dinero de vuelta.",

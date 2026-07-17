@@ -405,6 +405,16 @@ class DecisionValidationTests(unittest.TestCase):
         decision = agent._validated_decision({"action": "handoff", "messages": ["ok"]}, "quiero un humano")
         self.assertTrue(decision.report)
 
+    def test_reasoning_effort_only_goes_to_gpt5_models(self):
+        # Un despliegue con OPENAI_MODEL viejo no debe recibir reasoning_effort:
+        # haría fallar TODAS las llamadas y el bot solo respondería el fallback.
+        from src.application.unified_agent import _decision_llm_kwargs
+
+        with patch("src.application.unified_agent.settings.OPENAI_MODEL", "gpt-5.4-mini"):
+            self.assertEqual(_decision_llm_kwargs(), {"reasoning_effort": "none"})
+        with patch("src.application.unified_agent.settings.OPENAI_MODEL", "gpt-4o-mini"):
+            self.assertEqual(_decision_llm_kwargs(), {})
+
     def test_no_api_key_falls_back_to_safe_clarify(self):
         agent = SupervisorAgent()
         with patch("src.application.unified_agent.settings.OPENAI_API_KEY", ""):
