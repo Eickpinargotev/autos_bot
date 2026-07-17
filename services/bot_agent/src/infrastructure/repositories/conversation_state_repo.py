@@ -23,6 +23,9 @@ class ConversationState:
     user_name: str = "Desconocido"
     reminder_level: int = 0
     conversation_history: list[dict] = field(default_factory=list)
+    # Especialista dueño de la conversación (routing pegajoso del supervisor).
+    # Vacío = sin especialista: el turno entra por el supervisor.
+    active_agent: str = ""
 
 
 class ConversationStateRepo:

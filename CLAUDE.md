@@ -69,15 +69,18 @@ Hay **tres niveles** de tests; respétalos al escribir nuevos:
 
 Capas en `services/bot_agent/src/`: `domain/`, `application/`, `infrastructure/`, `core/`.
 
-Pipeline de conversación (**modelo único**, ver `docs/modelo_unico.md`):
-1. `application/unified_agent.py` — UNA decisión LLM por turno (`gpt-5.4-mini` sin razonamiento,
-   `temperature=0`): acción (`reply|handoff|close|city_invitation`), mensajes con etiquetas
-   `[[frag:ID]]`/`[[rag]]`, pendiente y reporte. También `FollowupAgent` (recordatorios).
-2. `application/agent_pipeline.py` — StateGraph de **LangGraph** con guardrails
-   **deterministas** en sus nodos: expansión de fragmentos literales y RAG, anti-bucle,
-   reporte + bloqueo en handoff, estado e historial.
-3. `application/fragment_catalog.py` — fragmentos literales derivados de `mensajes.json`
-   (variantes `_1` por registro de keyword resueltas por código).
+Pipeline de conversación (**supervisor/workers**, ver `docs/modelo_unico.md`):
+1. `application/unified_agent.py` — `SupervisorAgent` (coordina: saludo, ambiguo, queja,
+   WIN, cierre, dudas sueltas, y enruta con `route`) y `SpecialistAgent(area)` (GENERAL,
+   ALQUILER, CLASES, DICTAMEN; devuelve el turno con `defer`). `gpt-5.4-mini` sin
+   razonamiento, `temperature=0`; prompts = contrato común + playbook + catálogo del área.
+   También `FollowupAgent` (recordatorios).
+2. `application/agent_pipeline.py` — StateGraph de **LangGraph** con routing pegajoso
+   (`ConversationState.active_agent`) y guardrails **deterministas** en sus nodos:
+   expansión de fragmentos literales y RAG, fragmentos ajenos rechazados por área,
+   anti-bucle y anti ping-pong (defer), reporte + bloqueo en handoff, estado e historial.
+3. `application/fragment_catalog.py` — fragmentos literales derivados de `mensajes.json`,
+   particionados por área (`AREA_FRAGMENTS`; variantes `_1` resueltas por código).
 
 Reglas para cambios:
 - Para cambiar **el comportamiento del agente** (qué intención hace qué, playbooks), edita el

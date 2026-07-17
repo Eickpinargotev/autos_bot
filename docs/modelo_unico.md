@@ -1,18 +1,40 @@
-# Modelo único: agente conversacional sin FSM
+# Modelo único: agente conversacional sin FSM (supervisor / workers)
 
 Esta rama reemplaza la máquina de estados (recepción → clasificador → router →
-grafo de nodos de negocio) por **un agente único**: una sola decisión LLM por
-turno (`gpt-5.4-mini` sin razonamiento — `reasoning_effort="none"` —, `temperature=0`) con guardrails deterministas en código.
-La orquestación del turno sigue siendo un **StateGraph de LangGraph**, pero con
-UN punto de decisión en lugar de un grafo de estados de negocio:
+grafo de nodos de negocio) por una arquitectura **Supervisor / Workers** con
+LLM (`gpt-5.4-mini` sin razonamiento — `reasoning_effort="none"` —,
+`temperature=0`) y guardrails deterministas en código, orquestada con un
+**StateGraph de LangGraph**:
 
 ```
-load_state → decide ──┬─ city_invitation ─→ END
-                      └─ expand (fragmentos/RAG + anti-bucle)
-                             ├─ reply   ─→ END
-                             ├─ handoff ─→ END
-                             └─ close   ─→ END
+load_state ──┬─(sin especialista)──→ SUPERVISOR ──── route ───→ ESPECIALISTA
+             └─(especialista activo, sticky)─────────────────→ (GENERAL | ALQUILER | CLASES | DICTAMEN)
+                      ▲                                              │
+                      └───────────────── defer (máx. 1 vez) ─────────┘
+    supervisor/especialista ──┬─ city_invitation ─→ END
+                              └─ expand (fragmentos/RAG + anti-bucle)
+                                     ├─ reply   ─→ END
+                                     ├─ handoff ─→ END
+                                     └─ close   ─→ END
 ```
+
+Reparto de responsabilidades:
+- **Supervisor** (coordinador/recepción): saludo, mensajes ambiguos, quejas
+  (Q1/handoff), WIN, cierres, dudas informativas sueltas ([[rag]]) y el
+  **enrutamiento** al especialista del área (`action="route"`).
+- **Especialistas** (GENERAL/licencia, ALQUILER, CLASES, DICTAMEN): ejecutan su
+  proceso con SU playbook y SU catálogo particionado; si el tema no es suyo,
+  devuelven el turno (`action="defer"`).
+- Cada agente = CONTRATO COMÚN (reglas transversales: queja→humano,
+  pago→humano, reporte pendiente, correcciones, estilo) + su playbook + su
+  catálogo. Prompts cortos → menos alucinación y mejor caching.
+
+Eficiencia: el routing es **pegajoso** (`ConversationState.active_agent`): una
+vez enrutada, la conversación entra directo al especialista (UNA llamada LLM
+por turno). Solo el primer turno o un cambio de área cuestan dos. Guardrails
+anti ping-pong: un especialista solo puede deferir una vez por turno, el
+supervisor no puede re-enrutar al área que ya defirió y máximo 2 áreas por
+turno (luego aclaración segura).
 
 Motivación: el FSM obligaba a todos los clientes a pasar por la misma secuencia
 de preguntas aunque ya hubieran dado los datos ("quiero alquilar una moto"
@@ -34,14 +56,18 @@ Los flujos NO se perdieron; cambiaron de forma:
 
 ## Pipeline por turno
 
-1. `application/unified_agent.py` — `UnifiedAgent.decide()`: system prompt =
-   instrucciones estáticas + catálogo de fragmentos (cacheable); los datos del
-   turno (mensaje, historial, pendiente, reporte_pendiente, recordatorios)
-   viajan como JSON en el mensaje del usuario. Salida validada por código.
+1. `application/unified_agent.py` — `SupervisorAgent` y `SpecialistAgent(area)`
+   (base común `_DecisionAgent`): system prompt = contrato común + playbook del
+   rol + catálogo del área (cacheable); los datos del turno (mensaje,
+   historial, pendiente, reporte_pendiente, recordatorios, nota_interna)
+   viajan como JSON en el mensaje del usuario. Salida validada por código
+   (acciones por rol: el supervisor puede `route`, el especialista `defer`).
 2. `application/agent_pipeline.py` — `AgentPipeline.run()`: grafo LangGraph que
    ejecuta la decisión con guardrails deterministas en sus nodos:
    - Expande `[[frag:ID]]` al texto literal (resuelve variantes `_1` por
-     registro de keyword, como hacía el router).
+     registro de keyword, como hacía el router). **Un agente solo puede enviar
+     fragmentos de su propio catálogo** (`AREA_FRAGMENTS`): etiquetas ajenas se
+     descartan (guardrail contra alucinación cruzada).
    - Expande `[[rag]]` con `RagService`; si el RAG no tiene respaldo, envía el
      fallback, registra la pregunta sin respuesta y NO empuja el flujo.
    - **Anti-bucle**: si el turno repite exactamente lo que el bot ya dijo en

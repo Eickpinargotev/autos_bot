@@ -30,6 +30,31 @@ _KEYWORD_VARIANTS = {
 }
 _VARIANT_IDS = set(_KEYWORD_VARIANTS.values())
 
+# Partición del catálogo por agente (arquitectura supervisor/workers): cada
+# agente solo VE y solo PUEDE ENVIAR los fragmentos de su área. El pipeline
+# rechaza etiquetas fuera del set del agente activo (guardrail determinista
+# contra alucinación cruzada). Las variantes _1 se resuelven por código, así
+# que no se listan.
+AREA_FRAGMENTS: dict[str, tuple[str, ...]] = {
+    "SUPERVISOR": ("QUEJA.Q1", "WIN.W1"),
+    "GENERAL": ("GENERAL.G1", "GENERAL.G3", "GENERAL.G4", "GENERAL.G7"),
+    "ALQUILER": (
+        "Alquiler.A1", "GENERAL.G7", "GENERAL.G35", "GENERAL.G11",
+        "GENERAL.G13", "GENERAL.G16", "GENERAL.G19", "GENERAL.G20",
+        "GENERAL.G21", "GENERAL.G22", "GENERAL.G25", "GENERAL.G28",
+        "GENERAL.G29", "GENERAL.G30", "GENERAL.G31", "GENERAL.G32",
+    ),
+    "CLASES": ("CLASES.C1", "CLASES.C2", "CLASES.C5"),
+    "DICTAMEN": ("DICTAMEN.D1",),
+}
+
+SPECIALIST_AREAS = ("GENERAL", "ALQUILER", "CLASES", "DICTAMEN")
+
+
+def allowed_fragments(role: str) -> set[str]:
+    """Fragmentos que el agente `role` (SUPERVISOR o área) puede enviar."""
+    return set(AREA_FRAGMENTS.get(role, ()))
+
 
 @dataclass
 class Fragment:
@@ -82,17 +107,20 @@ def visible_fragment_ids() -> list[str]:
     return [fid for fid in _fragments if fid not in _VARIANT_IDS]
 
 
-def catalog_for_prompt() -> str:
-    """Render del catálogo para el mensaje system del agente.
+def catalog_for_prompt(fragment_ids: list[str] | tuple[str, ...] | None = None) -> str:
+    """Render del catálogo para el mensaje system de un agente.
 
     Incluye el texto LITERAL de cada fragmento para que el modelo sepa
     exactamente qué recibe el cliente (y no lo contradiga ni lo duplique).
-    Es contenido estable entre llamadas, así que cachea bien como parte del
-    system prompt.
+    Si se pasa `fragment_ids`, solo se renderiza esa partición (el catálogo
+    del área). Es contenido estable entre llamadas, así que cachea bien.
     """
+    ids = list(fragment_ids) if fragment_ids is not None else visible_fragment_ids()
     blocks: list[str] = []
-    for fid in visible_fragment_ids():
-        frag = _fragments[fid]
+    for fid in ids:
+        frag = _fragments.get(fid)
+        if frag is None:
+            continue
         if not frag.messages:
             continue
         lines = [f"### [[frag:{fid}]]"]

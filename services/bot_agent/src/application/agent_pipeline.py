@@ -1,17 +1,21 @@
-"""Pipeline del agente único (modelo único), orquestado con LangGraph.
+"""Pipeline conversacional (supervisor / workers), orquestado con LangGraph.
 
-Reemplaza al grafo FSM por un grafo mínimo de UN punto de decisión: el LLM
-decide QUÉ hacer (con los playbooks y el catálogo como contexto) y los nodos
-deterministas garantizan los efectos (fragmentos literales, RAG, anti-bucle,
-reporte + bloqueo, estado, recordatorio).
+Un turno = una decisión LLM del agente que corresponde + guardrails
+deterministas en los nodos. El SUPERVISOR coordina (saludo, ambiguo, queja,
+WIN, cierre, dudas sueltas) y enruta; cada ESPECIALISTA ejecuta su área con
+su propio playbook y su propio catálogo de fragmentos.
 
-Grafo por turno:
+Grafo por turno (routing pegajoso: con especialista activo se entra directo):
 
-    load_state → decide ──┬─ city_invitation ─→ END
-                          └─ expand (fragmentos/RAG + anti-bucle)
-                                 ├─ reply   ─→ END
-                                 ├─ handoff ─→ END
-                                 └─ close   ─→ END
+    load_state ──┬─(sin especialista)→ supervisor ──┬─ route ──→ specialist
+                 └─(especialista activo)→ specialist│              │
+                        ▲            (defer, 1 vez) │◄─────────────┘
+                        └────────────────────────────
+    supervisor/specialist ──┬─ city_invitation ─→ END
+                            └─ expand (fragmentos/RAG + anti-bucle)
+                                   ├─ reply   ─→ END
+                                   ├─ handoff ─→ END
+                                   └─ close   ─→ END
 """
 
 import re
@@ -20,9 +24,20 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from src.application.fragment_catalog import get_fragment, resolve_variant
+from src.application.fragment_catalog import (
+    SPECIALIST_AREAS,
+    allowed_fragments,
+    get_fragment,
+    resolve_variant,
+)
 from src.application.rag_service import RagService
-from src.application.unified_agent import RAG_TOKEN, AgentDecision, UnifiedAgent
+from src.application.unified_agent import (
+    RAG_TOKEN,
+    SAFE_CLARIFY_MESSAGE,
+    AgentDecision,
+    SpecialistAgent,
+    SupervisorAgent,
+)
 from src.core.config import settings
 from src.domain.entities import Channel, UserState
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
@@ -35,6 +50,10 @@ from src.infrastructure.repositories.unanswered_question_repository import Unans
 FRAG_TOKEN_RE = re.compile(r"\[\[frag:([A-Za-z0-9_.]+)\]\]")
 
 AGENT_FLOW = "AGENT"
+SUPERVISOR_ROLE = "SUPERVISOR"
+# Máximo de áreas que pueden intentar el mismo turno antes de degradar a una
+# aclaración segura (anti ping-pong supervisor↔especialistas).
+MAX_AREAS_PER_TURN = 2
 
 
 @dataclass
@@ -59,6 +78,10 @@ class AgentGraphState(TypedDict, total=False):
     text: str
     stored: ConversationState
     decision: AgentDecision
+    decider: str
+    area: str
+    tried_areas: list[str]
+    internal_note: str
     turn: _ExpandedTurn
     replies: list[str]
     reminder: dict[str, Any] | None
@@ -78,7 +101,8 @@ class AgentPipeline:
     )
 
     def __init__(self):
-        self.agent = UnifiedAgent()
+        self.supervisor = SupervisorAgent()
+        self.specialists = {area: SpecialistAgent(area) for area in SPECIALIST_AREAS}
         self.rag = RagService()
         self.graph = self._build_graph()
 
@@ -95,6 +119,8 @@ class AgentPipeline:
             "user_id": user_id,
             "user_name": user_name,
             "text": text,
+            "tried_areas": [],
+            "internal_note": "",
         })
         return FlowProcessingResult(
             legacy_state=result.get("legacy_state", UserState.GENERAL),
@@ -109,7 +135,8 @@ class AgentPipeline:
     def _build_graph(self):
         graph = StateGraph(AgentGraphState)
         graph.add_node("load_state", self._load_state)
-        graph.add_node("decide", self._decide)
+        graph.add_node("supervisor", self._supervisor)
+        graph.add_node("specialist", self._specialist)
         graph.add_node("expand", self._expand)
         graph.add_node("reply", self._reply)
         graph.add_node("handoff", self._handoff)
@@ -117,11 +144,20 @@ class AgentPipeline:
         graph.add_node("city_invitation", self._city_invitation)
 
         graph.set_entry_point("load_state")
-        graph.add_edge("load_state", "decide")
         graph.add_conditional_edges(
-            "decide",
-            self._after_decide,
-            {"city_invitation": "city_invitation", "expand": "expand"},
+            "load_state",
+            self._entry_route,
+            {"supervisor": "supervisor", "specialist": "specialist"},
+        )
+        graph.add_conditional_edges(
+            "supervisor",
+            self._after_decision,
+            {"specialist": "specialist", "city_invitation": "city_invitation", "expand": "expand"},
+        )
+        graph.add_conditional_edges(
+            "specialist",
+            self._after_decision,
+            {"supervisor": "supervisor", "city_invitation": "city_invitation", "expand": "expand"},
         )
         graph.add_conditional_edges(
             "expand",
@@ -132,8 +168,19 @@ class AgentPipeline:
             graph.add_edge(terminal, END)
         return graph.compile()
 
-    def _after_decide(self, state: AgentGraphState) -> str:
-        if state["decision"].action == "city_invitation":
+    def _entry_route(self, state: AgentGraphState) -> str:
+        active = state["stored"].active_agent
+        if active in SPECIALIST_AREAS:
+            return "specialist"
+        return "supervisor"
+
+    def _after_decision(self, state: AgentGraphState) -> str:
+        action = state["decision"].action
+        if action == "route":
+            return "specialist"
+        if action == "defer":
+            return "supervisor"
+        if action == "city_invitation":
             return "city_invitation"
         return "expand"
 
@@ -144,7 +191,7 @@ class AgentPipeline:
         return "reply"
 
     # ------------------------------------------------------------------
-    # Nodos
+    # Nodos de decisión
     # ------------------------------------------------------------------
 
     def _load_state(self, state: AgentGraphState) -> AgentGraphState:
@@ -152,20 +199,64 @@ class AgentPipeline:
         user_name = state.get("user_name") or "Desconocido"
         if user_name != "Desconocido":
             stored.user_name = user_name
-        return {"stored": stored}
+        update: AgentGraphState = {"stored": stored}
+        if stored.active_agent in SPECIALIST_AREAS:
+            update["area"] = stored.active_agent
+        return update
 
-    def _decide(self, state: AgentGraphState) -> AgentGraphState:
-        decision = self.agent.decide(
+    def _supervisor(self, state: AgentGraphState) -> AgentGraphState:
+        decision = self.supervisor.decide(
+            state["text"],
+            state["stored"],
+            client_id=state["user_id"],
+            canal=state["channel"],
+            internal_note=state.get("internal_note", ""),
+        )
+        tried = state.get("tried_areas", [])
+        # Anti ping-pong: no re-enrutar a un área que ya intentó este turno,
+        # ni encadenar más de MAX_AREAS_PER_TURN especialistas por turno.
+        if decision.action == "route" and (
+            decision.target in tried or len(tried) >= MAX_AREAS_PER_TURN
+        ):
+            decision = AgentDecision(
+                action="reply",
+                messages=[SAFE_CLARIFY_MESSAGE],
+                pending="Qué servicio necesita el cliente",
+                source="guardrail_reroute",
+            )
+        update: AgentGraphState = {"decision": decision, "decider": SUPERVISOR_ROLE}
+        if decision.action == "route":
+            update["area"] = decision.target
+        return update
+
+    def _specialist(self, state: AgentGraphState) -> AgentGraphState:
+        area = state["area"]
+        decision = self.specialists[area].decide(
             state["text"],
             state["stored"],
             client_id=state["user_id"],
             canal=state["channel"],
         )
-        return {"decision": decision}
+        update: AgentGraphState = {
+            "decision": decision,
+            "decider": area,
+            "tried_areas": [*state.get("tried_areas", []), area],
+        }
+        if decision.action == "defer":
+            update["internal_note"] = (
+                f"El especialista de {area} devolvió el turno: {decision.report} "
+                f"No vuelvas a enrutar a {area} en este turno."
+            )
+        return update
+
+    # ------------------------------------------------------------------
+    # Expansión + guardrails
+    # ------------------------------------------------------------------
 
     def _expand(self, state: AgentGraphState) -> AgentGraphState:
         decision = state["decision"]
-        turn = self._expand_messages(decision, state["stored"], state["user_id"], state["channel"])
+        allowed = allowed_fragments(state.get("decider", SUPERVISOR_ROLE))
+        turn = self._expand_messages(decision, state["stored"], state["user_id"], state["channel"], allowed)
 
         # Anti-bucle determinista: si el turno reproduce exactamente lo que el
         # bot ya dijo en un turno reciente, no lo repetimos una tercera vez;
@@ -178,87 +269,13 @@ class AgentPipeline:
             )
         return {"decision": decision, "turn": turn}
 
-    def _reply(self, state: AgentGraphState) -> AgentGraphState:
-        stored = state["stored"]
-        decision = state["decision"]
-        turn = state["turn"]
-
-        # El reporte del fragmento recién enviado manda; si no hubo, se
-        # conserva el que ya estaba pendiente (una duda lateral no lo borra).
-        pending_report = turn.fragment_report or stored.pending_report
-        pending = decision.pending if not turn.rag_missed else (decision.pending or stored.last_question)
-
-        user_name = state.get("user_name") or "Desconocido"
-        new_state = ConversationState(
-            flow=AGENT_FLOW,
-            node="",
-            last_question=pending,
-            awaiting_reply=bool(pending or pending_report),
-            pending_report=pending_report,
-            last_messages=turn.replies,
-            user_name=user_name if user_name != "Desconocido" else stored.user_name,
-            reminder_level=0,
-            conversation_history=self._append_history(
-                stored.conversation_history, state["text"], turn.history_messages, "agent_reply", pending
-            ),
-        )
-        ConversationStateRepo.set(state["channel"], state["user_id"], new_state)
-
-        # El recordatorio inteligente solo se agenda si quedó un paso pendiente
-        # y la duda del cliente no quedó abierta (RAG sin respaldo).
-        reminder = None
-        if pending and not turn.rag_missed:
-            reminder = {"level": 1, "seconds": settings.FOLLOWUP_FIRST_DELAY_SECONDS}
-        return {"replies": turn.replies, "reminder": reminder, "legacy_state": UserState.GENERAL}
-
-    def _handoff(self, state: AgentGraphState) -> AgentGraphState:
-        decision = state["decision"]
-        turn = state["turn"]
-        replies = turn.replies or [self.HANDOFF_DEFAULT_MESSAGE]
-        reason = decision.report or f"El agente derivó a un asesor: {state['text'][:240]}"
-        self._create_report_and_block(state["channel"], state["user_id"], state.get("user_name") or "", state["stored"], reason)
-        return {"replies": replies, "legacy_state": UserState.GENERAL}
-
-    def _close(self, state: AgentGraphState) -> AgentGraphState:
-        turn = state["turn"]
-        replies = turn.replies or [self.CLOSE_DEFAULT_MESSAGE]
-        ConversationStateRepo.clear(state["channel"], state["user_id"])
-        return {"replies": replies, "legacy_state": UserState.GENERAL}
-
-    def _city_invitation(self, state: AgentGraphState) -> AgentGraphState:
-        from src.application.publicidad_service import PublicidadService
-
-        city_text = state["decision"].city or state["text"]
-        user_name = state.get("user_name") or "Desconocido"
-        sent = ToolCallLogger.record(
-            client_id=state["user_id"],
-            canal=state["channel"],
-            tool_name="publicidad.handle_invitation_by_city",
-            input_data={"city_text": city_text, "user_name": user_name},
-            output_mapper=lambda result: {"sent": bool(result)},
-            text_mapper=lambda result: f"Publicidad por ciudad enviada: {bool(result)}",
-            call=lambda: PublicidadService.handle_invitation_by_city(
-                state["user_id"], city_text, user_name, Channel(state["channel"])
-            ),
-        )
-        if sent:
-            ConversationStateRepo.clear(state["channel"], state["user_id"])
-            return {"replies": [], "legacy_state": UserState.PUBLICIDAD}
-
-        reason = f"Ciudad '{city_text}' no se encontró en la lista de invitaciones."
-        self._create_report_and_block(state["channel"], state["user_id"], user_name, state["stored"], reason)
-        return {"replies": [self.HANDOFF_DEFAULT_MESSAGE], "legacy_state": UserState.GENERAL}
-
-    # ------------------------------------------------------------------
-    # Expansión de mensajes: fragmentos literales y RAG
-    # ------------------------------------------------------------------
-
     def _expand_messages(
         self,
         decision: AgentDecision,
         stored: ConversationState,
         user_id: str,
         channel_value: str,
+        allowed: set[str],
     ) -> _ExpandedTurn:
         turn = _ExpandedTurn()
         for message in decision.messages:
@@ -269,7 +286,7 @@ class AgentPipeline:
             if RAG_TOKEN in message:
                 self._expand_rag(message, decision, stored, user_id, channel_value, turn)
                 continue
-            self._expand_fragments(message, user_id, channel_value, turn)
+            self._expand_fragments(message, user_id, channel_value, turn, allowed)
         self._dedupe_turn(turn)
         return turn
 
@@ -301,7 +318,14 @@ class AgentPipeline:
             history.append(msg)
         turn.history_messages = history
 
-    def _expand_fragments(self, message: str, user_id: str, channel_value: str, turn: _ExpandedTurn):
+    def _expand_fragments(
+        self,
+        message: str,
+        user_id: str,
+        channel_value: str,
+        turn: _ExpandedTurn,
+        allowed: set[str],
+    ):
         pos = 0
         emitted_any = False
         for match in FRAG_TOKEN_RE.finditer(message):
@@ -309,14 +333,18 @@ class AgentPipeline:
             if prefix:
                 turn.replies.append(prefix)
                 turn.history_messages.append(prefix)
-            fragment_id = resolve_variant(match.group(1), user_id, channel_value)
-            fragment = get_fragment(fragment_id)
-            if fragment and fragment.messages:
-                turn.replies.extend(fragment.messages)
-                turn.history_messages.append(f"[[frag:{fragment_id}]]")
-                if fragment.report:
-                    turn.fragment_report = fragment.report
-                emitted_any = True
+            base_id = match.group(1)
+            # Guardrail: un agente solo puede enviar fragmentos de SU catálogo.
+            # Una etiqueta ajena o inexistente se descarta (alucinación).
+            if base_id in allowed:
+                fragment_id = resolve_variant(base_id, user_id, channel_value)
+                fragment = get_fragment(fragment_id)
+                if fragment and fragment.messages:
+                    turn.replies.extend(fragment.messages)
+                    turn.history_messages.append(f"[[frag:{fragment_id}]]")
+                    if fragment.report:
+                        turn.fragment_report = fragment.report
+                    emitted_any = True
             pos = match.end()
         suffix = message[pos:].strip()
         if suffix:
@@ -391,10 +419,6 @@ class AgentPipeline:
             call=lambda: UnansweredQuestionRepository.create(question),
         )
 
-    # ------------------------------------------------------------------
-    # Guardrail anti-bucle
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _is_repeating(history_messages: list[str], stored: ConversationState) -> bool:
         if not history_messages:
@@ -408,6 +432,85 @@ class AgentPipeline:
             if previous and previous == current:
                 return True
         return False
+
+    # ------------------------------------------------------------------
+    # Nodos de acción
+    # ------------------------------------------------------------------
+
+    def _reply(self, state: AgentGraphState) -> AgentGraphState:
+        stored = state["stored"]
+        decision = state["decision"]
+        turn = state["turn"]
+        decider = state.get("decider", SUPERVISOR_ROLE)
+
+        # El reporte del fragmento recién enviado manda; si no hubo, se
+        # conserva el que ya estaba pendiente (una duda lateral no lo borra).
+        pending_report = turn.fragment_report or stored.pending_report
+        pending = decision.pending if not turn.rag_missed else (decision.pending or stored.last_question)
+
+        user_name = state.get("user_name") or "Desconocido"
+        new_state = ConversationState(
+            flow=AGENT_FLOW,
+            node="",
+            last_question=pending,
+            awaiting_reply=bool(pending or pending_report),
+            pending_report=pending_report,
+            last_messages=turn.replies,
+            user_name=user_name if user_name != "Desconocido" else stored.user_name,
+            reminder_level=0,
+            conversation_history=self._append_history(
+                stored.conversation_history, state["text"], turn.history_messages, "agent_reply", pending, decider
+            ),
+            # Routing pegajoso: el especialista que respondió se queda con la
+            # conversación; una respuesta del supervisor no fija especialista.
+            active_agent=decider if decider in SPECIALIST_AREAS else "",
+        )
+        ConversationStateRepo.set(state["channel"], state["user_id"], new_state)
+
+        # El recordatorio inteligente solo se agenda si quedó un paso pendiente
+        # y la duda del cliente no quedó abierta (RAG sin respaldo).
+        reminder = None
+        if pending and not turn.rag_missed:
+            reminder = {"level": 1, "seconds": settings.FOLLOWUP_FIRST_DELAY_SECONDS}
+        return {"replies": turn.replies, "reminder": reminder, "legacy_state": UserState.GENERAL}
+
+    def _handoff(self, state: AgentGraphState) -> AgentGraphState:
+        decision = state["decision"]
+        turn = state["turn"]
+        replies = turn.replies or [self.HANDOFF_DEFAULT_MESSAGE]
+        reason = decision.report or f"El agente derivó a un asesor: {state['text'][:240]}"
+        self._create_report_and_block(state["channel"], state["user_id"], state.get("user_name") or "", state["stored"], reason)
+        return {"replies": replies, "legacy_state": UserState.GENERAL}
+
+    def _close(self, state: AgentGraphState) -> AgentGraphState:
+        turn = state["turn"]
+        replies = turn.replies or [self.CLOSE_DEFAULT_MESSAGE]
+        ConversationStateRepo.clear(state["channel"], state["user_id"])
+        return {"replies": replies, "legacy_state": UserState.GENERAL}
+
+    def _city_invitation(self, state: AgentGraphState) -> AgentGraphState:
+        from src.application.publicidad_service import PublicidadService
+
+        city_text = state["decision"].city or state["text"]
+        user_name = state.get("user_name") or "Desconocido"
+        sent = ToolCallLogger.record(
+            client_id=state["user_id"],
+            canal=state["channel"],
+            tool_name="publicidad.handle_invitation_by_city",
+            input_data={"city_text": city_text, "user_name": user_name},
+            output_mapper=lambda result: {"sent": bool(result)},
+            text_mapper=lambda result: f"Publicidad por ciudad enviada: {bool(result)}",
+            call=lambda: PublicidadService.handle_invitation_by_city(
+                state["user_id"], city_text, user_name, Channel(state["channel"])
+            ),
+        )
+        if sent:
+            ConversationStateRepo.clear(state["channel"], state["user_id"])
+            return {"replies": [], "legacy_state": UserState.PUBLICIDAD}
+
+        reason = f"Ciudad '{city_text}' no se encontró en la lista de invitaciones."
+        self._create_report_and_block(state["channel"], state["user_id"], user_name, state["stored"], reason)
+        return {"replies": [self.HANDOFF_DEFAULT_MESSAGE], "legacy_state": UserState.GENERAL}
 
     # ------------------------------------------------------------------
     # Efectos compartidos
@@ -441,6 +544,7 @@ class AgentPipeline:
         bot_messages: list[str],
         turn_type: str,
         pending: str = "",
+        agent: str = "",
     ) -> list[dict]:
         updated = [
             *history,
@@ -448,6 +552,7 @@ class AgentPipeline:
                 "flow": AGENT_FLOW,
                 "node": "",
                 "type": turn_type,
+                "agent": agent,
                 "user": user_message,
                 "bot": bot_messages,
                 "pending": pending,

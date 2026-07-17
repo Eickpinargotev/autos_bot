@@ -11,7 +11,7 @@ os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "http://nocodb.test/conversati
 os.environ.setdefault("NOCODB_TOKEN", "test-token")
 
 from src.domain.entities import Channel
-from src.application.unified_agent import UnifiedAgent
+from src.application.unified_agent import SupervisorAgent
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from src.infrastructure.repositories.conversation_state_repo import ConversationState
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
@@ -122,7 +122,7 @@ class ConversationToolLoggingTests(unittest.TestCase):
             "src.application.unified_agent.client.chat.completions.create",
             side_effect=RuntimeError("openai failed"),
         ):
-            decision = UnifiedAgent().decide(
+            decision = SupervisorAgent().decide(
                 "Hola, quiero información",
                 ConversationState(),
                 client_id="5061",
@@ -131,7 +131,7 @@ class ConversationToolLoggingTests(unittest.TestCase):
 
         self.assertTrue(decision.action)
         kwargs = log_mock.call_args.kwargs
-        self.assertEqual(kwargs["tool_name"], "agent.decide")
+        self.assertEqual(kwargs["tool_name"], "agent.decide.supervisor")
         self.assertEqual(kwargs["status"], "error")
         self.assertIn("openai failed", kwargs["error"])
 
