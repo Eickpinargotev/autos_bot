@@ -157,7 +157,12 @@ class AgentPipeline:
         graph.add_conditional_edges(
             "specialist",
             self._after_decision,
-            {"supervisor": "supervisor", "city_invitation": "city_invitation", "expand": "expand"},
+            {
+                "supervisor": "supervisor",
+                "specialist": "specialist",  # defer con destino directo
+                "city_invitation": "city_invitation",
+                "expand": "expand",
+            },
         )
         graph.add_conditional_edges(
             "expand",
@@ -175,12 +180,14 @@ class AgentPipeline:
         return "supervisor"
 
     def _after_decision(self, state: AgentGraphState) -> str:
-        action = state["decision"].action
-        if action == "route":
+        decision = state["decision"]
+        if decision.action == "route":
             return "specialist"
-        if action == "defer":
-            return "supervisor"
-        if action == "city_invitation":
+        if decision.action == "defer":
+            # Defer con destino válido: pasa DIRECTO al otro especialista (sin
+            # llamada extra al supervisor). Sin destino, coordina el supervisor.
+            return "specialist" if decision.target else "supervisor"
+        if decision.action == "city_invitation":
             return "city_invitation"
         return "expand"
 
@@ -237,16 +244,24 @@ class AgentPipeline:
             client_id=state["user_id"],
             canal=state["channel"],
         )
+        tried = [*state.get("tried_areas", []), area]
         update: AgentGraphState = {
             "decision": decision,
             "decider": area,
-            "tried_areas": [*state.get("tried_areas", []), area],
+            "tried_areas": tried,
         }
         if decision.action == "defer":
-            update["internal_note"] = (
-                f"El especialista de {area} devolvió el turno: {decision.report} "
-                f"No vuelvas a enrutar a {area} en este turno."
-            )
+            # Destino directo solo si es un área nueva y no se agotó el tope
+            # por turno; si no, el defer cae al supervisor (sin destino).
+            if decision.target and (decision.target in tried or len(tried) >= MAX_AREAS_PER_TURN):
+                decision.target = ""
+            if decision.target:
+                update["area"] = decision.target
+            else:
+                update["internal_note"] = (
+                    f"El especialista de {area} devolvió el turno: {decision.report} "
+                    f"No vuelvas a enrutar a {area} en este turno."
+                )
         return update
 
     # ------------------------------------------------------------------

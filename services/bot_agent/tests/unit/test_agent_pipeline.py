@@ -166,6 +166,44 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(result.replies, get_fragment("DICTAMEN.D1").messages)
         self.assertEqual(h.saved_state.active_agent, "DICTAMEN")
 
+    def test_defer_with_target_goes_directly_to_the_other_specialist(self):
+        # Transición GENERAL→ALQUILER (teórico ✓ + cita ✓): el defer lleva
+        # destino y el pipeline enruta DIRECTO, sin llamada al supervisor.
+        defer = AgentDecision(
+            action="defer", target="ALQUILER",
+            report="Teórico aprobado y ya tiene cita; quiere B1 (carro).",
+        )
+        alquiler_reply = AgentDecision(
+            action="reply", messages=["[[frag:GENERAL.G35]]"], pending="La sede de su prueba"
+        )
+        with PipelineHarness(
+            ConversationState(active_agent="GENERAL"),
+            specialist=[defer, alquiler_reply],
+        ) as h:
+            result = h.run(text="si")
+
+        h.supervisor_mock.assert_not_called()
+        self.assertEqual(h.specialist_mock.call_count, 2)
+        self.assertEqual(result.replies, get_fragment("GENERAL.G35").messages)
+        self.assertEqual(h.saved_state.active_agent, "ALQUILER")
+
+    def test_defer_target_already_tried_falls_back_to_supervisor(self):
+        defer_a = AgentDecision(action="defer", target="CLASES", report="no es mi área")
+        defer_b = AgentDecision(action="defer", target="ALQUILER", report="tampoco es mi área")
+        clarify = AgentDecision(action="reply", messages=["¿Con qué le ayudo exactamente?"], pending="Qué necesita")
+        with PipelineHarness(
+            ConversationState(active_agent="ALQUILER"),
+            supervisor=clarify,
+            specialist=[defer_a, defer_b],
+        ) as h:
+            result = h.run(text="mmm")
+
+        # ALQUILER→CLASES directo; CLASES quiso devolver a ALQUILER (ya
+        # intentada) → cae al supervisor, que aclara.
+        self.assertEqual(h.specialist_mock.call_count, 2)
+        h.supervisor_mock.assert_called_once()
+        self.assertEqual(result.replies, ["¿Con qué le ayudo exactamente?"])
+
     def test_rerouting_to_the_same_area_degrades_to_safe_clarify(self):
         defer = AgentDecision(action="defer", report="No es mi área.")
         stubborn_route = AgentDecision(action="route", target="CLASES")
@@ -427,6 +465,16 @@ class DecisionValidationTests(unittest.TestCase):
         deferred = agent._validated_decision({"action": "defer"}, "quiero otra cosa")
         self.assertEqual(deferred.action, "defer")
         self.assertTrue(deferred.report)
+
+    def test_defer_target_is_validated(self):
+        agent = SpecialistAgent("GENERAL")
+        ok = agent._validated_decision({"action": "defer", "target": "ALQUILER"}, "si")
+        self.assertEqual(ok.target, "ALQUILER")
+        # Nunca hacia sí mismo ni hacia áreas inexistentes.
+        self_target = agent._validated_decision({"action": "defer", "target": "GENERAL"}, "si")
+        self.assertEqual(self_target.target, "")
+        invalid = agent._validated_decision({"action": "defer", "target": "MARTE"}, "si")
+        self.assertEqual(invalid.target, "")
 
     def test_rag_query_without_token_gets_token_inserted(self):
         agent = SupervisorAgent()

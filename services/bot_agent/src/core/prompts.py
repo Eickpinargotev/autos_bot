@@ -102,12 +102,13 @@ Devuelve JSON estricto:
   "messages": ["texto propio, [[frag:ID]] o [[rag]]  (vacío si action=defer)"],
   "rag_query": "duda informativa a resolver con la base de conocimiento, o vacío",
   "pending": "qué debe responder o hacer el cliente ahora, o vacío",
-  "report": "resumen interno (obligatorio si action=handoff; si action=defer, el motivo del defer)",
+  "report": "resumen interno (obligatorio si action=handoff; si action=defer, el contexto del caso: datos ya conocidos)",
+  "target": "GENERAL|ALQUILER|CLASES|DICTAMEN (solo para defer: el área a la que va el caso, si la sabes)",
   "city": "ciudad mencionada (solo para city_invitation)",
   "confidence": 0.0
 }
 
-ACCIÓN defer: úsala cuando la intención del cliente queda FUERA de tu área (quiere otro servicio o un tema que no es tuyo). El coordinador retomará el turno. No la uses para quejas, pagos ni pedidos de humano: esos son handoff directo. No envíes mensajes con defer.
+ACCIÓN defer: úsala cuando la intención del cliente queda FUERA de tu área o cuando tu proceso terminó y el siguiente paso pertenece a otra área. Si sabes a qué área va el caso, ponla en "target" (el sistema lo pasa directo); en "report" resume los datos ya conocidos para que la otra área no los repregunte. No la uses para quejas, pagos ni pedidos de humano: esos son handoff directo. No envíes mensajes con defer.
 """
 
 SUPERVISOR_PROMPT_BODY = """
@@ -142,13 +143,14 @@ PROCESO:
 - NO aprobó el teórico → ofrecemos preparación y cita para el teórico: envía [[frag:GENERAL.G4]] para preguntar la ciudad. Cuando dé la ciudad → action="city_invitation" con esa ciudad en "city" (el sistema le envía la invitación del curso de su zona; no inventes fechas ni sedes).
 - SÍ aprobó el teórico → ¿tiene cita para la prueba de manejo? ([[frag:GENERAL.G3]] si hay que preguntarlo).
   - NO tiene cita → [[frag:GENERAL.G7]] (le ayudamos con el formulario de cita).
-  - SÍ tiene cita → lo que sigue (vehículo para la prueba, sede, paquetes) es del área de ALQUILER: action="defer" indicando en "report" los datos que ya se conocen (teórico aprobado, tiene cita, sede si la dijo).
+  - SÍ tiene cita → lo que sigue (vehículo para la prueba, sede, paquetes) es del área de ALQUILER: action="defer" con "target": "ALQUILER", indicando en "report" los datos que ya se conocen (teórico aprobado, tiene cita, vehículo o sede si los dijo). NUNCA derives a un humano por esto: es la continuación normal del proceso.
 - Que NO tenga el teórico no es un problema ni motivo de derivar o cerrar: es exactamente el caso que atendemos con el curso teórico ([[frag:GENERAL.G4]]).
 - Dudas informativas del proceso → [[rag]] en el mismo turno.
 
 ═══ EJEMPLOS (ilustran el principio, NO son reglas por frase exacta) ═══
 - Primer contacto: "vengo a que me ayude a sacar la cita del práctico" → {"action": "reply", "messages": ["[[frag:GENERAL.G1]]"], "pending": "Si ya tiene el teórico ganado"}. La etiqueta va SOLA: nunca escribas tú el contenido del fragmento ni lo dividas en partes.
 - Historial: se envió [[frag:GENERAL.G1]]; el cliente responde "no" → {"action": "reply", "messages": ["[[frag:GENERAL.G4]]"], "pending": "La ciudad donde hará el curso teórico"}.
+- Historial: se envió [[frag:GENERAL.G3]] (¿tiene cita?); el cliente responde "si" → {"action": "defer", "target": "ALQUILER", "report": "Teórico aprobado y ya tiene cita para la prueba; quiere B1 (carro)."}.
 """
 
 ALQUILER_AGENT_BODY = """

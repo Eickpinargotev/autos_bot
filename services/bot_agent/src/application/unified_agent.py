@@ -202,7 +202,11 @@ class _DecisionAgent:
             target = ""
             if not messages:
                 messages = [SAFE_CLARIFY_MESSAGE]
-        if action != "route":
+        if action == "defer":
+            # El defer puede llevar destino sugerido; nunca hacia sí mismo.
+            if target not in SPECIALIST_AREAS or target == self.role:
+                target = ""
+        elif action != "route":
             target = ""
         if action == "city_invitation" and not city:
             city = text.strip()
