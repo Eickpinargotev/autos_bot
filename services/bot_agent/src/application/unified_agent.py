@@ -31,6 +31,18 @@ client = OpenAI(
 RAG_TOKEN = "[[rag]]"
 MAX_MESSAGES_PER_TURN = 4
 
+
+def _decision_llm_kwargs() -> dict:
+    """Parámetros extra de las llamadas de DECISIÓN.
+
+    El agente decide sin razonamiento (reasoning_effort="none"): respuestas
+    directas y sin tokens de reasoning facturados. Si OPENAI_MODEL se cambia a
+    un modelo que no acepte el parámetro, se deja OPENAI_REASONING_EFFORT="".
+    """
+    if settings.OPENAI_REASONING_EFFORT:
+        return {"reasoning_effort": settings.OPENAI_REASONING_EFFORT}
+    return {}
+
 # Aclaración de seguridad cuando no hay modelo disponible o la llamada falla:
 # no adivinamos la intención con reglas; preguntamos con las opciones.
 SAFE_CLARIFY_MESSAGE = (
@@ -111,6 +123,7 @@ class UnifiedAgent:
                     {"role": "system", "content": _system_prompt()},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
                 ],
+                **_decision_llm_kwargs(),
             )
             data = json.loads(completion.choices[0].message.content or "{}")
             decision = self._validated_decision(data, text)
@@ -251,6 +264,7 @@ class FollowupAgent:
                     {"role": "system", "content": FOLLOWUP_AGENT_PROMPT},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
                 ],
+                **_decision_llm_kwargs(),
             )
             data = json.loads(completion.choices[0].message.content or "{}")
             message = str(data.get("message") or "").strip()

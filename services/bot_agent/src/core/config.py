@@ -4,9 +4,13 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str
     OPENAI_API_KEY: str = ""
-    # gpt-4.1-mini: sigue mejor instrucciones largas (playbooks + catálogo) y
-    # es el modelo de decisión del agente único. temperature=0 en decisiones.
-    OPENAI_MODEL: str = "gpt-4.1-mini"
+    # gpt-5.4-mini: modelo de decisión del agente único. temperature=0 en
+    # decisiones. Se usa SIN razonamiento (reasoning_effort="none", que además
+    # es el default del modelo): respuestas directas, sin tokens de reasoning.
+    OPENAI_MODEL: str = "gpt-5.4-mini"
+    # Se envía como reasoning_effort en las llamadas de decisión. Déjalo vacío
+    # ("") si cambias OPENAI_MODEL a un modelo que no acepte ese parámetro.
+    OPENAI_REASONING_EFFORT: str = "none"
     EVAL_JUDGE_MODEL: str = "gpt-4o-mini"
     # Timeout/reintentos de las llamadas al LLM. El default del SDK es 600s con
     # 2 reintentos: una llamada colgada retendría un hilo del worker ~30 min y

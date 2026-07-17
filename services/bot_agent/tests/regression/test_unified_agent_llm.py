@@ -66,6 +66,64 @@ class RentalSkipsIrrelevantStepsTests(unittest.TestCase):
 
 
 @requires_llm
+class TranscriptRegressionTests(unittest.TestCase):
+    """Bugs reales vistos en producción (transcript 2026-07-16)."""
+
+    PACKAGE_FRAGMENTS = (
+        "GENERAL.G13", "GENERAL.G16", "GENERAL.G19", "GENERAL.G20", "GENERAL.G21",
+        "GENERAL.G22", "GENERAL.G25", "GENERAL.G28", "GENERAL.G29", "GENERAL.G30",
+        "GENERAL.G31", "GENERAL.G32",
+    )
+
+    def test_does_not_assume_vehicle_when_client_never_said_it(self):
+        # Bug: "quiero alquilar" + "ya tengo cita" → entregó el paquete de MOTO
+        # sin saber vehículo ni sede. Debe preguntar, no adivinar.
+        state = ConversationState(
+            flow="AGENT",
+            last_question="Si ya tiene cita agendada para la prueba de manejo",
+            awaiting_reply=True,
+            conversation_history=[
+                {
+                    "flow": "AGENT",
+                    "node": "",
+                    "type": "agent_reply",
+                    "user": "Hola, quiero alquilar, tengo 18 años",
+                    "bot": ["[[frag:Alquiler.A1]]"],
+                    "pending": "Si ya tiene cita agendada para la prueba de manejo",
+                }
+            ],
+        )
+        decision = _decide("Si, ya la tengo", state)
+        self.assertEqual(decision.action, "reply")
+        joined = _joined(decision)
+        for package in self.PACKAGE_FRAGMENTS:
+            self.assertNotIn(f"[[frag:{package}]]", joined, f"Entregó {package} sin saber el vehículo")
+
+    def test_data_correction_after_package_is_not_handed_off(self):
+        # Bug: tras enviar el paquete (reporte_pendiente lleno), el cliente
+        # corrigió "es para carro" y el agente derivó a humano. Una corrección
+        # del pedido la atiende el agente.
+        state = ConversationState(
+            flow="AGENT",
+            pending_report="Contestaron mensaje sobre formulario de reservacion, revisar!",
+            last_question="Que haga la reserva con el formulario del paquete",
+            awaiting_reply=True,
+            conversation_history=[
+                {
+                    "flow": "AGENT",
+                    "node": "",
+                    "type": "agent_reply",
+                    "user": "Si, ya la tengo",
+                    "bot": ["[[frag:GENERAL.G16]]"],
+                    "pending": "Que haga la reserva con el formulario del paquete",
+                }
+            ],
+        )
+        decision = _decide("Es para carro que quiero alquilar", state)
+        self.assertEqual(decision.action, "reply")
+
+
+@requires_llm
 class EscalationTests(unittest.TestCase):
     def test_angry_customer_is_handed_off_with_a_human_message(self):
         decision = _decide("Me siento estafado, pagué y nadie me resuelve nada. Quiero mi dinero de vuelta.")

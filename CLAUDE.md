@@ -70,7 +70,7 @@ Hay **tres niveles** de tests; respétalos al escribir nuevos:
 Capas en `services/bot_agent/src/`: `domain/`, `application/`, `infrastructure/`, `core/`.
 
 Pipeline de conversación (**modelo único**, ver `docs/modelo_unico.md`):
-1. `application/unified_agent.py` — UNA decisión LLM por turno (`gpt-4.1-mini`,
+1. `application/unified_agent.py` — UNA decisión LLM por turno (`gpt-5.4-mini` sin razonamiento,
    `temperature=0`): acción (`reply|handoff|close|city_invitation`), mensajes con etiquetas
    `[[frag:ID]]`/`[[rag]]`, pendiente y reporte. También `FollowupAgent` (recordatorios).
 2. `application/agent_pipeline.py` — StateGraph de **LangGraph** con guardrails

@@ -2,7 +2,7 @@
 
 Esta rama reemplaza la máquina de estados (recepción → clasificador → router →
 grafo de nodos de negocio) por **un agente único**: una sola decisión LLM por
-turno (`gpt-4.1-mini`, `temperature=0`) con guardrails deterministas en código.
+turno (`gpt-5.4-mini` sin razonamiento — `reasoning_effort="none"` —, `temperature=0`) con guardrails deterministas en código.
 La orquestación del turno sigue siendo un **StateGraph de LangGraph**, pero con
 UN punto de decisión en lugar de un grafo de estados de negocio:
 
