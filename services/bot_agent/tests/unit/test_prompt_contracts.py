@@ -50,6 +50,14 @@ class CommonContractTests(unittest.TestCase):
         self.assertIn("NUNCA vuelvas a preguntar un dato que el cliente ya dio", AGENT_COMMON_CONTRACT)
         self.assertIn("sáltate los pasos ya resueltos", AGENT_COMMON_CONTRACT)
 
+    def test_contract_infers_state_from_requests_and_respects_branches(self):
+        # Lecciones generales del transcript 2026-07-16: pedir OBTENER algo
+        # implica no tenerlo, y la respuesta a una pregunta sí/no elige la
+        # rama; nunca se envía el material de la rama contraria.
+        self.assertIn("ya te dijo que NO lo tiene", AGENT_COMMON_CONTRACT)
+        self.assertIn("RAMAS del proceso", AGENT_COMMON_CONTRACT)
+        self.assertIn("NUNCA envíes el material de la rama contraria", AGENT_COMMON_CONTRACT)
+
     def test_contract_avoids_intent_by_exact_phrase(self):
         self.assertIn("nunca por palabras sueltas ni frases exactas", AGENT_COMMON_CONTRACT)
 

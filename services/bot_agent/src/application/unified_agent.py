@@ -129,6 +129,9 @@ class _DecisionAgent:
         input_data = {
             "text": text,
             "role": self.role,
+            # El modelo queda en la traza: permite diagnosticar despliegues
+            # con un OPENAI_MODEL distinto al esperado sin adivinar.
+            "model": settings.OPENAI_MODEL,
             "history_turns": len(state.conversation_history),
             "pending": state.last_question,
             "pending_report": bool(state.pending_report),
@@ -311,6 +314,7 @@ class FollowupAgent:
         started = time.monotonic()
         input_data = {
             "pending": state.last_question,
+            "model": settings.OPENAI_MODEL,
             "history_turns": len(state.conversation_history),
             "reminder_level": state.reminder_level,
         }
