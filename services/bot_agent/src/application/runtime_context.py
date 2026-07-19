@@ -141,12 +141,10 @@ def clear_user_runtime_context(
 ):
     from src.application.reminder_service import ReminderService
     from src.infrastructure.repositories.conversation_state_repo import ConversationStateRepo
-    from src.infrastructure.repositories.redis_state_repo import RedisStateRepo
 
     ReminderService.cancel(channel, user_id)
     BufferService.get_and_clear_buffer(user_id, channel)
     ConversationStateRepo.clear(channel, user_id)
-    RedisStateRepo.reset_state(user_id, channel)
 
     redis_client.delete(
         _key("joined_group", channel, user_id),

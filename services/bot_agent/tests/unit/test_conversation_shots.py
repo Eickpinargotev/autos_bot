@@ -12,8 +12,8 @@ os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "")
 os.environ.setdefault("NOCODB_CONVERSATION_SHOTS_URL", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
-from src.application.agent_pipeline import FlowProcessingResult
-from src.domain.entities import Channel, UserState
+from src.application.agent_pipeline import TurnResult
+from src.domain.entities import Channel
 from src.infrastructure.evals.conversation_shots import (
     ConversationShotBuilder,
     ConversationShotRepository,
@@ -134,13 +134,8 @@ class ConversationShotTests(unittest.TestCase):
         with patch("src.infrastructure.tasks.celery_app.BufferService.get_and_clear_buffer", return_value="quiero saber algo"), patch(
             "src.infrastructure.tasks.celery_app.ReminderService.cancel"
         ), patch("src.infrastructure.tasks.celery_app.ConversationStateRepo.get", side_effect=[before, after]), patch(
-            "src.infrastructure.tasks.celery_app.RedisStateRepo.get_state",
-            return_value=UserState.GENERAL,
-        ), patch(
-            "src.infrastructure.tasks.celery_app.RedisStateRepo.set_state"
-        ), patch(
-            "src.infrastructure.tasks.celery_app.process_fsm",
-            return_value=FlowProcessingResult(UserState.GENERAL, replies=["respuesta bot"]),
+            "src.infrastructure.tasks.celery_app.run_agent_turn",
+            return_value=TurnResult(replies=["respuesta bot"]),
         ), patch(
             "src.infrastructure.tasks.celery_app.ConversationShotRepository.save",
             return_value=True,

@@ -5,13 +5,15 @@ sistema**: un cambio de una frase puede alterar el ruteo de miles de conversacio
 Este documento define el proceso obligatorio para crearlos o editarlos. **Ningún
 prompt se edita "al vuelo".**
 
-Los prompts vigentes y su rol:
+Los prompts vigentes y su rol (arquitectura supervisor/workers, ver
+`docs/modelo_unico.md` y `docs/diseno_especialistas.md`):
 
 | Prompt | Rol | Contrato de salida |
 | ------ | --- | ------------------ |
-| `RECEPTION_AGENT_PROMPT` | Intake (PD1): decide action/flow del primer contacto | JSON validado por `ReceptionAgent._validated_decision` |
-| `REPLY_EVALUATION_PROMPT` | Clasificador dentro de flujo (PD2): intent + value + duda lateral | JSON normalizado por `ResponseClassifier._normalize` |
-| `REPORT_SUMMARY_PROMPT` | Resumen para reportes a asesor | JSON `{"resumen": ...}` |
+| `AGENT_COMMON_CONTRACT` | Reglas transversales de TODOS los agentes (fragmentos literales, anti-invención, queja/pago→humano, estilo) | — (se ensambla con el resto) |
+| `SUPERVISOR_PROMPT_BODY` + `SUPERVISOR_OUTPUT_SCHEMA` | Coordinador: saludo, ambiguo, queja, WIN, dudas sueltas y enrutamiento | JSON validado por `_DecisionAgent._validated_decision` |
+| `AREA_PROMPT_BODIES[área]` + `SPECIALIST_OUTPUT_SCHEMA` | Playbook de cada especialista (GENERAL, CURSO_TEORICO, ALQUILER, CLASES, DICTAMEN, TRAMITES) | JSON validado por `_DecisionAgent._validated_decision` |
+| `FOLLOWUP_AGENT_PROMPT` | Recordatorio inteligente (decide si retomar y redacta UN mensaje) | JSON `{send, message}` |
 | `EXTRACT_AD_INFO_PROMPT` | Extracción de datos de anuncios | JSON `{dia, valor, hora}` |
 | Prompt del RAG (en `rag_service._answer_prompt`) | Generación con evidencia | JSON `{has_answer, answer}` |
 
@@ -27,10 +29,11 @@ preservarlos:
    saludo, haz X". Los few-shot ilustran el principio; no son reglas por caso. Si un
    bug se arregló agregando la frase literal del cliente al prompt, el arreglo está
    mal: generaliza la instrucción.
-2. **Un prompt = una decisión.** Recepción decide el ruteo inicial; el clasificador
-   interpreta la respuesta al paso; el RAG genera con evidencia. No mezclar
-   responsabilidades ni duplicar reglas entre prompts (dos fuentes de verdad
-   divergen).
+2. **Un prompt = una responsabilidad.** El supervisor coordina y enruta; cada
+   especialista ejecuta SOLO su playbook con SU catálogo; el followup decide el
+   recordatorio; el RAG genera con evidencia. No mezclar responsabilidades ni
+   duplicar reglas entre prompts (dos fuentes de verdad divergen): lo transversal
+   vive UNA vez en `AGENT_COMMON_CONTRACT`.
 3. **Prioridades explícitas y excluyentes.** Ambos prompts de decisión eligen UNA
    acción/intención siguiendo un orden de prioridad numerado (queja > handoff >
    rechazo > …). Toda regla nueva debe insertarse en ese orden, no como excepción
@@ -46,11 +49,12 @@ preservarlos:
    `tests/unit/test_prompt_contracts.py`. El conocimiento de negocio vive en el RAG
    y en `mensajes.json`, no en los prompts.
 7. **Estados imposibles se bloquean en código, no solo en el prompt.** Ejemplos
-   vigentes: un `greeting` nunca lleva duda lateral (`_normalize`), un `start_flow`
-   sin pregunta no antepone respuesta (invariante P2 en `_normalized_decision`). Si
+   vigentes: un especialista no puede enviar fragmentos ajenos (partición en
+   `agent_pipeline`), `route`/`defer` con target inválido se descartan
+   (`_validated_decision`), el defer solo puede ocurrir una vez por turno. Si
    detectas una combinación inválida nueva, agrega la normalización en código además
    de la instrucción.
-8. **Decisiones con `temperature=0`.** Recepción, clasificador y juez son
+8. **Decisiones con `temperature=0`.** Supervisor, especialistas y followup son
    deterministas. Solo la generación libre (RAG, publicidad) puede usar otra
    temperatura.
 9. **Sin conocimiento variable en el prompt.** Precios, horarios, links, requisitos →
@@ -65,10 +69,10 @@ Checklist a seguir **en orden**; si un paso falla, no se avanza:
    qué el comportamiento actual es incorrecto, y por qué la solución es una
    instrucción general y no una regla por frase.
 2. **¿Es de verdad el prompt?** Antes de editar, confirma que el problema no es de:
-   - ruteo → `flow_router.py`
    - texto del bot → `mensajes.json`
-   - cableado del grafo → `flow_graph.py`
-   - normalización de salida → `_validated_decision` / `_normalize`
+   - partición de fragmentos por área → `fragment_catalog.py` (`AREA_FRAGMENTS`)
+   - cableado del grafo / guardrails (anti-bucle, defer, reporte) → `agent_pipeline.py`
+   - normalización de salida → `_validated_decision` (`unified_agent.py`)
    La mayoría de los "bugs de prompt" son de otra capa.
 3. **Localiza la sección correcta** del prompt (los bloques están separados por caso
    con `═══`). La regla nueva va dentro del caso al que pertenece y respetando el
@@ -107,8 +111,8 @@ Además de todo lo anterior:
 4. Definir el **fallback sin LLM**: qué hace el sistema si no hay key o la llamada
    falla. La regla del proyecto es degradar a un comportamiento seguro y honesto
    (aclarar / `unknown`), nunca adivinar con heurísticas.
-5. Añadirlo a la tabla de este documento y, si toma decisiones de ruteo, a
-   `docs/tabla_decision_agente.md`.
+5. Añadirlo a la tabla de este documento y, si define un área nueva, actualizar
+   `docs/diseno_especialistas.md` (mapa de especialistas y partición de fragmentos).
 
 ## 4. Qué NO hacer (errores ya cometidos y corregidos)
 

@@ -14,7 +14,6 @@ from src.application.runtime_context import (
     set_keyword_active_report,
 )
 from src.domain.entities import Channel
-from src.infrastructure.repositories.redis_state_repo import RedisStateRepo
 from src.infrastructure.channels.senders import ChannelSenderRegistry
 from src.infrastructure.repositories.conversation_state_repo import ConversationStateRepo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
@@ -25,7 +24,7 @@ from src.infrastructure.evals.conversation_shots import (
     ConversationShotRepository,
     ShotTraceCollector,
 )
-from src.application.fsm import process_fsm
+from src.application.agent_pipeline import run_agent_turn
 
 celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL)
 
@@ -73,8 +72,8 @@ def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desc
 
     # Un solo turno en proceso a la vez por conversación. Sin este candado, un
     # mensaje que llega mientras el turno anterior sigue esperando al LLM crea
-    # dos process_fsm en paralelo del MISMO usuario: el turno más lento pisa el
-    # estado del más nuevo y las respuestas salen desordenadas. Si el candado
+    # dos turnos del agente en paralelo del MISMO usuario: el turno más lento
+    # pisa el estado del más nuevo y las respuestas salen desordenadas. Si el candado
     # está tomado, la tarea se reagenda SIN drenar el buffer: el debounce por
     # `seq` sigue decidiendo cuál tarea procesa la ráfaga.
     lock_key = scoped_key("processing", channel_value, user_id)
@@ -102,10 +101,8 @@ def _process_buffered_messages_locked(channel_value: Channel, user_id: str, user
 
     ReminderService.cancel(channel_value, user_id)
     state_before = ConversationStateRepo.get(channel_value, user_id)
-    state = RedisStateRepo.get_state(user_id, channel_value)
     with ShotTraceCollector() as shot_collector:
-        result = process_fsm(user_id, state, text, channel=channel_value, user_name=user_name)
-    RedisStateRepo.set_state(user_id, result.legacy_state, channel_value)
+        result = run_agent_turn(channel_value, user_id, text, user_name=user_name)
     state_after = ConversationStateRepo.get(channel_value, user_id)
 
     _save_conversation_shot(

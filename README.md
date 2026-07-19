@@ -41,8 +41,8 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 │   ├── operacion_escala_y_trazabilidad.md  # concurrencia, anti-duplicados, capacidad, trazado
 │   ├── seguridad.md                        # postura de seguridad + checklist de despliegue
 │   ├── gobernanza_de_prompts.md            # proceso obligatorio para crear/editar prompts
-│   ├── reglas_agente_recepcion.md
-│   ├── tabla_decision_agente.md
+│   ├── modelo_unico.md                     # arquitectura supervisor/workers vigente
+│   ├── diseno_especialistas.md             # mapa de especialistas, mensajes fijos y prompts
 │   ├── despliegue_docker_easypanel.md
 │   ├── descripcion_funcional_bot.md
 │   ├── arquitectura_general.md
@@ -149,8 +149,8 @@ paralelo**.
 
 ### ¿Por qué hilos y por qué 20 (y no se satura la CPU)?
 
-- **Las tareas son I/O-bound, no CPU-bound.** Cada turno hace varias llamadas al LLM
-  (recepción/clasificador + RAG): el ~95% del tiempo el hilo está **esperando la
+- **Las tareas son I/O-bound, no CPU-bound.** Cada turno hace una o más llamadas al LLM
+  (supervisor/especialista + RAG): el ~95% del tiempo el hilo está **esperando la
   respuesta de OpenAI por la red**, con la CPU ociosa.
 - **Hilos, no procesos.** Con `--pool=threads` los 20 son hilos dentro de **un solo
   proceso**. Por el **GIL** de Python, solo un hilo ejecuta cálculo a la vez, así que

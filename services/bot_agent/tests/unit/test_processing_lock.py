@@ -26,7 +26,7 @@ class ProcessingLockTests(unittest.TestCase):
             tasks.process_buffered_messages, "apply_async"
         ) as reschedule_mock, patch.object(
             tasks.BufferService, "drain_if_current"
-        ) as drain_mock, patch.object(tasks, "process_fsm") as fsm_mock:
+        ) as drain_mock, patch.object(tasks, "run_agent_turn") as turn_mock:
             tasks.process_buffered_messages("whatsapp", "5061", "Cliente", 3)
 
         lock_key = scoped_key("processing", Channel.WHATSAPP, "5061")
@@ -35,7 +35,7 @@ class ProcessingLockTests(unittest.TestCase):
         # decide después) y no toca el buffer ni el grafo.
         reschedule_mock.assert_called_once_with(("whatsapp", "5061", "Cliente", 3), countdown=2)
         drain_mock.assert_not_called()
-        fsm_mock.assert_not_called()
+        turn_mock.assert_not_called()
 
     def test_releases_lock_after_processing(self):
         with patch.object(tasks.redis_client, "set", return_value=True), patch.object(

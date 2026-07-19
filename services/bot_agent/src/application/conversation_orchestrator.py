@@ -17,7 +17,6 @@ from src.application.runtime_context import (
 )
 from src.domain.entities import Channel, InboundMessage, MessageType, OrchestratorAction
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
-from src.infrastructure.repositories.redis_state_repo import RedisStateRepo
 from src.infrastructure.repositories.report_repository import ReportRepository
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories.keyword_registry_repository import KeywordRegistryRepository
@@ -116,7 +115,6 @@ class ConversationOrchestrator:
         repo = PostgresUserRepo()
         repo.block_user(message.user_id, reason="Ingreso a grupo", days=12, channel=message.channel)
         set_welcome_context(message.channel, message.user_id)
-        RedisStateRepo.reset_state(message.user_id, message.channel)
         BufferService.get_and_clear_buffer(message.user_id, message.channel)
 
         return [self._send(message, msg) for msg in welcome_msgs]

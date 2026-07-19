@@ -39,7 +39,7 @@ from src.application.unified_agent import (
     SupervisorAgent,
 )
 from src.core.config import settings
-from src.domain.entities import Channel, UserState
+from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from src.infrastructure.repositories.conversation_state_repo import ConversationState, ConversationStateRepo
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
@@ -57,8 +57,7 @@ MAX_AREAS_PER_TURN = 2
 
 
 @dataclass
-class FlowProcessingResult:
-    legacy_state: UserState
+class TurnResult:
     replies: list[str] = field(default_factory=list)
     reminder: dict[str, Any] | None = None
 
@@ -85,7 +84,6 @@ class AgentGraphState(TypedDict, total=False):
     turn: _ExpandedTurn
     replies: list[str]
     reminder: dict[str, Any] | None
-    legacy_state: UserState
 
 
 class AgentPipeline:
@@ -112,7 +110,7 @@ class AgentPipeline:
         user_id: str,
         text: str,
         user_name: str = "Desconocido",
-    ) -> FlowProcessingResult:
+    ) -> TurnResult:
         channel_value = channel.value if isinstance(channel, Channel) else channel
         result = self.graph.invoke({
             "channel": channel_value,
@@ -122,8 +120,7 @@ class AgentPipeline:
             "tried_areas": [],
             "internal_note": "",
         })
-        return FlowProcessingResult(
-            legacy_state=result.get("legacy_state", UserState.GENERAL),
+        return TurnResult(
             replies=result.get("replies", []),
             reminder=result.get("reminder"),
         )
@@ -529,7 +526,7 @@ class AgentPipeline:
         reminder = None
         if pending and not turn.rag_missed:
             reminder = {"level": 1, "seconds": settings.FOLLOWUP_FIRST_DELAY_SECONDS}
-        return {"replies": turn.replies, "reminder": reminder, "legacy_state": UserState.GENERAL}
+        return {"replies": turn.replies, "reminder": reminder}
 
     def _handoff(self, state: AgentGraphState) -> AgentGraphState:
         decision = state["decision"]
@@ -537,13 +534,13 @@ class AgentPipeline:
         replies = turn.replies or [self.HANDOFF_DEFAULT_MESSAGE]
         reason = decision.report or f"El agente derivó a un asesor: {state['text'][:240]}"
         self._create_report_and_block(state["channel"], state["user_id"], state.get("user_name") or "", state["stored"], reason)
-        return {"replies": replies, "legacy_state": UserState.GENERAL}
+        return {"replies": replies}
 
     def _close(self, state: AgentGraphState) -> AgentGraphState:
         turn = state["turn"]
         replies = turn.replies or [self.CLOSE_DEFAULT_MESSAGE]
         ConversationStateRepo.clear(state["channel"], state["user_id"])
-        return {"replies": replies, "legacy_state": UserState.GENERAL}
+        return {"replies": replies}
 
     def _city_invitation(self, state: AgentGraphState) -> AgentGraphState:
         from src.application.publicidad_service import PublicidadService
@@ -563,11 +560,11 @@ class AgentPipeline:
         )
         if sent:
             ConversationStateRepo.clear(state["channel"], state["user_id"])
-            return {"replies": [], "legacy_state": UserState.PUBLICIDAD}
+            return {"replies": []}
 
         reason = f"Ciudad '{city_text}' no se encontró en la lista de invitaciones."
         self._create_report_and_block(state["channel"], state["user_id"], user_name, state["stored"], reason)
-        return {"replies": [self.HANDOFF_DEFAULT_MESSAGE], "legacy_state": UserState.GENERAL}
+        return {"replies": [self.HANDOFF_DEFAULT_MESSAGE]}
 
     # ------------------------------------------------------------------
     # Efectos compartidos
@@ -616,3 +613,21 @@ class AgentPipeline:
             },
         ]
         return updated[-settings.AGENT_HISTORY_LIMIT:]
+
+
+# ---------------------------------------------------------------------------
+# Punto de entrada del turno conversacional (lo usa el worker de Celery).
+# ---------------------------------------------------------------------------
+_default_pipeline: AgentPipeline | None = None
+
+
+def run_agent_turn(
+    channel: Channel | str,
+    user_id: str,
+    text: str,
+    user_name: str = "Desconocido",
+) -> TurnResult:
+    global _default_pipeline
+    if _default_pipeline is None:
+        _default_pipeline = AgentPipeline()
+    return _default_pipeline.run(channel, user_id, text, user_name=user_name)

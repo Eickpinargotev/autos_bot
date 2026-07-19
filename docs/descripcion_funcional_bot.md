@@ -15,23 +15,23 @@ El bot trabaja como una recepcion automatica con memoria de conversacion. Cada m
 Cuando llega un mensaje nuevo, el sistema puede tomar estos caminos:
 
 1. Si el cliente viene desde publicidad, entra al flujo de publicidad correspondiente. Este camino se usa para personas que llegan por invitaciones, campanas o mensajes promocionales.
-2. Si el mensaje no viene desde publicidad, entra primero al agente recepcionista. Este agente entiende la intencion del cliente, responde dudas iniciales cuando corresponde y deriva al proceso adecuado.
-3. Si el mensaje corresponde a una palabra clave especial, como `tareas` o `transporte`, se activa el flujo respectivo de seguimiento.
+2. Si el mensaje corresponde a una palabra clave especial, como `tareas` o `transporte`, se activa el flujo respectivo de seguimiento.
+3. En cualquier otro caso, el mensaje llega al **supervisor** (recepcion). El supervisor entiende la intencion del cliente, atiende el mismo los casos transversales (saludos, mensajes ambiguos, quejas, felicitaciones por aprobar la prueba, dudas informativas sueltas) y, cuando hay una intencion clara de servicio, **enruta** la conversacion al especialista del area. A partir de ahi el especialista queda como dueño de la conversacion.
 
-Desde el agente recepcionista, el cliente puede ser derivado a estos procesos:
+Los especialistas disponibles son:
 
-- Informacion general: cuando pregunta por licencia, curso teorico, citas, prueba de manejo, COSEVI, MOPT u orientacion general.
-- Alquiler de vehiculo: cuando pide alquilar, rentar o reservar un vehiculo para prueba de manejo.
-- Clases de manejo: cuando solicita clases practicas, lecciones o practica de conduccion.
-- Dictamen medico: cuando consulta por dictamen, examen medico, cita, requisitos o formulario.
-- Quejas: cuando expresa molestia, reclamo, devolucion, mal servicio o enojo.
-- Clientes que aprobaron: cuando informa que gano, aprobo o paso una prueba.
-- Publicidad: cuando el contexto indica que viene por una invitacion o campana.
-- Bienvenida a grupos: cuando se detecta que el cliente ingreso a un grupo.
+- Proceso de licencia (GENERAL): ordena el proceso cuando el cliente quiere sacar su licencia y hay que ubicar en que paso esta (teorico, cita, vehiculo).
+- Curso teorico (CURSO_TEORICO): matricula del curso por ciudad, cita teorica, pago de enteros, reingreso a un curso vencido y plataforma de estudio.
+- Alquiler de vehiculo (ALQUILER): alquilar, rentar o reservar un vehiculo para la prueba de manejo, en cualquier categoria y sede.
+- Clases de manejo (CLASES): clases practicas, lecciones o practica de conduccion.
+- Dictamen medico (DICTAMEN): dictamen, requisitos y su formulario.
+- Tramites administrativos (TRAMITES): renovacion, homologacion, permiso temporal, taxi, maquinaria, cancelacion de citas y multas; informa con la base de conocimiento y deriva al equipo cuando el cliente decide ejecutar.
+
+Si un especialista recibe un tema que no es suyo, devuelve el turno y el caso pasa al area correcta con el contexto ya reunido: nadie vuelve a preguntar lo que el cliente ya dijo.
 
 Las palabras clave `tareas` y `transporte` funcionan como accesos directos a procesos especiales. Cuando alguno de estos caminos se inicia, el sistema registra al cliente en NocoDB para reconocerlo en futuras interacciones. Ese registro permite aplicar informacion diferenciada cuando corresponda, por ejemplo enviar SINPE distintos en casos de dictamen o en informacion relacionada con alquiler de motos.
 
-Tanto el agente recepcionista como los procesos guiados pueden responder preguntas. Esto significa que el cliente puede hacer una duda al inicio de la conversacion o mientras ya esta dentro de un proceso, y el bot intentara responderla sin perder el hilo principal.
+Tanto el supervisor como los especialistas pueden responder preguntas. Esto significa que el cliente puede hacer una duda al inicio de la conversacion o mientras ya esta dentro de un proceso, y el bot intentara responderla sin perder el hilo principal.
 
 ## Canales y tipos de mensajes
 
@@ -44,22 +44,22 @@ Los mensajes que atiende son:
 - Imagen o documento: el bot avisa que no puede ver imagenes/documentos. Si el cliente insiste, se interpreta como una solicitud de ayuda para revision humana.
 - Eventos de grupo: cuando el sistema detecta ingreso a grupo, puede enviar el mensaje de bienvenida y cambiar el estado del cliente; este mensaje de bienvenida se envía solo si el cliente primero recibió el mensaje de invitación cuando llego por publicidad.
 
-## Recepcion inicial
+## Recepcion inicial (supervisor)
 
-Cuando un cliente escribe por primera vez, o cuando no hay un proceso activo, el sistema entra en una etapa de recepcion. En esta etapa no se limita a buscar palabras sueltas; interpreta el mensaje completo para entender si el cliente esta preguntando algo, si quiere contratar un servicio, si tiene una queja o si necesita una persona.
+Cuando un cliente escribe por primera vez, o cuando ningun especialista tiene la conversacion, el mensaje lo atiende el supervisor. No se limita a buscar palabras sueltas; interpreta el mensaje completo para entender si el cliente esta preguntando algo, si quiere contratar un servicio, si tiene una queja o si necesita una persona.
 
-La recepcion decide entre varias acciones:
+El supervisor decide entre varias acciones:
 
-- Responder una duda y luego iniciar un proceso guiado.
-- Responder una duda y hacer una pregunta aclaratoria.
-- Iniciar directamente un proceso guiado.
-- Pedir una aclaracion breve.
+- Enrutar la conversacion al especialista del area cuando la intencion es clara.
+- Responder una duda informativa con la base de conocimiento.
+- Pedir una aclaracion breve cuando el mensaje es ambiguo (sin repetir la misma aclaracion una y otra vez).
+- Atender quejas y felicitaciones con los mensajes del negocio.
 - Crear reporte para asesor humano.
 - Cerrar la conversacion si el cliente indica que no necesita continuar.
 
-Esta recepcion es importante porque muchos clientes escriben mensajes mezclados, por ejemplo: "quiero sacar licencia de moto, que necesito?" En ese caso el bot puede responder primero la duda con RAG y luego preguntar si desea mas información sobre el proceso.
+Esta recepcion es importante porque muchos clientes escriben mensajes mezclados, por ejemplo: "quiero sacar licencia de moto, que necesito?" En ese caso el especialista puede responder la duda con RAG y avanzar el proceso en el mismo turno, saltandose los pasos que el cliente ya resolvio.
 
-El detalle paso a paso de cada proceso se revisa en el diagrama de flujo del sistema. Este documento se enfoca en explicar como se comporta el agente en la operacion diaria y que debe esperar el equipo al usarlo.
+El mapa completo de especialistas y sus mensajes se revisa en `docs/diseno_especialistas.md`. Este documento se enfoca en explicar como se comporta el agente en la operacion diaria y que debe esperar el equipo al usarlo.
 
 ## RAG y base de conocimiento
 
@@ -88,12 +88,11 @@ Si el equipo agrega, modifica o elimina informacion de esa base, el bot puede us
 
 Un cliente puede responder una pregunta del proceso y al mismo tiempo hacer una duda adicional. Por ejemplo: "Si, es en Liberia, pero que pasa si pierdo la prueba?"
 
-En ese caso el sistema:
+En ese caso el especialista, en un mismo turno:
 
-- Detecta la respuesta principal para avanzar el proceso.
-- Extrae la pregunta lateral.
-- Usa RAG para responder esa duda.
-- Luego envia los mensajes del siguiente paso del proceso.
+- Toma la respuesta principal para avanzar el proceso.
+- Responde la duda lateral con RAG.
+- Envia los mensajes del siguiente paso del proceso.
 
 Si la pregunta lateral no tiene respuesta en la base de conocimiento, queda registrada como pregunta sin respuesta y el bot indica que puede contactar a un asesor.
 
@@ -151,22 +150,13 @@ Los recordatorios permiten dar seguimiento automatico cuando el cliente no respo
 
 No todos los recordatorios generan reportes. Algunos solo buscan que el cliente retome la conversacion; otros continuan el proceso si el cliente responde; y otros si estan pensados para avisar al equipo cuando el cliente contesta.
 
-El funcionamiento general es:
+En las conversaciones del agente los recordatorios son **inteligentes**: un agente de seguimiento analiza la conversacion, decide si conviene retomar (no insiste si el cliente se despidio, dio un plazo o esta molesto) y redacta UN mensaje corto personalizado al punto exacto donde quedo el chat. El funcionamiento general es:
 
-1. El bot envia un mensaje que espera respuesta.
-2. Si el cliente responde antes del recordatorio, el bot cancela ese seguimiento y continua la conversacion.
-3. Si el cliente no responde, el bot envia un recordatorio.
-4. Despues del recordatorio, el sistema queda atento por si el cliente contesta.
-5. Segun el tipo de recordatorio, la respuesta del cliente puede continuar la conversacion, cerrar el seguimiento o generar un reporte para el equipo.
-
-Cada recordatorio puede tener:
-
-- Tiempo de espera en segundos.
-- Mensajes que se enviaran.
-- Indicacion de si la respuesta del cliente requiere reporte.
-- Otro recordatorio encadenado, si el proceso necesita mas de un intento.
-
-En algunos procesos puede haber mas de un recordatorio. Por ejemplo, el bot puede enviar un primer seguimiento y, si el cliente sigue sin responder, enviar un segundo. Si el cliente contesta despues, el sistema revisa que corresponde hacer en ese punto: continuar automaticamente, dejar la conversacion lista para seguir o avisar al equipo.
+1. El bot envia un mensaje que deja un paso pendiente del cliente.
+2. Si el cliente responde antes del recordatorio, el seguimiento se cancela y la conversacion continua.
+3. Si el cliente no responde, el agente de seguimiento evalua y, si conviene, envia el recordatorio.
+4. Hay un maximo de recordatorios por conversacion (tope duro en la configuracion); despues de eso el bot no insiste mas.
+5. Segun el punto del proceso, la respuesta del cliente puede continuar la conversacion o generar un reporte para el equipo.
 
 En publicidad y palabras clave tambien hay recordatorios programados. En esos casos el objetivo es dar seguimiento a una invitacion, a un ingreso a grupo o a un proceso especial. Si el cliente responde en un momento que requiere revision humana, el equipo recibe un reporte para revisar la conversacion y continuar manualmente si corresponde.
 

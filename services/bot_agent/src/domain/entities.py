@@ -13,18 +13,6 @@ class MessageType(Enum):
     DOCUMENT = "document"
     OTHER = "other"
 
-class UserState(Enum):
-    INICIO = "INICIO"
-    DICTAMEN = "DICTAMEN"
-    CLASES = "CLASES"
-    GENERAL = "GENERAL"
-    ALQUILER = "ALQUILER"
-    QUEJAS = "QUEJAS"
-    WIN = "WIN"
-    PUBLICIDAD = "PUBLICIDAD"
-    KEYWORD = "KEYWORD"
-    WELCOME = "WELCOME"
-
 @dataclass
 class Message:
     user_id: str

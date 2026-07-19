@@ -21,7 +21,7 @@ os.environ.setdefault("NOCODB_CONVERSATION_SHOTS_URL", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.core.config import settings
-from src.domain.entities import Channel, UserState
+from src.domain.entities import Channel
 from src.infrastructure.repositories import nocodb_retention
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories.conversation_state_repo import (
@@ -29,7 +29,6 @@ from src.infrastructure.repositories.conversation_state_repo import (
     ConversationState,
     ConversationStateRepo,
 )
-from src.infrastructure.repositories.redis_state_repo import STATE_TTL_SECONDS, RedisStateRepo
 from src.infrastructure.evals.conversation_shots import ConversationShotRepository
 
 
@@ -136,7 +135,6 @@ class RedisTtlTests(unittest.TestCase):
     def test_retention_constant_matches_setting(self):
         expected = settings.CONVERSATION_RETENTION_DAYS * 24 * 60 * 60
         self.assertEqual(CONVERSATION_STATE_TTL_SECONDS, expected)
-        self.assertEqual(STATE_TTL_SECONDS, expected)
 
     def test_conversation_state_set_applies_sliding_ttl(self):
         with patch(
@@ -145,14 +143,6 @@ class RedisTtlTests(unittest.TestCase):
             ConversationStateRepo.set(Channel.WHATSAPP, "506999", ConversationState())
         _, kwargs = redis_mock.set.call_args
         self.assertEqual(kwargs.get("ex"), CONVERSATION_STATE_TTL_SECONDS)
-
-    def test_fsm_state_set_applies_sliding_ttl(self):
-        with patch(
-            "src.infrastructure.repositories.redis_state_repo.redis_client"
-        ) as redis_mock:
-            RedisStateRepo.set_state("506999", UserState.INICIO, Channel.WHATSAPP)
-        _, kwargs = redis_mock.set.call_args
-        self.assertEqual(kwargs.get("ex"), STATE_TTL_SECONDS)
 
 
 if __name__ == "__main__":

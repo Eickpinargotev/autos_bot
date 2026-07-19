@@ -8,7 +8,7 @@ LLM (`gpt-5.4-mini` sin razonamiento — `reasoning_effort="none"` —,
 
 ```
 load_state ──┬─(sin especialista)──→ SUPERVISOR ──── route ───→ ESPECIALISTA
-             └─(especialista activo, sticky)─────────────────→ (GENERAL | ALQUILER | CLASES | DICTAMEN)
+             └─(especialista activo, sticky)─────────────────→ (GENERAL | CURSO_TEORICO | ALQUILER | CLASES | DICTAMEN | TRAMITES)
                       ▲                                              │
                       └───────────────── defer (máx. 1 vez) ─────────┘
     supervisor/especialista ──┬─ city_invitation ─→ END
@@ -22,7 +22,8 @@ Reparto de responsabilidades:
 - **Supervisor** (coordinador/recepción): saludo, mensajes ambiguos, quejas
   (Q1/handoff), WIN, cierres, dudas informativas sueltas ([[rag]]) y el
   **enrutamiento** al especialista del área (`action="route"`).
-- **Especialistas** (GENERAL/licencia, ALQUILER, CLASES, DICTAMEN): ejecutan su
+- **Especialistas** (GENERAL/intake de licencia, CURSO_TEORICO, ALQUILER, CLASES,
+  DICTAMEN, TRAMITES — mapa completo en `docs/diseno_especialistas.md`): ejecutan su
   proceso con SU playbook y SU catálogo particionado; si el tema no es suyo,
   devuelven el turno (`action="defer"`).
 - Cada agente = CONTRATO COMÚN (reglas transversales: queja→humano,
@@ -52,7 +53,7 @@ Los flujos NO se perdieron; cambiaron de forma:
 | Textos curados por nodo en `mensajes.json` | Igual: `mensajes.json` sigue siendo la única fuente de los textos. El agente los referencia como **fragmentos literales** `[[frag:FLUJO.NODO]]` y `fragment_catalog.py` los expande sin reescribirlos (estilo y emojis intactos). |
 | `reporte` del nodo terminal | El fragmento conserva su metadato `reporte`: al enviarse queda `pending_report` y la siguiente respuesta del cliente se deriva al equipo (reporte + bloqueo), salvo que sea solo una duda informativa. |
 | Recordatorios fijos por nodo | **Recordatorios inteligentes** (ver abajo). |
-| Docs históricos (`tabla_decision_agente.md`, `reglas_agente_recepcion.md`) | Se conservan como referencia del diseño anterior. |
+| Docs históricos (`tabla_decision_agente.md`, `reglas_agente_recepcion.md`) | Eliminados (quedan en el historial de git); el diseño vigente está en `docs/diseno_especialistas.md`. |
 
 ## Pipeline por turno
 

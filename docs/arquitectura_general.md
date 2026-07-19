@@ -1,77 +1,79 @@
 # Arquitectura de Atención de la Escuela de Manejo
 
-Este documento explica de forma sencilla y a alto nivel cómo funciona el "cerebro" de nuestro asistente virtual. El sistema no es un solo bot gigante, sino un equipo de diferentes componentes (agentes y sistemas lógicos) que trabajan juntos para guiar al cliente.
+Este documento explica de forma sencilla y a alto nivel cómo funciona el "cerebro" de
+nuestro asistente virtual. No es un solo bot gigante: es un **equipo de agentes** (un
+supervisor y varios especialistas) que trabajan juntos para guiar al cliente, más una
+capa determinista que garantiza que los textos del negocio salgan siempre exactos.
+
+Los detalles técnicos viven en `docs/modelo_unico.md`; el mapa completo de
+especialistas, mensajes fijos y prompts en `docs/diseno_especialistas.md`.
 
 ## El Recorrido de un Mensaje
 
-Cuando un cliente envía un mensaje por WhatsApp o Telegram, este es el viaje que realiza:
+1. **Filtros rápidos (sin IA):** el sistema revisa si el cliente envió un comando
+   especial (como `/d`) o una **palabra clave** del negocio (*"tareas"*,
+   *"transporte"*). Si es así, responde con mensajes pre-escritos y programados, sin
+   gastar inteligencia artificial. La publicidad y las bienvenidas a grupos también
+   van por esta vía.
 
-1. **La Primera Línea de Defensa (Filtros Rápidos):** 
-   El sistema revisa si el cliente envió un comando especial (como `/d` para limpiar historial) o una **Palabra Clave** específica (como *"tareas"* o *"transporte"*). Si es así, el bot responde automáticamente con información pre-escrita y programada, sin gastar inteligencia artificial.
+2. **El Supervisor (recepción):** si no hay un especialista atendiendo la
+   conversación, el mensaje llega al supervisor. Él atiende saludos, mensajes
+   ambiguos, quejas, felicitaciones por ganar la prueba y dudas informativas sueltas;
+   y cuando detecta una intención clara de servicio, **enruta** la conversación al
+   especialista del área.
 
-2. **Verificación de Flujos Activos:**
-   Si el cliente no usó una palabra clave, el sistema revisa si el cliente ya está a la mitad de un trámite. Si es así, manda su mensaje directamente al **Clasificador** (explicado más abajo) para continuar el proceso.
+3. **El Especialista (dueño de la conversación):** una vez enrutada, la conversación
+   entra directo al especialista en los turnos siguientes (routing "pegajoso": una
+   sola llamada al modelo por turno). Cada especialista conoce SOLO su área:
 
-3. **El Agente Recepcionista (Si es un cliente nuevo):**
-   Si el cliente apenas nos está contactando, el mensaje llega al Agente Recepcionista, quien tiene la misión de entender qué necesita el cliente y canalizarlo correctamente.
+   | Especialista | Atiende |
+   | --- | --- |
+   | GENERAL | Intake del proceso de licencia (¿teórico ganado?, ¿cita?) |
+   | CURSO_TEORICO | Matrícula del curso teórico por ciudad, cita teórica, enteros, reingreso |
+   | ALQUILER | Alquiler de vehículo para la prueba de manejo (todas las categorías) |
+   | CLASES | Clases prácticas de manejo |
+   | DICTAMEN | Dictamen médico y su formulario |
+   | TRAMITES | Renovación, homologación, permiso temporal, taxi, maquinaria, cancelaciones, multas |
 
----
+   Si el tema no es suyo, el especialista **devuelve el turno** (`defer`) y el caso
+   pasa al área correcta con el contexto ya reunido (nadie repregunta lo que el
+   cliente ya dijo).
 
-## Los Agentes del Sistema (El Cerebro)
+## Cómo se garantiza la precisión (capa determinista)
 
-Nuestro asistente utiliza Inteligencia Artificial dividida en "agentes" con roles muy específicos:
+Los agentes deciden; el **código** hace cumplir las reglas duras:
 
-### 1. El Agente Recepcionista (El Enrutador)
-* **Su razón de existir:** Es la cara amigable del negocio. Su trabajo es conversar con el cliente nuevo, responder sus dudas iniciales y descubrir qué servicio necesita para enviarlo al departamento correcto (flujo).
-* **Cómo funciona:** Analiza el mensaje crudo del cliente. Puede entender errores ortográficos o mensajes confusos.
-* **Sus Herramientas:**
-  * *Base de Conocimientos (RAG):* Si el cliente tiene dudas (ej. *"¿Cuánto cuesta el curso?"*, *"¿Tengo que llevar mi propio casco?"*), el recepcionista usa esta herramienta para buscar la información en nuestra base de datos, responder la duda y preguntar si desea continuar con el trámite.
-  * *Canalizador de Flujos:* Tiene el poder de iniciar trámites oficiales ("GENERAL", "CLASES", "DICTAMEN", "ALQUILER", "QUEJA").
+- **Textos curados literales:** los precios, guiones y formularios viven en
+  `mensajes.json`. El agente los referencia con etiquetas (`[[frag:ID]]`) y el
+  sistema los expande al texto exacto — el modelo nunca los reescribe.
+- **Partición por área:** cada agente solo puede enviar los fragmentos de SU
+  catálogo; una etiqueta ajena se descarta automáticamente.
+- **Base de conocimiento (RAG):** toda duda informativa (requisitos, costos,
+  trámites) se responde con evidencia de la base; si no hay respaldo, el bot lo
+  admite y la pregunta queda registrada para el equipo.
+- **Guardrails:** anti-bucle (si el bot fuera a repetirse, deriva a un humano),
+  anti ping-pong entre áreas, reportes al equipo humano con bloqueo cuando el caso
+  pasa a gestión manual (pagos, quejas, verificaciones).
+- **Recordatorios inteligentes:** si el cliente deja algo pendiente, un agente de
+  seguimiento decide más tarde si conviene retomar y redacta UN mensaje al punto
+  exacto donde quedó el chat (con topes duros de frecuencia en código).
 
-### 2. El Agente Clasificador (El Analista dentro del Trámite)
-* **Su razón de existir:** Una vez que el cliente ya entró a un trámite oficial (ej. está agendando un alquiler), las preguntas que hace el bot son fijas (ej. *"¿Qué tipo de vehículo ocupas?"*). El trabajo del Clasificador es "traducir" lo que el humano responda para que el sistema informático lo entienda.
-* **Cómo funciona:** Toma la respuesta del cliente y la evalúa contra la pregunta que el bot le acaba de hacer. 
-* **Qué hace exactamente:**
-  * Determina si el cliente afirmó, negó o rechazó el trámite.
-  * Extrae datos clave. Por ejemplo, si el cliente escribe *"ocupo un sedán manual"*, el clasificador lo traduce al dato limpio: `carro`.
-  * *Detector de Desvíos:* Si en medio del trámite el cliente hace una pregunta totalmente diferente, el clasificador lo nota y alerta al sistema para que primero se responda esa duda antes de seguir.
-  * *Resumidor de Quejas:* Si el usuario se confunde mucho o pide ayuda humana, el clasificador redacta un pequeño resumen del problema para entregárselo a un asesor real.
-
----
-
-## La Máquina de Estados (Los Trámites Formales)
-
-A diferencia de los Agentes (que usan Inteligencia Artificial para pensar), la **Máquina de Estados** es el "rail" o camino estricto por el que camina el bot para asegurar que los trámites se hagan bien y en orden.
-
-* **¿Qué es?** Es el sistema que dicta qué pregunta sigue. Lee un archivo pre-escrito (`mensajes.json`) donde están todos nuestros guiones de venta y pasos a seguir.
-* **¿Cómo trabaja con la IA?** La Máquina de Estados le envía un texto fijo al cliente (ej. *"¿En qué sede te ubicas?"*). Luego se queda esperando. Cuando el cliente responde, la máquina no piensa, sino que le pide ayuda al **Agente Clasificador** para que le traduzca la respuesta. Una vez traducida, la Máquina de Estados avanza al siguiente paso del guion o termina el trámite.
-
-### Resumen del Ecosistema
-1. **Cliente escribe** ➡️ **Filtros rápidos** (Si aplica) ➡️ **Recepcionista** (Resuelve dudas y lo mete a un trámite).
-2. **Dentro del Trámite** ➡️ La **Máquina de Estados** hace las preguntas y el **Clasificador** traduce las respuestas del cliente hasta llegar a la meta final.
-
-### Diagrama de Flujo Visual
+## Diagrama de flujo
 
 ```mermaid
 flowchart TD
-    A[Mensaje del Cliente] --> B{¿Es palabra clave o comando?}
-    B -- Sí --> C[Respuesta Automática Programada]
-    B -- No --> D{¿El cliente ya está en un trámite?}
-    
-    D -- No --> E[Agente Recepcionista]
-    E -- Consulta duda --> F[(Base de Conocimientos)]
-    F -. Responde duda .-> E
-    E -- Asigna un servicio --> G[Máquina de Estados\nTrámite Formal]
-    
-    D -- Sí --> G
-    
-    G -- Hace pregunta estructurada --> H[Cliente Responde]
-    H --> I[Agente Clasificador]
-    
-    I -- Detecta duda nueva --> E
-    I -- Extrae intención y valor --> G
-    
-    G -- Avanza al siguiente paso --> J{¿Fin del trámite?}
-    J -- No --> G
-    J -- Sí --> K[Termina y queda a la espera]
+    A[Mensaje del cliente] --> B{¿Comando o palabra clave?}
+    B -- Sí --> C[Respuesta automática programada]
+    B -- No --> D{¿Hay especialista activo?}
+
+    D -- No --> S[Supervisor]
+    S -- Saludo / ambiguo / queja / duda suelta --> R1[Responde él mismo]
+    S -- Intención clara --> E[Especialista del área]
+
+    D -- Sí --> E
+    E -- No es mi área --> E2[Otro especialista o supervisor]
+    E -- Responde --> F[Fragmentos literales + RAG + guardrails]
+    F --> G[Cliente]
+    F -. Pago / queja / verificación .-> H[Reporte al equipo humano]
+    F -. Quedó algo pendiente .-> I[Recordatorio inteligente]
 ```

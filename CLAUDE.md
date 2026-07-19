@@ -72,12 +72,13 @@ Hay **tres niveles** de tests; respétalos al escribir nuevos:
 
 Capas en `services/bot_agent/src/`: `domain/`, `application/`, `infrastructure/`, `core/`.
 
-Pipeline de conversación (**supervisor/workers**, ver `docs/modelo_unico.md`):
+Pipeline de conversación (**supervisor/workers**, ver `docs/modelo_unico.md` y el
+diseño de áreas en `docs/diseno_especialistas.md`):
 1. `application/unified_agent.py` — `SupervisorAgent` (coordina: saludo, ambiguo, queja,
    WIN, cierre, dudas sueltas, y enruta con `route`) y `SpecialistAgent(area)` (GENERAL,
-   ALQUILER, CLASES, DICTAMEN; devuelve el turno con `defer`). `gpt-5.4-mini` sin
-   razonamiento, `temperature=0`; prompts = contrato común + playbook + catálogo del área.
-   También `FollowupAgent` (recordatorios).
+   CURSO_TEORICO, ALQUILER, CLASES, DICTAMEN, TRAMITES; devuelve el turno con `defer`).
+   `gpt-5.4-mini` sin razonamiento, `temperature=0`; prompts = contrato común + playbook +
+   catálogo del área. También `FollowupAgent` (recordatorios).
 2. `application/agent_pipeline.py` — StateGraph de **LangGraph** con routing pegajoso
    (`ConversationState.active_agent`) y guardrails **deterministas** en sus nodos:
    expansión de fragmentos literales y RAG, fragmentos ajenos rechazados por área,
@@ -101,27 +102,28 @@ Documentación de referencia (mantenerla al día si tocas esas áreas):
 Retención del historial (20 días desde la última interacción, ventana deslizante):
 - El plazo lo controla `settings.CONVERSATION_RETENTION_DAYS` (por defecto 20). Para cambiarlo,
   ajusta esa variable; no hardcodees el número en otra parte.
-- **Redis** (`conversation_state:*`, `state:*`) usa TTL deslizante: `ConversationStateRepo.set`
-  y `RedisStateRepo.set_state` reescriben la clave con `ex=...` en cada interacción.
+- **Redis** (`conversation_state:*`) usa TTL deslizante: `ConversationStateRepo.set`
+  reescribe la clave con `ex=...` en cada interacción.
 - **NocoDB** (log durable y *shots*) se purga con la tarea Celery `purge_expired_conversations`,
   agendada por **Celery beat**. Por eso el `celery_worker` corre con `-B` en ambos compose: si
   tocas ese comando, conserva el beat o la purga deja de ejecutarse. Helpers de borrado:
   `infrastructure/repositories/nocodb_retention.py`. Tests: `tests/unit/test_conversation_retention.py`.
 
-## 5. Diseño conversacional (FSM + LLM)
+## 5. Diseño conversacional (playbooks + mensajes curados)
 
-El reto del sistema es mezclar un **flujo automático de mensajes curados** (FSM) con un
-**flujo conversacional** (responder dudas). Reglas para que sea natural y no robótico:
+El reto del sistema es mezclar **mensajes curados del negocio** (plantillas literales) con un
+**flujo conversacional** razonado. Reglas para que sea natural y no robótico:
 
 - **Separación de capas:**
-  - *Esqueleto FSM (determinista):* qué nodo sigue (`flow_router.py`) y los **mensajes
-    curados** del flujo (`mensajes.json`: precios, links, guiones). El LLM NO los reinventa.
-  - *Capa conversacional (razonada con contexto):* cuando el usuario no avanza el flujo
-    (duda, saludo…), se decide con el **paso pendiente como dato** (qué espera el bot)
-    cómo responder. El contexto del estado se pasa como DATO, no como ramas hardcodeadas.
-- **Re-anclaje consciente de la resolución:** no insistir con el paso del flujo ("retomemos…")
-  si la duda del cliente **no quedó resuelta**. Solo reanclar cuando se resolvió y aún aporta
-  (ver `_off_flow_replies` en `flow_graph.py`).
+  - *Textos curados (deterministas):* viven en `mensajes.json` y se envían LITERALES vía
+    `[[frag:ID]]` (`fragment_catalog.py` los expande; el LLM NO los reinventa ni parafrasea).
+    Todo dato variable (precios, links, requisitos) sale de un fragmento o del RAG.
+  - *Capa conversacional (razonada con contexto):* el agente decide con el historial y el
+    **paso pendiente como dato** (qué espera el bot) qué sigue: responder la duda, avanzar
+    el playbook o ambas. El contexto del estado se pasa como DATO, no como ramas hardcodeadas.
+- **Re-anclaje consciente de la resolución:** no insistir con el paso del proceso ("retomemos…")
+  si la duda del cliente **no quedó resuelta** (un RAG sin respaldo no empuja el flujo; los
+  recordatorios inteligentes solo retoman lo pendiente cuando conviene).
 - **Prohibido el prompt overfitting:** las instrucciones se dan por **contexto/intención**,
   nunca por frase exacta. ❌ "si el usuario dice 'hola', responde X". ✅ "si el mensaje
   contiene un saludo, haz X". La diversidad de expresión humana es infinita; una regla por
@@ -140,8 +142,8 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
 `docs/gobernanza_de_prompts.md`; resumen ejecutable:
 
 1. **Confirma que el bug es del prompt** y no del router, del grafo, de
-   `mensajes.json` o de la normalización de salida (`_validated_decision`,
-   `_normalize`). La mayoría de "bugs de prompt" son de otra capa.
+   `mensajes.json` o de la normalización de salida (`_validated_decision`).
+   La mayoría de "bugs de prompt" son de otra capa.
 2. **La regla nueva se escribe por intención/contexto, nunca por frase exacta**, y va
    dentro del bloque del caso correspondiente (secciones `═══`), respetando el orden
    de prioridad — nunca como parche al final.
