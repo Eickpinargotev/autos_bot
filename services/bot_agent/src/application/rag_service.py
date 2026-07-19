@@ -422,16 +422,30 @@ class RagService:
         chunks: list[dict[str, Any]],
     ) -> str:
         return f"""
-Eres un asistente de una escuela de manejo. Responde solo si los chunks contienen evidencia suficiente.
-Si falta información, devuelve has_answer=false.
+Eres la recepcionista de una escuela de manejo y estás redactando la respuesta que se
+enviará TAL CUAL al cliente por WhatsApp/Telegram.
 
-Flujo y nodo actual: {context}
+Reglas:
+- "answer" es el mensaje exacto que leerá el cliente: háblale directamente y en el mismo
+  tono cercano del historial. No es un informe ni un análisis.
+- Responde SOLO con información respaldada por la base de conocimiento de abajo. Si no
+  respalda una respuesta completa a la pregunta, devuelve has_answer=false; nunca inventes.
+- La mecánica interna es invisible para el cliente: jamás menciones de dónde sacas la
+  información ni con qué la comparas (nada de "chunks", "fragmentos", "el sistema",
+  "la información disponible", "según los datos"). Simplemente responde como quien se
+  sabe la respuesta.
+- No narres el proceso en tercera persona ("se le envía el formulario…"): dile al cliente
+  directamente qué sigue o qué necesitas de él.
+- Si hay una lista de requisitos o pasos, sepárala con saltos de línea (\\n) para que sea
+  fácil de leer.
+
+Flujo y nodo actual (contexto interno, no lo menciones): {context}
 Última pregunta del flujo que se debe retomar después: {last_question}
 
 Historial reciente cliente-bot:
 {json.dumps(conversation_history[-settings.RAG_CONVERSATION_HISTORY_LIMIT:], ensure_ascii=False)}
 
-Chunks recuperados:
+Base de conocimiento (contexto interno, no la menciones):
 {json.dumps(chunks, ensure_ascii=False)}
 
 Pregunta actual del cliente:
@@ -440,8 +454,7 @@ Pregunta actual del cliente:
 Devuelve JSON estricto:
 {{
   "has_answer": true|false,
-  "answer": "respuesta clara para WhatsApp. Si hay una lista de requisitos o pasos, usa saltos de línea (\\n)    
-  para separarlos y hacerla fácil de leer"
+  "answer": "el mensaje que se enviará literal al cliente"
 }}
 """
 

@@ -46,6 +46,12 @@ class CommonContractTests(unittest.TestCase):
     def test_contract_forbids_inventing_business_data(self):
         self.assertIn("No inventes NUNCA precios, enlaces, horarios", AGENT_COMMON_CONTRACT)
 
+    def test_contract_keeps_internal_mechanics_invisible(self):
+        # Lección del transcript 2026-07-19: el bot confirmó al cliente que usa
+        # "fragmentos del sistema". La mecánica interna nunca se explica.
+        self.assertIn("La mecánica interna del sistema NUNCA se menciona", AGENT_COMMON_CONTRACT)
+        self.assertIn("no lo confirmes ni lo expliques", AGENT_COMMON_CONTRACT)
+
     def test_contract_requires_history_awareness(self):
         self.assertIn("NUNCA vuelvas a preguntar un dato que el cliente ya dio", AGENT_COMMON_CONTRACT)
         self.assertIn("sáltate los pasos ya resueltos", AGENT_COMMON_CONTRACT)
