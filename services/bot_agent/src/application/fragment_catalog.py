@@ -37,7 +37,8 @@ _VARIANT_IDS = set(_KEYWORD_VARIANTS.values())
 # que no se listan.
 AREA_FRAGMENTS: dict[str, tuple[str, ...]] = {
     "SUPERVISOR": ("QUEJA.Q1", "WIN.W1"),
-    "GENERAL": ("GENERAL.G1", "GENERAL.G3", "GENERAL.G4", "GENERAL.G7"),
+    "GENERAL": ("GENERAL.G1", "GENERAL.G3", "GENERAL.G7"),
+    "CURSO_TEORICO": ("GENERAL.G4",),
     "ALQUILER": (
         "Alquiler.A1", "GENERAL.G7", "GENERAL.G35", "GENERAL.G11",
         "GENERAL.G13", "GENERAL.G16", "GENERAL.G19", "GENERAL.G20",
@@ -46,9 +47,11 @@ AREA_FRAGMENTS: dict[str, tuple[str, ...]] = {
     ),
     "CLASES": ("CLASES.C1", "CLASES.C2", "CLASES.C5"),
     "DICTAMEN": ("DICTAMEN.D1",),
+    # TRAMITES informa 100 % vía RAG: no tiene textos curados propios.
+    "TRAMITES": (),
 }
 
-SPECIALIST_AREAS = ("GENERAL", "ALQUILER", "CLASES", "DICTAMEN")
+SPECIALIST_AREAS = ("GENERAL", "CURSO_TEORICO", "ALQUILER", "CLASES", "DICTAMEN", "TRAMITES")
 
 
 def allowed_fragments(role: str) -> set[str]:

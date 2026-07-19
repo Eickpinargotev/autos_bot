@@ -56,6 +56,16 @@ class SupervisorRoutingTests(unittest.TestCase):
         decision = SupervisorAgent().decide("hola buenas", ConversationState())
         self.assertEqual(decision.action, "reply")
 
+    def test_renewal_intent_routes_to_tramites(self):
+        decision = SupervisorAgent().decide("buenas, quiero renovar mi licencia que ya se me vence", ConversationState())
+        self.assertEqual(decision.action, "route")
+        self.assertEqual(decision.target, "TRAMITES")
+
+    def test_theory_course_intent_routes_to_curso_teorico(self):
+        decision = SupervisorAgent().decide("quiero matricular el curso teorico para la licencia", ConversationState())
+        self.assertEqual(decision.action, "route")
+        self.assertEqual(decision.target, "CURSO_TEORICO")
+
     def test_win_sends_review_fragment(self):
         decision = SupervisorAgent().decide("les cuento que aprobé mi prueba de manejo!!!", ConversationState())
         self.assertIn("[[frag:WIN.W1]]", _joined(decision))
@@ -182,6 +192,66 @@ class GeneralSpecialistTests(unittest.TestCase):
         )
         decision = SpecialistAgent("GENERAL").decide("sí, ya tengo la cita", state)
         self.assertEqual(decision.action, "defer")
+
+    def test_missing_theory_is_deferred_to_curso_teorico(self):
+        # "No tengo el teórico" no se atiende en GENERAL: pasa al área del
+        # curso teórico con el contexto en el defer (diseño v3).
+        state = ConversationState(
+            flow="AGENT",
+            active_agent="GENERAL",
+            last_question="¿Ya tiene el teórico ganado?",
+            awaiting_reply=True,
+            conversation_history=[
+                _turn("quiero sacar la licencia", ["[[frag:GENERAL.G1]]"],
+                      "Si ya tiene el teórico ganado", "GENERAL"),
+            ],
+        )
+        decision = SpecialistAgent("GENERAL").decide("no, todavía no lo tengo", state)
+        self.assertEqual(decision.action, "defer")
+        self.assertEqual(decision.target, "CURSO_TEORICO")
+
+
+@requires_llm
+class CursoTeoricoSpecialistTests(unittest.TestCase):
+    def test_city_answer_triggers_city_invitation(self):
+        state = ConversationState(
+            flow="AGENT",
+            active_agent="CURSO_TEORICO",
+            last_question="¿Dónde vive para el curso teórico?",
+            awaiting_reply=True,
+            conversation_history=[
+                _turn("no tengo el teórico", ["[[frag:GENERAL.G4]]"],
+                      "La ciudad donde hará el curso teórico", "CURSO_TEORICO"),
+            ],
+        )
+        decision = SpecialistAgent("CURSO_TEORICO").decide("vivo en nicoya", state)
+        self.assertEqual(decision.action, "city_invitation")
+        self.assertTrue(decision.city)
+
+
+@requires_llm
+class TramitesSpecialistTests(unittest.TestCase):
+    def test_renewal_is_informed_with_rag_not_handed_off(self):
+        decision = SpecialistAgent("TRAMITES").decide(
+            "que ocupo para renovar la licencia?", ConversationState(flow="AGENT", active_agent="TRAMITES")
+        )
+        self.assertEqual(decision.action, "reply")
+        self.assertIn("[[rag]]", _joined(decision))
+
+    def test_accepting_dictamen_defers_to_dictamen(self):
+        state = ConversationState(
+            flow="AGENT",
+            active_agent="TRAMITES",
+            last_question="¿Desea que le gestionemos el dictamen médico?",
+            awaiting_reply=True,
+            conversation_history=[
+                _turn("quiero renovar mi licencia", ["[[rag]]"],
+                      "Si desea que le gestionemos el dictamen médico", "TRAMITES"),
+            ],
+        )
+        decision = SpecialistAgent("TRAMITES").decide("sí, lo ocupo, ayúdeme con eso", state)
+        self.assertEqual(decision.action, "defer")
+        self.assertEqual(decision.target, "DICTAMEN")
 
 
 @requires_llm

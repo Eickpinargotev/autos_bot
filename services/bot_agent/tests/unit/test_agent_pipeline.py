@@ -27,7 +27,6 @@ from src.application.unified_agent import (
     SupervisorAgent,
 )
 from src.core.config import settings
-from src.domain.entities import UserState
 from src.infrastructure.repositories.conversation_state_repo import ConversationState
 
 
@@ -187,6 +186,47 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(result.replies, get_fragment("GENERAL.G35").messages)
         self.assertEqual(h.saved_state.active_agent, "ALQUILER")
 
+    def test_general_defers_theory_course_to_curso_teorico(self):
+        # Diseño v3: la rama "no tengo el teórico" ya no la ejecuta GENERAL;
+        # el defer con destino lleva el caso directo a CURSO_TEORICO.
+        defer = AgentDecision(
+            action="defer", target="CURSO_TEORICO",
+            report="No tiene el teórico ganado; quiere iniciar su proceso.",
+        )
+        teorico_reply = AgentDecision(
+            action="reply", messages=["[[frag:GENERAL.G4]]"], pending="La ciudad del curso teórico"
+        )
+        with PipelineHarness(
+            ConversationState(active_agent="GENERAL"),
+            specialist=[defer, teorico_reply],
+        ) as h:
+            result = h.run(text="no")
+
+        h.supervisor_mock.assert_not_called()
+        self.assertEqual(h.specialist_mock.call_count, 2)
+        self.assertEqual(result.replies, get_fragment("GENERAL.G4").messages)
+        self.assertEqual(h.saved_state.active_agent, "CURSO_TEORICO")
+
+    def test_tramites_defers_dictamen_cross_sell(self):
+        # TRAMITES informa y, cuando el cliente acepta el dictamen, pasa el
+        # caso directo a DICTAMEN (venta cruzada del diseño v3).
+        defer = AgentDecision(
+            action="defer", target="DICTAMEN",
+            report="Cliente en renovación; acepta gestionar el dictamen médico.",
+        )
+        dictamen_reply = AgentDecision(
+            action="reply", messages=["[[frag:DICTAMEN.D1]]"], pending="El formulario del dictamen"
+        )
+        with PipelineHarness(
+            ConversationState(active_agent="TRAMITES"),
+            specialist=[defer, dictamen_reply],
+        ) as h:
+            result = h.run(text="si, ocupo el dictamen")
+
+        h.supervisor_mock.assert_not_called()
+        self.assertEqual(result.replies, get_fragment("DICTAMEN.D1").messages)
+        self.assertEqual(h.saved_state.active_agent, "DICTAMEN")
+
     def test_defer_target_already_tried_falls_back_to_supervisor(self):
         defer_a = AgentDecision(action="defer", target="CLASES", report="no es mi área")
         defer_b = AgentDecision(action="defer", target="ALQUILER", report="tampoco es mi área")
@@ -232,6 +272,19 @@ class FragmentGuardrailTests(unittest.TestCase):
             result = h.run(text="quiero clases")
 
         self.assertEqual(result.replies, ["¿Ocupa las clases en Liberia?"])
+
+    def test_tramites_has_no_fragments_and_foreign_tags_are_dropped(self):
+        # TRAMITES es 100 % RAG: cualquier etiqueta de fragmento que alucine
+        # (p. ej. un paquete de alquiler) se descarta por partición de catálogo.
+        decision = AgentDecision(
+            action="reply",
+            messages=["[[frag:GENERAL.G25]]", "Le explico los requisitos del trámite."],
+            pending="Si desea continuar el trámite",
+        )
+        with PipelineHarness(ConversationState(active_agent="TRAMITES"), specialist=decision) as h:
+            result = h.run(text="quiero renovar la licencia")
+
+        self.assertEqual(result.replies, ["Le explico los requisitos del trámite."])
 
     def test_fragment_tag_expands_to_literal_messages(self):
         decision = AgentDecision(
@@ -417,7 +470,7 @@ class AntiLoopTests(unittest.TestCase):
 class CityInvitationTests(unittest.TestCase):
     def test_city_invitation_delegates_to_publicidad(self):
         decision = AgentDecision(action="city_invitation", messages=[], city="Nicoya")
-        with PipelineHarness(ConversationState(active_agent="GENERAL"), specialist=decision) as h:
+        with PipelineHarness(ConversationState(active_agent="CURSO_TEORICO"), specialist=decision) as h:
             with patch(
                 "src.application.publicidad_service.PublicidadService.handle_invitation_by_city",
                 return_value=True,
@@ -426,13 +479,12 @@ class CityInvitationTests(unittest.TestCase):
 
         invite_mock.assert_called_once()
         self.assertEqual(invite_mock.call_args.args[1], "Nicoya")
-        self.assertEqual(result.legacy_state, UserState.PUBLICIDAD)
         self.assertEqual(result.replies, [])
         h.clear_mock.assert_called_once()
 
     def test_city_not_found_reports_and_blocks(self):
         decision = AgentDecision(action="city_invitation", messages=[], city="Atlantis")
-        with PipelineHarness(ConversationState(active_agent="GENERAL"), specialist=decision) as h:
+        with PipelineHarness(ConversationState(active_agent="CURSO_TEORICO"), specialist=decision) as h:
             with patch(
                 "src.application.publicidad_service.PublicidadService.handle_invitation_by_city",
                 return_value=False,

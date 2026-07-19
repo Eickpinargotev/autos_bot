@@ -8,6 +8,9 @@ os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/tes
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 
 from src.application.fragment_catalog import (
+    AREA_FRAGMENTS,
+    SPECIALIST_AREAS,
+    allowed_fragments,
     catalog_for_prompt,
     get_fragment,
     resolve_variant,
@@ -60,6 +63,22 @@ class FragmentCatalogTests(unittest.TestCase):
         ) as exists_mock:
             self.assertEqual(resolve_variant("CLASES.C2", "506", "whatsapp"), "CLASES.C2")
         exists_mock.assert_not_called()
+
+    def test_area_partition_matches_design_v3(self):
+        # Diseño v3 (docs/diseno_especialistas.md): 6 especialistas; G4 es de
+        # CURSO_TEORICO (no de GENERAL) y TRAMITES no tiene textos curados.
+        self.assertEqual(
+            SPECIALIST_AREAS,
+            ("GENERAL", "CURSO_TEORICO", "ALQUILER", "CLASES", "DICTAMEN", "TRAMITES"),
+        )
+        self.assertEqual(set(AREA_FRAGMENTS), {"SUPERVISOR", *SPECIALIST_AREAS})
+        self.assertEqual(allowed_fragments("CURSO_TEORICO"), {"GENERAL.G4"})
+        self.assertNotIn("GENERAL.G4", allowed_fragments("GENERAL"))
+        self.assertEqual(allowed_fragments("TRAMITES"), set())
+        # Cada fragmento listado existe de verdad en mensajes.json.
+        for area, fragment_ids in AREA_FRAGMENTS.items():
+            for fid in fragment_ids:
+                self.assertIsNotNone(get_fragment(fid), f"{area}: {fid} no existe")
 
     def test_catalog_for_prompt_contains_literal_texts_and_tags(self):
         catalog = catalog_for_prompt()

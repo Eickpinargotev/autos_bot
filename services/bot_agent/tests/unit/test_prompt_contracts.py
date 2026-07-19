@@ -65,7 +65,7 @@ class CommonContractTests(unittest.TestCase):
 class SupervisorPromptTests(unittest.TestCase):
     def test_schema_defines_route_and_targets(self):
         self.assertIn('"action": "route|reply|handoff|close|city_invitation"', SUPERVISOR_OUTPUT_SCHEMA)
-        self.assertIn("GENERAL|ALQUILER|CLASES|DICTAMEN", SUPERVISOR_OUTPUT_SCHEMA)
+        self.assertIn("GENERAL|CURSO_TEORICO|ALQUILER|CLASES|DICTAMEN|TRAMITES", SUPERVISOR_OUTPUT_SCHEMA)
 
     def test_supervisor_owns_cross_cutting_cases(self):
         for owned in ("QUEJA", "WIN", "SALUDO", "AMBIGUO", "VARIOS SERVICIOS"):
@@ -80,20 +80,44 @@ class SupervisorPromptTests(unittest.TestCase):
 class SpecialistPromptTests(unittest.TestCase):
     def test_schema_defines_defer(self):
         self.assertIn('"action": "reply|defer|handoff|close|city_invitation"', SPECIALIST_OUTPUT_SCHEMA)
+        self.assertIn("GENERAL|CURSO_TEORICO|ALQUILER|CLASES|DICTAMEN|TRAMITES", SPECIALIST_OUTPUT_SCHEMA)
         self.assertIn("ACCIÓN defer", SPECIALIST_OUTPUT_SCHEMA)
 
     def test_every_area_has_a_body(self):
-        self.assertEqual(set(AREA_PROMPT_BODIES), {"GENERAL", "ALQUILER", "CLASES", "DICTAMEN"})
+        # Diseño v3: 6 especialistas (docs/diseno_especialistas.md).
+        self.assertEqual(
+            set(AREA_PROMPT_BODIES),
+            {"GENERAL", "CURSO_TEORICO", "ALQUILER", "CLASES", "DICTAMEN", "TRAMITES"},
+        )
 
     def test_alquiler_keeps_transcript_lessons(self):
         body = AREA_PROMPT_BODIES["ALQUILER"]
         self.assertIn("NUNCA asumas el vehículo", body)
         self.assertIn("NUNCA preguntes la subcategoría", body)
         self.assertIn("sigue vigente todo el proceso", body)
+        # Requisitos de edad/licencia previa se aclaran con RAG, no de memoria.
+        self.assertIn("REQUISITOS DUROS", body)
 
-    def test_general_defers_rental_phase(self):
-        self.assertIn('action="defer"', AREA_PROMPT_BODIES["GENERAL"])
-        self.assertIn("city_invitation", AREA_PROMPT_BODIES["GENERAL"])
+    def test_general_defers_both_phases(self):
+        # GENERAL es intake: delega el teórico a CURSO_TEORICO y la fase de
+        # vehículo a ALQUILER; ya no ejecuta city_invitation.
+        body = AREA_PROMPT_BODIES["GENERAL"]
+        self.assertIn('action="defer"', body)
+        self.assertIn("CURSO_TEORICO", body)
+        self.assertIn("ALQUILER", body)
+        self.assertNotIn("city_invitation", body)
+
+    def test_curso_teorico_owns_city_invitation_and_hard_warnings(self):
+        body = AREA_PROMPT_BODIES["CURSO_TEORICO"]
+        self.assertIn("city_invitation", body)
+        # Advertencia del entero: pagar el código equivocado es irreversible.
+        self.assertIn("no se puede corregir", body)
+
+    def test_tramites_informs_and_offers_dictamen(self):
+        body = AREA_PROMPT_BODIES["TRAMITES"]
+        self.assertIn("INFORMAR", body)
+        self.assertIn("DICTAMEN", body)
+        self.assertIn("[[rag]]", body)
 
 
 class HygieneTests(unittest.TestCase):
