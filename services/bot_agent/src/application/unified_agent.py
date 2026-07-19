@@ -47,6 +47,61 @@ SAFE_CLARIFY_MESSAGE = (
 )
 
 
+def _decision_response_format(valid_actions: set[str]) -> dict:
+    """Structured Outputs de OpenAI (json_schema con strict=True).
+
+    El proveedor garantiza que la salida cumple el esquema al pie de la letra:
+    campos exactos, tipos exactos y acciones/targets dentro del enum. Es el
+    método más fuerte que ofrece la API (más que el JSON mode `json_object`).
+    `_validated_decision` sigue siendo la autoridad para la coherencia
+    SEMÁNTICA (etiqueta RAG + consulta, defer hacia sí mismo, mensajes vacíos):
+    el esquema garantiza la forma, no el sentido.
+    """
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "agent_decision",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "action": {"type": "string", "enum": sorted(valid_actions)},
+                    "messages": {"type": "array", "items": {"type": "string"}},
+                    "rag_query": {"type": "string"},
+                    "pending": {"type": "string"},
+                    "report": {"type": "string"},
+                    "city": {"type": "string"},
+                    "target": {"type": "string", "enum": ["", *SPECIALIST_AREAS]},
+                    "confidence": {"type": "number"},
+                },
+                "required": [
+                    "action", "messages", "rag_query", "pending",
+                    "report", "city", "target", "confidence",
+                ],
+            },
+        },
+    }
+
+
+FOLLOWUP_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "followup_decision",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "send": {"type": "boolean"},
+                "message": {"type": "string"},
+            },
+            "required": ["send", "message"],
+        },
+    },
+}
+
+
 def _decision_llm_kwargs() -> dict:
     """Parámetros extra de las llamadas de DECISIÓN.
 
@@ -147,7 +202,7 @@ class _DecisionAgent:
             completion = client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 temperature=0,
-                response_format={"type": "json_object"},
+                response_format=_decision_response_format(self._valid_actions()),
                 messages=[
                     {"role": "system", "content": _system_prompt_for(self.role)},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
@@ -322,7 +377,7 @@ class FollowupAgent:
             completion = client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 temperature=0,
-                response_format={"type": "json_object"},
+                response_format=FOLLOWUP_RESPONSE_FORMAT,
                 messages=[
                     {"role": "system", "content": FOLLOWUP_AGENT_PROMPT},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},

@@ -13,6 +13,27 @@ from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 
 
+# Structured Outputs (json_schema estricto): OpenAI garantiza la forma exacta
+# de la salida. La validación semántica (respuesta vacía = sin respaldo) sigue
+# en código.
+ANSWER_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "rag_answer",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "has_answer": {"type": "boolean"},
+                "answer": {"type": "string"},
+            },
+            "required": ["has_answer", "answer"],
+        },
+    },
+}
+
+
 @dataclass
 class RagAnswer:
     has_answer: bool
@@ -100,7 +121,7 @@ class RagService:
             started = time.monotonic()
             completion = self.openai.chat.completions.create(
                 model=settings.OPENAI_MODEL,
-                response_format={"type": "json_object"},
+                response_format=ANSWER_RESPONSE_FORMAT,
                 messages=[
                     {"role": "system", "content": "Devuelve JSON estricto. Responde solo con información respaldada por el contexto."},
                     {"role": "user", "content": prompt},

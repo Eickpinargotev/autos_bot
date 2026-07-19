@@ -541,6 +541,52 @@ class DecisionValidationTests(unittest.TestCase):
         decision = agent._validated_decision({"action": "handoff", "messages": ["ok"]}, "quiero un humano")
         self.assertTrue(decision.report)
 
+    def test_decide_sends_strict_json_schema_to_openai(self):
+        # Structured Outputs: la llamada lleva json_schema con strict=True
+        # (el proveedor fuerza campos/tipos/enums exactos), no solo JSON mode.
+        agent = SupervisorAgent()
+        fake = MagicMock()
+        fake.choices[0].message.content = (
+            '{"action": "reply", "messages": ["hola"], "rag_query": "", "pending": "",'
+            ' "report": "", "city": "", "target": "", "confidence": 1.0}'
+        )
+        with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "sk-test"), patch(
+            "src.application.unified_agent.client.chat.completions.create", return_value=fake
+        ) as create_mock:
+            decision = agent.decide("hola", ConversationState())
+
+        self.assertEqual(decision.action, "reply")
+        fmt = create_mock.call_args.kwargs["response_format"]
+        self.assertEqual(fmt["type"], "json_schema")
+        self.assertTrue(fmt["json_schema"]["strict"])
+        schema = fmt["json_schema"]["schema"]
+        self.assertFalse(schema["additionalProperties"])
+        # Enum de acciones por rol y de targets por área (imposible inventar).
+        self.assertIn("route", schema["properties"]["action"]["enum"])
+        self.assertNotIn("defer", schema["properties"]["action"]["enum"])
+        self.assertIn("TRAMITES", schema["properties"]["target"]["enum"])
+        self.assertEqual(set(schema["required"]), set(schema["properties"]))
+
+        from src.application.fragment_catalog import SPECIALIST_AREAS
+
+        specialist_fmt = __import__(
+            "src.application.unified_agent", fromlist=["_decision_response_format"]
+        )._decision_response_format(SpecialistAgent("TRAMITES")._valid_actions())
+        actions = specialist_fmt["json_schema"]["schema"]["properties"]["action"]["enum"]
+        self.assertIn("defer", actions)
+        self.assertNotIn("route", actions)
+
+    def test_followup_and_rag_use_strict_json_schema(self):
+        from src.application.rag_service import ANSWER_RESPONSE_FORMAT
+        from src.application.unified_agent import FOLLOWUP_RESPONSE_FORMAT
+
+        for fmt in (FOLLOWUP_RESPONSE_FORMAT, ANSWER_RESPONSE_FORMAT):
+            self.assertEqual(fmt["type"], "json_schema")
+            self.assertTrue(fmt["json_schema"]["strict"])
+            schema = fmt["json_schema"]["schema"]
+            self.assertFalse(schema["additionalProperties"])
+            self.assertEqual(set(schema["required"]), set(schema["properties"]))
+
     def test_reasoning_effort_only_goes_to_gpt5_models(self):
         # Un despliegue con OPENAI_MODEL viejo no debe recibir reasoning_effort:
         # haría fallar TODAS las llamadas y el bot solo respondería el fallback.

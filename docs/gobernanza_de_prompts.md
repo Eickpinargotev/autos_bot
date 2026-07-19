@@ -40,10 +40,14 @@ preservarlos:
    suelta al final.
 4. **El dato y la instrucción viajan separados.** El mensaje del cliente entra como
    JSON en el turno de usuario; el system prompt no interpola texto del cliente.
-5. **Salida = JSON estricto contra contrato validado en código.** Si cambias el
-   esquema de salida, cambia en el mismo commit el validador
-   (`_validated_decision` / `_normalize`) y sus tests. El código nunca debe confiar
-   en que el modelo cumpla el esquema.
+5. **Salida = JSON con esquema forzado + validador en código (dos capas).**
+   Todas las llamadas usan **Structured Outputs** de OpenAI (`json_schema` con
+   `strict: true`): el proveedor garantiza campos, tipos y enums exactos
+   (`_decision_response_format`, `FOLLOWUP_RESPONSE_FORMAT`,
+   `ANSWER_RESPONSE_FORMAT`). Aun así, la coherencia SEMÁNTICA la valida el
+   código (`_validated_decision`): etiqueta RAG + consulta juntas, defer nunca
+   hacia sí mismo, mensajes vacíos → aclaración segura. Si cambias el esquema,
+   cambia en el mismo commit el json_schema, el validador y sus tests.
 6. **Genéricos respecto al catálogo.** Los prompts no mencionan contenido de
    `mensajes.json` (precios, "casco", "programar cita"…). Lo vigila
    `tests/unit/test_prompt_contracts.py`. El conocimiento de negocio vive en el RAG
