@@ -22,6 +22,14 @@ class ConversationLogRepository:
         text: str = "",
         event_type: str = "message",
     ) -> bool:
+        if (event_type or "message") == "message":
+            ConversationLogRepository._track_seguimiento(
+                client_id=client_id,
+                canal=canal,
+                autor="cliente",
+                texto=text or f"[{ConversationLogRepository._message_type_value(message_type)}]",
+                nombre=sender_name or "",
+            )
         return ConversationLogRepository.append_message(
             client_id=client_id,
             canal=canal,
@@ -46,6 +54,9 @@ class ConversationLogRepository:
         text: str,
         event_type: str = "bot_reply",
     ) -> bool:
+        ConversationLogRepository._track_seguimiento(
+            client_id=client_id, canal=canal, autor="bot", texto=text or ""
+        )
         return ConversationLogRepository.append_message(
             client_id=client_id,
             canal=canal,
@@ -97,6 +108,22 @@ class ConversationLogRepository:
                 "created_at": ConversationLogRepository._now_iso(),
             },
         )
+
+    @staticmethod
+    def _track_seguimiento(*, client_id: str, canal: Channel | str, autor: str, texto: str, nombre: str = "") -> None:
+        """Alimenta el seguimiento por cliente/resumen mensual sin afectar el log.
+
+        Import perezoso para no crear un ciclo (seguimiento_repository importa
+        este módulo). Cualquier fallo del seguimiento no debe romper el logueo.
+        """
+        try:
+            from src.application import seguimiento_service
+
+            seguimiento_service.registrar_mensaje(
+                client_id=str(client_id), canal=canal, autor=autor, texto=texto, nombre=nombre
+            )
+        except Exception as e:
+            print(f"Error en seguimiento de mensaje: {e}")
 
     @staticmethod
     def append_message(client_id: str, canal: Channel | str, message: dict[str, Any]) -> bool:

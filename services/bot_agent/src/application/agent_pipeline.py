@@ -587,6 +587,10 @@ class AgentPipeline:
         )
         PostgresUserRepo().block_user(user_id, reason=reason, days=12, channel=channel)
 
+        from src.application import seguimiento_service
+
+        seguimiento_service.registrar_derivacion(user_id, channel)
+
         from src.application.runtime_context import clear_user_runtime_context
 
         clear_user_runtime_context(channel, user_id, cancel_scheduled=False, clear_reports=False)

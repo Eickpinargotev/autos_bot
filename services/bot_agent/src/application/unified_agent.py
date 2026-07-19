@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from openai import OpenAI
 
+from src.application import seguimiento_service
 from src.application.fragment_catalog import AREA_FRAGMENTS, SPECIALIST_AREAS, catalog_for_prompt
 from src.core.config import settings
 from src.core.prompts import (
@@ -209,6 +210,7 @@ class _DecisionAgent:
                 ],
                 **_decision_llm_kwargs(),
             )
+            seguimiento_service.registrar_uso_llm(client_id, canal, getattr(completion, "usage", None))
             data = json.loads(completion.choices[0].message.content or "{}")
             decision = self._validated_decision(data, text)
             self._log_decision(client_id, canal, input_data, decision, started, "success")
@@ -384,6 +386,7 @@ class FollowupAgent:
                 ],
                 **_decision_llm_kwargs(),
             )
+            seguimiento_service.registrar_uso_llm(client_id, canal, getattr(completion, "usage", None))
             data = json.loads(completion.choices[0].message.content or "{}")
             message = str(data.get("message") or "").strip()
             decision = FollowupDecision(send=bool(data.get("send")) and bool(message), message=message)

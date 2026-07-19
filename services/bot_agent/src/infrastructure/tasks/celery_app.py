@@ -57,6 +57,12 @@ celery_app.conf.beat_schedule = {
         "task": "src.infrastructure.tasks.celery_app.purge_expired_conversations",
         "schedule": crontab(hour=8, minute=0),
     },
+    # Red de seguridad del seguimiento: vuelca a NocoDB los buffers que no se
+    # volcaron inline (costos de followups sin mensaje, caídas de NocoDB).
+    "volcar-seguimiento-pendiente": {
+        "task": "src.infrastructure.tasks.celery_app.flush_seguimiento_pendiente",
+        "schedule": crontab(minute="*/5"),
+    },
 }
 
 # Candado de procesamiento por conversación. Debe superar el peor caso de un
@@ -329,6 +335,15 @@ def purge_expired_conversations():
         f"{shots} shots eliminados de NocoDB"
     )
     return {"conversations": conversations, "shots": shots}
+
+
+@celery_app.task
+def flush_seguimiento_pendiente():
+    """Vuelca a NocoDB los buffers de seguimiento/resumen mensual pendientes."""
+    from src.application import seguimiento_service
+
+    intentos = seguimiento_service.flush_pendientes()
+    return {"buffers": intentos}
 
 
 @celery_app.task

@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import httpx
 from openai import OpenAI
 
+from src.application import seguimiento_service
 from src.core.config import settings
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
@@ -127,6 +128,7 @@ class RagService:
                     {"role": "user", "content": prompt},
                 ],
             )
+            seguimiento_service.registrar_uso_llm(client_id, canal, getattr(completion, "usage", None))
             data = json.loads(completion.choices[0].message.content or "{}")
             has_answer = bool(data.get("has_answer"))
             answer = str(data.get("answer") or "").strip()

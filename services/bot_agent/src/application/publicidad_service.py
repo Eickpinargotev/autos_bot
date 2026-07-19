@@ -90,6 +90,9 @@ class PublicidadService:
                     {"role": "user", "content": json.dumps({"mensaje": primer_mensaje}, ensure_ascii=False)}
                 ]
             )
+            from src.application import seguimiento_service
+
+            seguimiento_service.registrar_uso_llm(user_id, channel_value, getattr(completion, "usage", None))
             extracted = json.loads(completion.choices[0].message.content)
             dia = extracted.get("dia")
             valor = extracted.get("valor")

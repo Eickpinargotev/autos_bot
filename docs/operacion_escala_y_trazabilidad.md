@@ -113,3 +113,35 @@ importa, el fix es un candado Redis por `client_id:canal` alrededor del append.
 - **NocoDB**: log durable; purga diaria por Celery beat (`purge_expired_conversations`).
 - **Postgres**: bloqueos y registro de dictamen (sin conversaciones).
 - **Qdrant**: base de conocimiento del RAG (sin datos de clientes).
+
+## 5. Seguimiento por cliente y resumen mensual
+
+Tablas en la base **LOGs_Autos_Mensajes** de NocoDB (creadas en la versión
+`2026.07.0`):
+
+- **`seguimiento_clientes`** (una fila por `client_id` + `canal`): contador de
+  conversaciones iniciadas (una "conversación" dura hasta
+  `SEGUIMIENTO_VENTANA_CONVERSACION_HORAS` = 24h desde el primer mensaje del
+  cliente; pasado el plazo, el siguiente mensaje abre otra), primera/última
+  interacción del cliente, derivaciones a asesor, costo acumulado del LLM y un
+  historial simplificado (`{hora, autor: cliente|bot|dueño, texto}`, con tope
+  `SEGUIMIENTO_HISTORIAL_MAX_MENSAJES`).
+- **`resumen_mensual`** (una fila por mes `YYYY-MM`): mensajes del bot,
+  mensajes del cliente y costo total del mes.
+
+Diseño (en `application/seguimiento_service.py`):
+
+- **Costo exacto**: cada llamada a `chat.completions` registra su `usage`
+  (entrada, entrada cacheada y salida) y se convierte a **micro-USD enteros**
+  con los precios `OPENAI_PRICE_*_USD_PER_1M` (gpt-5.4-mini: 0.75 / 0.075 /
+  4.50 por millón). Sumar enteros evita el error acumulado de punto flotante;
+  el campo decimal legible se deriva del entero al escribir. Los embeddings
+  del RAG (text-embedding-3-small) no se contabilizan (costo despreciable).
+- **Robustez**: los eventos se acumulan primero en Redis con operaciones
+  atómicas (`RPUSH`/`HINCRBY`, claves `seguimiento_*` con `scoped_key` y
+  `resumen_mensual_deltas:<mes>`); el volcado a NocoDB toma un candado no
+  bloqueante por fila y solo descuenta del buffer lo efectivamente escrito.
+  Si NocoDB está caído, los deltas quedan en Redis y los re-intenta la tarea
+  de Celery beat `flush_seguimiento_pendiente` (cada 5 minutos).
+- Estas tablas NO entran en la purga de retención: son la vista de largo
+  plazo para dar seguimiento a cada cliente.

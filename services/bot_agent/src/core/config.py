@@ -39,6 +39,21 @@ class Settings(BaseSettings):
     NOCODB_UNANSWERED_QUESTIONS_URL: str = "http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n"
     NOCODB_RAG_WEBHOOK_TOKEN: str = ""
     NOCODB_TOKEN: str = ""
+    # Seguimiento por cliente y resumen mensual (base LOGs_Autos_Mensajes).
+    NOCODB_SEGUIMIENTO_CLIENTES_URL: str = "http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/m0z6xtcemlnwtu7/records?pageSize=25"
+    NOCODB_RESUMEN_MENSUAL_URL: str = "http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mk51gipqv4xblxk/records?pageSize=25"
+    # Precios de gpt-5.4-mini (USD por millón de tokens). Si cambias
+    # OPENAI_MODEL, actualiza estos tres valores en el mismo despliegue: el
+    # costo acumulado se calcula con ellos.
+    OPENAI_PRICE_INPUT_USD_PER_1M: float = 0.75
+    OPENAI_PRICE_CACHED_INPUT_USD_PER_1M: float = 0.075
+    OPENAI_PRICE_OUTPUT_USD_PER_1M: float = 4.50
+    # Una "conversación" dura hasta 24h desde el primer mensaje del cliente;
+    # pasado ese plazo, el siguiente mensaje cuenta como conversación nueva.
+    SEGUIMIENTO_VENTANA_CONVERSACION_HORAS: int = 24
+    # Tope del historial simplificado por cliente (mismo motivo que
+    # CONVERSATION_LOG_MAX_MESSAGES: el JSON se re-escribe completo cada vez).
+    SEGUIMIENTO_HISTORIAL_MAX_MENSAJES: int = 400
     RAG_CONVERSATION_HISTORY_LIMIT: int = 5
     # Historial que ve el agente único por turno. Los fragmentos se guardan
     # como etiquetas [[frag:ID]] (no texto completo), así que cabe más contexto
