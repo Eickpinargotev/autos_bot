@@ -1,0 +1,77 @@
+{# Vista del administrador: aquí SÍ aparece el costo real del proveedor. #}
+<div class="cifras">
+  <div class="cifra">
+    <div class="etiqueta">Costo real (a pagar)</div>
+    <div class="valor">{{ totales.real_microusd | usd }}</div>
+    <div class="nota">{{ totales.tokens_entrada }} tokens entrada · {{ totales.tokens_salida }} salida</div>
+  </div>
+  <div class="cifra destacada">
+    <div class="etiqueta">Facturado al cliente</div>
+    <div class="valor">{{ totales.cliente_microusd | usd }}</div>
+    <div class="nota">Periodo {{ periodo.id }}, desde el {{ periodo.abierto_en | fecha }}</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Margen</div>
+    <div class="valor">{{ totales.margen_microusd | usd }}</div>
+    <div class="nota">
+      {% if totales.real_microusd %}
+        {{ (totales.cliente_microusd / totales.real_microusd) | round(2) }}× sobre el costo
+      {% else %}
+        Sin consumo del proveedor todavía
+      {% endif %}
+    </div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Mensajes</div>
+    <div class="valor">{{ totales.mensajes }}</div>
+    <div class="nota">{{ totales.eventos }} eventos</div>
+  </div>
+</div>
+
+<h2>Por categoría</h2>
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>Categoría</th><th class="num">Eventos</th><th class="num">Mensajes</th>
+        <th class="num">Costo real</th><th class="num">Facturado</th><th class="num">Margen</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in categorias %}
+      <tr>
+        <td>{{ 'Turnos con LLM' if c.categoria == 'llm' else 'Mensajes por código' }}</td>
+        <td class="num">{{ c.eventos }}</td>
+        <td class="num">{{ c.mensajes }}</td>
+        <td class="num">{{ c.real_microusd | usd }}</td>
+        <td class="num">{{ c.cliente_microusd | usd }}</td>
+        <td class="num">{{ (c.cliente_microusd - c.real_microusd) | usd }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="vacio">Todavía no hay consumo en este periodo.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Por origen</h2>
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr><th>Origen</th><th>Categoría</th><th class="num">Eventos</th><th class="num">Costo real</th><th class="num">Facturado</th></tr>
+    </thead>
+    <tbody>
+      {% for o in origenes %}
+      <tr>
+        <td>{{ o.origen or '—' }}</td>
+        <td><span class="pastilla">{{ o.categoria }}</span></td>
+        <td class="num">{{ o.eventos }}</td>
+        <td class="num">{{ o.real_microusd | usd }}</td>
+        <td class="num">{{ o.cliente_microusd | usd }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="vacio">Sin datos.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

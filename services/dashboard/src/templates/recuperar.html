@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block titulo %}Recuperar acceso{% endblock %}
+
+{% block contenido %}
+<div class="panel login">
+  <h1>Recuperar acceso</h1>
+
+  {% if not configurado %}
+    <div class="mensaje error">
+      La recuperación por Telegram no está configurada en el servidor. Define
+      <code>ADMIN_TELEGRAM_CHAT_ID</code> y <code>TELEGRAM_BOT_TOKEN</code>.
+    </div>
+  {% endif %}
+
+  {% if paso == 'confirmar' %}
+    <p class="sub">
+      Escribe el código que te llegó por Telegram y elige tu contraseña nueva.
+      El código vence a los pocos minutos y solo sirve una vez.
+    </p>
+
+    <form method="post" action="/recuperar/confirmar">
+      <input type="hidden" name="usuario" value="{{ usuario_pedido }}">
+      <label for="codigo">Código</label>
+      <input id="codigo" name="codigo" inputmode="numeric" autocomplete="one-time-code" autofocus required>
+      <label for="nueva">Contraseña nueva (mínimo 10 caracteres)</label>
+      <input id="nueva" name="nueva" type="password" autocomplete="new-password" minlength="10" required>
+      <label for="repetir">Repite la nueva</label>
+      <input id="repetir" name="repetir" type="password" autocomplete="new-password" minlength="10" required>
+      <p></p>
+      <button class="primario" style="width:100%">Cambiar contraseña</button>
+    </form>
+
+    <p class="sub" style="margin-top:14px">
+      ¿No te llegó? <a href="/recuperar">Pide otro código</a>.
+    </p>
+
+  {% else %}
+    <p class="sub">
+      Escribe tu usuario y te mando un código al Telegram autorizado. Nadie más
+      lo recibe, así que sin acceso a ese chat no se puede recuperar la cuenta.
+    </p>
+
+    <form method="post" action="/recuperar">
+      <label for="usuario">Usuario</label>
+      <input id="usuario" name="usuario" autocomplete="username" autofocus required>
+      <p></p>
+      <button class="primario" style="width:100%">Enviarme el código</button>
+    </form>
+  {% endif %}
+
+  <p class="sub" style="margin-top:14px"><a href="/login">Volver al ingreso</a></p>
+</div>
+{% endblock %}

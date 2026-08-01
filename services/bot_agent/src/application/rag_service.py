@@ -3,15 +3,14 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-import httpx
 from openai import OpenAI
 
 from src.application import seguimiento_service
 from src.core.config import settings
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
+from src.infrastructure.repositories.postgres_conn import consultar, consultar_uno
 
 
 # Structured Outputs (json_schema estricto): OpenAI garantiza la forma exacta
@@ -54,7 +53,10 @@ class RagChunk:
 
 class RagService:
     collection_name = "escuela_manejo_kb"
-    chunks_table_id = "mlk30zxjzj4lfd8"
+    # Identifica el origen de los puntos en Qdrant. Cambió al migrar de NocoDB
+    # a Postgres; los puntos viejos se limpian solos en la primera sincronización
+    # completa (delete_stale_records borra todo lo que no esté en la base).
+    chunks_table_id = "rag_chunks"
     vector_size = 1536
     score_threshold = 0.25
     source_text_limit = 700
@@ -128,7 +130,9 @@ class RagService:
                     {"role": "user", "content": prompt},
                 ],
             )
-            seguimiento_service.registrar_uso_llm(client_id, canal, getattr(completion, "usage", None))
+            seguimiento_service.registrar_uso_llm(
+                client_id, canal, getattr(completion, "usage", None), origen="rag"
+            )
             data = json.loads(completion.choices[0].message.content or "{}")
             has_answer = bool(data.get("has_answer"))
             answer = str(data.get("answer") or "").strip()
@@ -194,51 +198,37 @@ class RagService:
         deleted = self.delete_stale_records(self.chunks_table_id, current_ids)
         return {"upserted": upserted, "deleted": deleted}
 
-    def sync_chunk_event(self, event: dict[str, Any]) -> dict[str, int]:
-        event_type = self._event_type(event)
-        table_id = self._event_table_id(event)
-        if table_id and table_id != self.chunks_table_id:
-            return {"upserted": 0, "deleted": 0, "ignored": 1}
+    def sync_chunk_id(self, chunk_id: int) -> dict[str, int]:
+        """Re-sincroniza un chunk concreto tras editarlo en el dashboard.
 
-        rows = self._event_rows(event)
-        if not rows:
-            return {"upserted": 0, "deleted": 0, "ignored": 1}
+        Si el chunk ya no existe o quedó inactivo, se borra su punto de Qdrant.
+        Es la sustitución del antiguo webhook de NocoDB: ahora el disparo viene
+        del propio dashboard, que es quien edita la base de conocimiento.
+        """
+        registro = consultar_uno(
+            "SELECT id, titulo, contenido FROM rag_chunks WHERE id = %s AND activo",
+            (int(chunk_id),),
+        )
+        if not registro:
+            borrados = 1 if self.delete_record({"id": chunk_id}, self.chunks_table_id) else 0
+            return {"upserted": 0, "deleted": borrados, "ignored": 0}
 
-        if "delete" in event_type:
-            deleted = 0
-            for row in rows:
-                if self.delete_record(row, table_id or self.chunks_table_id):
-                    deleted += 1
-            return {"upserted": 0, "deleted": deleted, "ignored": 0}
-
-        upserted = self.upsert_records(rows, table_id or self.chunks_table_id)
-        return {"upserted": upserted, "deleted": 0, "ignored": 0}
+        return {"upserted": self.upsert_records([registro], self.chunks_table_id), "deleted": 0, "ignored": 0}
 
     def fetch_chunk_records(self) -> list[dict[str, Any]]:
-        if not settings.NOCODB_RAG_CHUNKS_URL:
+        """Lee la base de conocimiento desde Postgres.
+
+        Solo entran los chunks activos: desactivar uno en el dashboard lo saca
+        del RAG sin borrarlo, y la limpieza de puntos obsoletos se encarga de
+        quitarlo de Qdrant en la siguiente sincronización.
+        """
+        try:
+            return consultar(
+                "SELECT id, titulo, contenido FROM rag_chunks WHERE activo ORDER BY id"
+            )
+        except Exception as e:
+            print(f"Error leyendo chunks del RAG en Postgres: {e}")
             return []
-
-        records: list[dict[str, Any]] = []
-        page = 1
-        page_size = 1000
-        while True:
-            url = self._url_with_params(settings.NOCODB_RAG_CHUNKS_URL, {"page": page, "pageSize": page_size})
-            response = httpx.get(url, headers={"xc-token": settings.NOCODB_TOKEN}, timeout=20.0)
-            response.raise_for_status()
-            data = response.json()
-            batch = data.get("list") or data.get("records") or data.get("data") or []
-            if not isinstance(batch, list):
-                break
-            records.extend([record.get("fields", record) for record in batch if isinstance(record, dict)])
-
-            page_info = data.get("pageInfo") or data.get("pagination") or {}
-            total_rows = page_info.get("totalRows") or page_info.get("total")
-            if len(batch) < page_size:
-                break
-            if total_rows and len(records) >= int(total_rows):
-                break
-            page += 1
-        return records
 
     def upsert_records(self, records: list[dict[str, Any]], table_id: str) -> int:
         self.ensure_collection()
@@ -282,17 +272,19 @@ class RagService:
             return False
 
     def delete_stale_records(self, table_id: str, current_record_ids: set[str]) -> int:
-        try:
-            from qdrant_client.models import FieldCondition, Filter, MatchValue
+        """Borra de Qdrant todo punto que ya no exista (o no esté activo) en la base.
 
+        Recorre la colección ENTERA, sin filtrar por `table_id`. Así una misma
+        pasada limpia tanto los chunks borrados en el dashboard como los puntos
+        que quedaron del origen anterior (NocoDB), que tenían otro `table_id` y
+        de otro modo permanecerían para siempre contaminando las búsquedas.
+        """
+        try:
             deleted = 0
             offset = None
             while True:
                 points, offset = self.client.scroll(
                     collection_name=self.collection_name,
-                    scroll_filter=Filter(
-                        must=[FieldCondition(key="table_id", match=MatchValue(value=table_id))]
-                    ),
                     limit=1000,
                     offset=offset,
                     with_payload=True,
@@ -302,6 +294,7 @@ class RagService:
                     point.id
                     for point in points
                     if str((point.payload or {}).get("record_id") or "") not in current_record_ids
+                    or str((point.payload or {}).get("table_id") or "") != table_id
                 ]
                 if stale_point_ids:
                     self.delete_point_ids(stale_point_ids)
@@ -380,7 +373,7 @@ class RagService:
         text = self.record_text(record_data)
         if not record_id or not text:
             return None
-        external_id = f"nocodb:{table_id}:{record_id}"
+        external_id = f"pg:{table_id}:{record_id}"
         return RagChunk(
             point_id=self.point_id(table_id, record_id),
             external_id=external_id,
@@ -399,7 +392,18 @@ class RagService:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, text)) if text else ""
 
     def record_text(self, record: dict[str, Any]) -> str:
-        ignored = {"Id", "id", "ID", "_id", "CreatedAt", "UpdatedAt", "created_at", "updated_at"}
+        """Texto que se embebe: el título y el contenido del chunk.
+
+        Se mantiene el recorrido genérico como respaldo para filas con otra
+        forma (p. ej. durante la migración), pero el caso normal es
+        titulo + contenido.
+        """
+        if "titulo" in record or "contenido" in record:
+            titulo = str(record.get("titulo") or "").strip()
+            contenido = str(record.get("contenido") or "").strip()
+            return "\n".join(parte for parte in (titulo, contenido) if parte).strip()
+
+        ignored = {"Id", "id", "ID", "_id", "CreatedAt", "UpdatedAt", "created_at", "updated_at", "activo"}
         parts = []
         for key, value in record.items():
             if key in ignored or value is None:
@@ -411,7 +415,7 @@ class RagService:
         return "\n".join(parts).strip()
 
     def point_id(self, table_id: str, record_id: str) -> str:
-        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"nocodb:{table_id}:{record_id}"))
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"pg:{table_id}:{record_id}"))
 
     def _answer_prompt(
         self,
@@ -521,26 +525,3 @@ Devuelve JSON estricto:
             text=f"RAG generó respuesta: {has_answer}",
             duration_ms=ToolCallLogger._duration_ms(started),
         )
-
-    def _event_type(self, event: dict[str, Any]) -> str:
-        return str(event.get("type") or event.get("event") or event.get("Event") or "").lower()
-
-    def _event_table_id(self, event: dict[str, Any]) -> str:
-        data = event.get("data") or event.get("Data") or event
-        return str(data.get("table_id") or data.get("tableId") or data.get("table") or event.get("table_id") or "")
-
-    def _event_rows(self, event: dict[str, Any]) -> list[dict[str, Any]]:
-        data = event.get("data") or event.get("Data") or event
-        rows = data.get("rows") or data.get("records") or data.get("list") or event.get("rows") or []
-        if isinstance(rows, dict):
-            rows = [rows]
-        if not rows and isinstance(data.get("row"), dict):
-            rows = [data["row"]]
-        return [row.get("fields", row) for row in rows if isinstance(row, dict)]
-
-    def _url_with_params(self, url: str, params: dict[str, Any]) -> str:
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
-        for key, value in params.items():
-            query[key] = [str(value)]
-        return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))

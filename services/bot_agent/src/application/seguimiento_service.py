@@ -1,4 +1,4 @@
-"""Seguimiento por cliente y resumen mensual (tablas en LOGs_Autos_Mensajes).
+"""Seguimiento por cliente y resumen mensual (tablas en Postgres).
 
 Qué registra:
 - Por cliente: conversaciones iniciadas (ventana de 24h desde el primer
@@ -9,10 +9,10 @@ Qué registra:
 
 Diseño robusto (mismo espíritu que el buffer de mensajes):
 1. Cada evento se ACUMULA primero en Redis con operaciones atómicas
-   (RPUSH/HINCRBY). El camino caliente no necesita candados y una caída de
-   NocoDB no pierde datos: quedan en el buffer.
+   (RPUSH/HINCRBY). El camino caliente no necesita candados y una caída de la
+   base no pierde datos: quedan en el buffer.
 2. El volcado (flush) toma un candado no bloqueante por fila, lee la fila de
-   NocoDB, aplica los deltas y escribe. Solo tras escribir con éxito descuenta
+   Postgres, aplica los deltas y escribe. Solo tras escribir con éxito descuenta
    del buffer EXACTAMENTE lo aplicado (HINCRBY negativo / LTRIM), preservando
    lo que otro proceso haya sumado entre medias.
 3. El flush corre tras cada mensaje y, como red de seguridad, la tarea
@@ -29,7 +29,9 @@ from typing import Any
 from src.application.buffer_service import redis_client, scoped_key
 from src.core.config import settings
 from src.domain.entities import Channel
-from src.infrastructure.repositories.nocodb_retention import parse_timestamp
+from src.infrastructure.repositories import billing_repository
+from src.infrastructure.repositories.fechas import parse_timestamp
+from src.infrastructure.repositories.postgres_conn import ejecutar
 from src.infrastructure.repositories.seguimiento_repository import SeguimientoRepository
 
 HISTORIAL_PREFIX = "seguimiento_historial"
@@ -38,7 +40,7 @@ LOCK_PREFIX = "seguimiento_lock"
 MES_DELTAS_PREFIX = "resumen_mensual_deltas"
 MES_LOCK_PREFIX = "resumen_mensual_lock"
 
-# Si un buffer queda huérfano (p. ej. NocoDB caído días), se conserva un mes
+# Si un buffer queda huérfano (p. ej. la base caída días), se conserva un mes
 # para que la tarea periódica pueda volcarlo; después expira solo.
 _BUFFER_TTL_SECONDS = 30 * 24 * 3600
 _LOCK_TTL_SECONDS = 30
@@ -62,8 +64,21 @@ def costo_microusd(prompt_tokens: int, cached_tokens: int, completion_tokens: in
 
 # --- Registro de eventos (camino caliente, solo Redis) -----------------------
 
-def registrar_uso_llm(client_id: str, canal: Channel | str, usage: Any) -> None:
-    """Acumula el costo/tokens de una llamada al LLM (objeto `usage` de OpenAI)."""
+def registrar_uso_llm(
+    client_id: str,
+    canal: Channel | str,
+    usage: Any,
+    origen: str = "agente",
+) -> None:
+    """Acumula el costo/tokens de una llamada al LLM (objeto `usage` de OpenAI).
+
+    Hace dos cosas con el mismo dato:
+    1. Suma el delta en Redis, que alimenta el seguimiento por cliente y el
+       resumen mensual (camino tolerante a caídas, se vuelca después).
+    2. Anota el hecho facturable en `uso_eventos`, que es lo que el dashboard
+       suma en vivo. `origen` dice qué parte del bot gastó (agente, recordatorio,
+       rag, publicidad) para poder desglosarlo.
+    """
     try:
         if usage is None:
             return
@@ -92,6 +107,43 @@ def registrar_uso_llm(client_id: str, canal: Channel | str, usage: Any) -> None:
         pipe.execute()
     except Exception as e:
         print(f"Error registrando uso de LLM en seguimiento: {e}")
+        return
+
+    # El libro mayor de facturación se escribe directo a Postgres (no pasa por
+    # el buffer): el dashboard lo suma en vivo y debe reflejar el consumo al
+    # instante. Su propio manejo de errores impide que un fallo aquí afecte
+    # la respuesta al cliente.
+    billing_repository.registrar_evento_llm(
+        client_id=client_id,
+        canal=canal,
+        origen=origen,
+        modelo=settings.OPENAI_MODEL,
+        tokens_entrada=prompt,
+        tokens_cacheados=cached,
+        tokens_salida=completion,
+        costo_real_microusd=micro,
+    )
+
+
+def registrar_uso_codigo(
+    client_id: str,
+    canal: Channel | str,
+    origen: str,
+    mensajes: int = 1,
+) -> None:
+    """Anota mensajes entregados SIN pasar por el modelo.
+
+    Son los que dispara el código: la palabra clave (`tareas`/`transporte`), la
+    bienvenida al grupo, las secuencias programadas de publicidad y los envíos
+    manuales del dashboard. No tienen costo de proveedor, pero sí se facturan
+    con una tarifa fija por mensaje.
+    """
+    billing_repository.registrar_evento_codigo(
+        client_id=client_id,
+        canal=canal,
+        origen=origen,
+        mensajes=mensajes,
+    )
 
 
 def registrar_mensaje(
@@ -129,6 +181,27 @@ def registrar_mensaje(
     flush_mes(_mes_actual())
 
 
+def registrar_intervencion_humana(client_id: str, canal: Channel | str) -> None:
+    """Cuenta que una persona del negocio entró a atender esta conversación.
+
+    Se escribe directo a Postgres y no al buffer de Redis: es un hecho puntual y
+    poco frecuente, y el panel del administrador debe reflejarlo enseguida.
+    """
+    try:
+        ejecutar(
+            """
+            INSERT INTO seguimiento_clientes (client_id, canal, intervenciones_humano, ultima_intervencion_humano)
+            VALUES (%s, %s, 1, NOW())
+            ON CONFLICT (client_id, canal) DO UPDATE SET
+                intervenciones_humano = seguimiento_clientes.intervenciones_humano + 1,
+                ultima_intervencion_humano = NOW()
+            """,
+            (str(client_id), _canal_value(canal)),
+        )
+    except Exception as e:
+        print(f"Error registrando intervención humana: {e}")
+
+
 def registrar_derivacion(client_id: str, canal: Channel | str) -> None:
     """Cuenta una derivación a asesor (reporte + bloqueo) para el cliente."""
     try:
@@ -146,12 +219,10 @@ def registrar_derivacion(client_id: str, canal: Channel | str) -> None:
     flush_cliente(client_id, canal)
 
 
-# --- Volcado a NocoDB --------------------------------------------------------
+# --- Volcado a Postgres ------------------------------------------------------
 
 def flush_cliente(client_id: str, canal: Channel | str) -> bool:
     """Vuelca los buffers del cliente a su fila de seguimiento_clientes."""
-    if not settings.NOCODB_SEGUIMIENTO_CLIENTES_URL:
-        return False
     canal_value = _canal_value(canal)
     lock_key = scoped_key(LOCK_PREFIX, canal_value, client_id)
     if not redis_client.set(lock_key, "1", nx=True, ex=_LOCK_TTL_SECONDS):
@@ -206,8 +277,6 @@ def flush_cliente(client_id: str, canal: Channel | str) -> bool:
 
 def flush_mes(mes: str) -> bool:
     """Vuelca los deltas acumulados del mes a su fila de resumen_mensual."""
-    if not settings.NOCODB_RESUMEN_MENSUAL_URL:
-        return False
     lock_key = f"{MES_LOCK_PREFIX}:{mes}"
     if not redis_client.set(lock_key, "1", nx=True, ex=_LOCK_TTL_SECONDS):
         return False

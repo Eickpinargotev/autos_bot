@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block titulo %}Mi consumo{% endblock %}
+
+{% block contenido %}
+<h1>Mi consumo</h1>
+<p class="sub">
+  Se actualiza solo, cada 5 segundos. Se cobra por mensaje entregado: los que
+  atiende la inteligencia artificial cuestan más que los automáticos.
+</p>
+
+<div data-refrescar="/factura/totales" data-cada="5000">
+  {% include "_factura_totales.html" %}
+</div>
+{% endblock %}

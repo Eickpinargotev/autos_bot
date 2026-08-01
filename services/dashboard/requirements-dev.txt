@@ -1,0 +1,4 @@
+# Dependencias SOLO de desarrollo/test. No se instalan en la imagen de producción.
+# Se instalan en la etapa `dev` del Dockerfile (ver docker-compose.local.yml).
+-r requirements.txt
+pytest

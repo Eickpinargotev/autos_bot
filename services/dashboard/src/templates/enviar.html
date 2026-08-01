@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block titulo %}Enviar{% endblock %}
+
+{% block contenido %}
+<h1>Enviar</h1>
+<p class="sub">
+  Elige la plataforma, el mensaje y a quién va. Los envíos salen en segundo plano;
+  en <a href="/envios">Envíos</a> ves cómo van. Un mensaje con varias partes las
+  manda una tras otra, con una pausa de entre 1 y 6 segundos.
+  Los mensajes con algún problema aparecen deshabilitados: arréglalos en
+  <a href="/mensajes">Mensajes</a>.
+</p>
+
+<div class="panel">
+  <form method="post" action="/enviar">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="campos">
+      <div>
+        <label for="canal">Plataforma</label>
+        <select id="canal" name="canal" required>
+          {% for canal in canales %}
+          <option value="{{ canal }}">{{ canal | capitalize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="plantilla_id">Mensaje</label>
+        <select id="plantilla_id" name="plantilla_id" required>
+          {% for p in plantillas %}
+          <option value="{{ p.id }}" {{ 'disabled' if p.problemas }}>
+            {{ p.clave }} — {{ p.partes | length }} parte(s){% if p.problemas %} · revisar: {{ p.problemas[0] }}{% endif %}
+          </option>
+          {% else %}
+          <option value="" disabled>No hay mensajes creados</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <label for="destinos">ID de destino</label>
+    <textarea id="destinos" name="destinos" required
+              placeholder="Uno por línea.&#10;En WhatsApp es el número con código de país (50688888888).&#10;En Telegram es el ID de chat."></textarea>
+
+    <p></p>
+    <button class="primario" {{ 'disabled' if not plantillas }}>Poner en cola</button>
+    {% if not plantillas %}
+    <p class="sub">Primero <a href="/mensajes">crea un mensaje</a>.</p>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

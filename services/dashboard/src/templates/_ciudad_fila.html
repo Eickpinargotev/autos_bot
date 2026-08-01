@@ -1,0 +1,50 @@
+{# Una fila del catálogo de ciudades. Se devuelve sola tras guardar una celda,
+   para que los avisos de validación se repinten con el dato nuevo. #}
+<tr id="ciudad-{{ ciudad.id }}">
+  <td style="min-width:150px">
+    <div class="celda">
+      <textarea data-guardar-en="/ciudades/{{ ciudad.id }}/campo" data-campo="ciudad"
+                rows="2">{{ ciudad.ciudad }}</textarea>
+      <span class="guardado">guardado</span>
+    </div>
+    {% if ciudad.avisos %}
+    <ul class="avisos">{% for a in ciudad.avisos %}<li>{{ a }}</li>{% endfor %}</ul>
+    {% endif %}
+  </td>
+
+  {% for campo in ['mensaje_1', 'mensaje_2', 'mensaje_3', 'mensaje_4', 'mensaje_5'] %}
+  <td style="min-width:220px">
+    <div class="celda">
+      <textarea data-guardar-en="/ciudades/{{ ciudad.id }}/campo" data-campo="{{ campo }}"
+                rows="4">{{ ciudad[campo] }}</textarea>
+      <span class="guardado">guardado</span>
+    </div>
+  </td>
+  {% endfor %}
+
+  <td style="min-width:160px">
+    <div class="celda">
+      <textarea data-guardar-en="/ciudades/{{ ciudad.id }}/campo" data-campo="link_facebook"
+                rows="2">{{ ciudad.link_facebook }}</textarea>
+      <span class="guardado">guardado</span>
+    </div>
+  </td>
+
+  <td style="white-space:nowrap">
+    <span class="pastilla {{ 'ok' if ciudad.activo else 'alerta' }}">
+      {{ 'activa' if ciudad.activo else 'inactiva' }}
+    </span>
+    <form method="post" action="/ciudades/{{ ciudad.id }}/activo" style="margin-top:6px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini">{{ 'Desactivar' if ciudad.activo else 'Activar' }}</button>
+    </form>
+    <form method="post" action="/ciudades/{{ ciudad.id }}/eliminar" style="margin-top:6px"
+          onsubmit="return confirm('Se eliminará {{ ciudad.ciudad }} del catálogo. ¿Continuar?')">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini peligro">Eliminar</button>
+    </form>
+    <div style="font-size:11px;color:var(--suave);margin-top:6px">
+      {{ ciudad.actualizado_en | fecha }}<br>{{ ciudad.actualizado_por }}
+    </div>
+  </td>
+</tr>

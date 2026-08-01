@@ -8,7 +8,19 @@ import httpx
 from src.core.config import settings
 
 
-IMAGE_MARKER_RE = re.compile(r"(?im)(?:^|\s)imagen\s*=\s*([A-Za-z0-9_-]+)")
+# La referencia puede ser un ID de Google Drive o una URL completa, de ahí que
+# el patrón acepte `:/?=&`. El punto entra (las URLs lo llevan) y por eso al
+# capturar se recorta la puntuación final: "Imagen=1ab3." no debe incluir el
+# punto que cierra la frase.
+_REFERENCIA = r"([A-Za-z0-9_\-./:?=&%~+]+)"
+IMAGE_MARKER_RE = re.compile(rf"(?im)(?:^|\s)imagen\s*=\s*{_REFERENCIA}")
+# `Video=` funciona igual que `Imagen=`: es el marcador que el negocio escribe
+# dentro del texto del mensaje (en el catálogo de ciudades o en una plantilla).
+VIDEO_MARKER_RE = re.compile(rf"(?im)(?:^|\s)video\s*=\s*{_REFERENCIA}")
+
+
+def _limpiar_referencia(valor: str) -> str:
+    return valor.rstrip(".,;:")
 
 
 @dataclass
@@ -22,18 +34,36 @@ class OutboundAttachment:
 class ParsedOutboundMessage:
     clean_text: str
     image_ids: list[str] = field(default_factory=list)
+    video_ids: list[str] = field(default_factory=list)
 
 
 def parse_outbound_message(text: str) -> ParsedOutboundMessage:
-    image_ids = IMAGE_MARKER_RE.findall(text or "")
+    image_ids = [_limpiar_referencia(v) for v in IMAGE_MARKER_RE.findall(text or "")]
+    video_ids = [_limpiar_referencia(v) for v in VIDEO_MARKER_RE.findall(text or "")]
     clean_text = IMAGE_MARKER_RE.sub("", text or "")
+    clean_text = VIDEO_MARKER_RE.sub("", clean_text)
     clean_text = re.sub(r"[ \t]+\n", "\n", clean_text)
     clean_text = re.sub(r"\n{3,}", "\n\n", clean_text).strip()
-    return ParsedOutboundMessage(clean_text=clean_text, image_ids=image_ids)
+    return ParsedOutboundMessage(clean_text=clean_text, image_ids=image_ids, video_ids=video_ids)
+
+
+def url_publica(referencia: str) -> str:
+    """URL descargable de una referencia de media.
+
+    La referencia puede ser una URL directa (se usa tal cual) o un ID de Google
+    Drive (se expande con la plantilla configurada). Lo necesita WasenderAPI,
+    que descarga la media por URL en vez de recibir el binario.
+    """
+    referencia = (referencia or "").strip()
+    if not referencia:
+        return ""
+    if referencia.startswith("http://") or referencia.startswith("https://"):
+        return referencia
+    return settings.GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE.format(image_id=referencia)
 
 
 def download_drive_image(image_id: str) -> OutboundAttachment | None:
-    url = settings.GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE.format(image_id=image_id)
+    url = url_publica(image_id)
     downloaded = 0
     suffix = ".jpg"
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)

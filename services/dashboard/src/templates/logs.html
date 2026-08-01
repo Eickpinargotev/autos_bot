@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block titulo %}Conversaciones{% endblock %}
+
+{% block contenido %}
+<h1>Conversaciones</h1>
+<p class="sub">Todo lo que el bot ha hablado, ordenado por actividad reciente.</p>
+
+<div class="panel">
+  <form class="linea" method="get" action="/admin/logs">
+    <input name="q" value="{{ busqueda }}" placeholder="Buscar por número de teléfono…"
+           inputmode="tel" autocomplete="off">
+    <button>Buscar</button>
+  </form>
+  <p class="sub" style="margin:8px 0 0">
+    Solo por número: los guiones, espacios y el «+» se ignoran. No se busca dentro
+    del texto de los mensajes — eso obligaría a recorrer todo el historial y dejaría
+    el panel lento justo cuando más conversaciones hay.
+  </p>
+</div>
+
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr><th>Cliente</th><th>Nombre</th><th>Canal</th><th class="num">Mensajes</th><th>Última actividad</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in conversaciones %}
+      <tr>
+        <td>{{ c.client_id }}</td>
+        <td>{{ c.nombre or '—' }}</td>
+        <td>{{ c.canal }}</td>
+        <td class="num">{{ c.mensajes }}</td>
+        <td>{{ c.ultima_actividad | fecha }}</td>
+        <td><a class="boton mini" href="/admin/logs/{{ c.canal }}/{{ c.client_id }}">Ver</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="vacio">
+        {% if busqueda %}Ningún número coincide con «{{ busqueda }}».
+        {% else %}No hay conversaciones registradas.{% endif %}
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

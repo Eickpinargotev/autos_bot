@@ -1,10 +1,10 @@
-import httpx
 import json
 import time
 from src.core.config import settings
 from src.core.prompts import EXTRACT_AD_INFO_PROMPT
 from src.domain.entities import Channel
 from src.application.runtime_context import clear_user_runtime_context, register_ad_context
+from src.infrastructure.repositories.invitaciones_repository import InvitacionesRepository
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 from src.infrastructure.tasks.celery_app import send_delayed_message_sequence, schedule_ad_programmed_messages
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
@@ -92,7 +92,9 @@ class PublicidadService:
             )
             from src.application import seguimiento_service
 
-            seguimiento_service.registrar_uso_llm(user_id, channel_value, getattr(completion, "usage", None))
+            seguimiento_service.registrar_uso_llm(
+                user_id, channel_value, getattr(completion, "usage", None), origen="publicidad"
+            )
             extracted = json.loads(completion.choices[0].message.content)
             dia = extracted.get("dia")
             valor = extracted.get("valor")
@@ -178,27 +180,8 @@ class PublicidadService:
 
     @staticmethod
     def _fetch_invitation_records() -> list[dict]:
-        headers = {"xc-token": settings.NOCODB_TOKEN}
-        url = settings.NOCODB_INVITACIONES_URL
-        try:
-            # Reemplazar pageSize con limit para la nueva versión de NocoDB.
-            if "pageSize=" in url:
-                import re
-                url = re.sub(r'pageSize=\d+', 'limit=1000', url)
-            if "limit=" not in url:
-                url += "&limit=1000" if "?" in url else "?limit=1000"
-
-            response = httpx.get(url, headers=headers, timeout=10.0)
-            response.raise_for_status()
-            data = response.json()
-            records = data.get("list", data.get("records", []))
-            return records if isinstance(records, list) else []
-        except httpx.HTTPStatusError as e:
-            print(f"Error HTTP NocoDB: {e.response.status_code}. Revisa tu token en .env")
-            return []
-        except Exception as e:
-            print(f"Error conectando a NocoDB: {e}")
-            return []
+        """Ciudades activas del catálogo que administra el dashboard."""
+        return InvitacionesRepository.listar_activas()
 
     @staticmethod
     def _log_record(

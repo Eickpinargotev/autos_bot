@@ -1,3 +1,6 @@
+import random
+import time
+
 from celery import Celery
 from celery.schedules import crontab
 from src.core.config import settings
@@ -14,7 +17,10 @@ from src.application.runtime_context import (
     set_keyword_active_report,
 )
 from src.domain.entities import Channel
+from src.application import seguimiento_service
 from src.infrastructure.channels.senders import ChannelSenderRegistry
+from src.infrastructure.channels.wasender import WasenderNoConfigurado
+from src.infrastructure.repositories import envios_repository
 from src.infrastructure.repositories.conversation_state_repo import ConversationStateRepo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
@@ -57,11 +63,18 @@ celery_app.conf.beat_schedule = {
         "task": "src.infrastructure.tasks.celery_app.purge_expired_conversations",
         "schedule": crontab(hour=8, minute=0),
     },
-    # Red de seguridad del seguimiento: vuelca a NocoDB los buffers que no se
-    # volcaron inline (costos de followups sin mensaje, caídas de NocoDB).
+    # Red de seguridad del seguimiento: vuelca a Postgres los buffers que no se
+    # volcaron inline (costos de followups sin mensaje, caídas de la base).
     "volcar-seguimiento-pendiente": {
         "task": "src.infrastructure.tasks.celery_app.flush_seguimiento_pendiente",
         "schedule": crontab(minute="*/5"),
+    },
+    # Cola de envíos manuales del dashboard. El dashboard solo inserta filas en
+    # estado 'pendiente'; enviarlas es cosa del bot, que es quien tiene los
+    # canales configurados. Cada 10s para que un envío se sienta inmediato.
+    "procesar-envios-pendientes": {
+        "task": "src.infrastructure.tasks.celery_app.procesar_envios_pendientes",
+        "schedule": 10.0,
     },
 }
 
@@ -324,22 +337,22 @@ def purge_expired_conversations():
 
     Política: `settings.CONVERSATION_RETENTION_DAYS` días desde la última
     interacción. El estado/historial en Redis ya expira solo por TTL; aquí se
-    limpia el registro durable en NocoDB (log de conversaciones y, si está
-    configurada, la tabla de shots). La agenda la dispara Celery beat a diario.
+    limpia el registro durable en Postgres (log de conversaciones y shots).
+    La agenda la dispara Celery beat a diario.
     """
     days = settings.CONVERSATION_RETENTION_DAYS
     conversations = ConversationLogRepository.purge_older_than(days)
     shots = ConversationShotRepository.purge_older_than(days)
     print(
         f"[retención] Purga >{days}d: {conversations} conversaciones y "
-        f"{shots} shots eliminados de NocoDB"
+        f"{shots} shots eliminados de Postgres"
     )
     return {"conversations": conversations, "shots": shots}
 
 
 @celery_app.task
 def flush_seguimiento_pendiente():
-    """Vuelca a NocoDB los buffers de seguimiento/resumen mensual pendientes."""
+    """Vuelca a Postgres los buffers de seguimiento/resumen mensual pendientes."""
     from src.application import seguimiento_service
 
     intentos = seguimiento_service.flush_pendientes()
@@ -359,3 +372,131 @@ def schedule_keyword_programmed_messages(channel: str, user_id: str):
     if tasks:
         redis_client.rpush(key, *tasks)
         redis_client.expire(key, RUNTIME_TTL_SECONDS)
+
+
+# --- Cola de envíos manuales del dashboard -----------------------------------
+
+def _texto_de_la_parte(parte: dict) -> str:
+    """Arma el texto de una parte añadiendo el marcador de media si la tiene.
+
+    Se reutiliza el mismo formato `Imagen=` / `Video=` que ya entiende
+    `ChannelSenderRegistry.send`, en vez de abrir un segundo camino de envío.
+    """
+    texto = (parte.get("texto") or "").strip()
+    tipo = parte.get("media_tipo") or ""
+    referencia = (parte.get("media_ref") or "").strip()
+    if not tipo or not referencia:
+        return texto
+    marcador = "Imagen" if tipo == "imagen" else "Video"
+    return f"{texto}\n\n{marcador}={referencia}".strip()
+
+
+def _espera_entre_partes() -> float:
+    """Pausa aleatoria antes de la siguiente parte.
+
+    Una cadena de mensajes a intervalos exactos es la firma más obvia de un bot.
+    El intervalo variable la disimula sin necesidad de nada más.
+    """
+    minimo = settings.ENVIO_DELAY_MIN_SEGUNDOS
+    maximo = max(settings.ENVIO_DELAY_MAX_SEGUNDOS, minimo)
+    return random.uniform(minimo, maximo)
+
+
+def _clasificar_error(exc: Exception) -> tuple[str, str]:
+    """Separa lo que el cliente puede arreglar de lo que debe ver el administrador.
+
+    Devuelve (mensaje_para_el_cliente, detalle_tecnico). Si el mensaje al
+    cliente queda vacío, la interfaz solo ofrece reportarlo: significa que la
+    causa no está en sus manos.
+    """
+    detalle = f"{type(exc).__name__}: {exc}"
+
+    # El motivo real de un 4xx viene en el CUERPO de la respuesta, no en el
+    # mensaje de la excepción: sin esto, "chat not found" nunca se detectaría y
+    # el cliente vería un error en blanco que no puede arreglar.
+    cuerpo = ""
+    respuesta = getattr(exc, "response", None)
+    if respuesta is not None:
+        try:
+            cuerpo = respuesta.text or ""
+        except Exception:
+            cuerpo = ""
+        if cuerpo:
+            detalle = f"{detalle} | respuesta: {cuerpo[:1000]}"
+
+    texto = f"{exc} {cuerpo}".lower()
+
+    if isinstance(exc, WasenderNoConfigurado):
+        return ("WhatsApp todavía no está conectado. Avísale al administrador.", detalle)
+    if "chat not found" in texto or "chat_id is empty" in texto or "user not found" in texto:
+        return ("El ID de destino no existe o el cliente nunca escribió al bot.", detalle)
+    if "bot was blocked" in texto or "blocked by the user" in texto:
+        return ("Esa persona bloqueó al bot, no se le puede escribir.", detalle)
+    if "imagen" in texto or "image" in texto or "video" in texto or "media" in texto:
+        return ("No se pudo abrir el archivo adjunto. Revisa que el enlace sea público.", detalle)
+    if "message is too long" in texto or "text is too long" in texto:
+        return ("El texto es demasiado largo para esta plataforma. Acórtalo.", detalle)
+    return ("", detalle)
+
+
+@celery_app.task
+def procesar_envios_pendientes():
+    """Envía lo que el dashboard dejó en cola.
+
+    Cada envío es una CADENA de partes que salen una tras otra con una pausa
+    aleatoria. Si una parte falla a mitad, se marca el error indicando por cuál
+    se quedó: al reintentar se retoma desde ahí, para no repetirle al cliente
+    los mensajes que ya recibió.
+
+    Los envíos manuales se facturan como mensajes de código (no pasan por el
+    modelo), igual que la palabra clave o los flujos programados.
+    """
+    envios_repository.rescatar_atascados()
+
+    procesados = {"enviados": 0, "errores": 0, "partes": 0}
+    for envio in envios_repository.tomar_pendientes():
+        partes = envio.get("partes") or []
+        if not partes:
+            envios_repository.marcar_error(envio["id"], "El mensaje quedó sin contenido.", "sin partes")
+            procesados["errores"] += 1
+            continue
+
+        # Se retoma donde se quedó el intento anterior.
+        desde = int(envio.get("partes_enviadas") or 0)
+        fallo = None
+
+        for indice in range(desde, len(partes)):
+            if indice > desde:
+                time.sleep(_espera_entre_partes())
+            try:
+                ChannelSenderRegistry.send(
+                    envio["canal"],
+                    envio["destino_id"],
+                    _texto_de_la_parte(partes[indice]),
+                    log_conversation=False,
+                )
+            except Exception as exc:
+                fallo = (indice, exc)
+                break
+            envios_repository.marcar_parte_enviada(envio["id"], indice + 1)
+            procesados["partes"] += 1
+
+        if fallo is not None:
+            indice, exc = fallo
+            mensaje_cliente, detalle = _clasificar_error(exc)
+            if indice > 0:
+                mensaje_cliente = (
+                    f"Se enviaron las primeras {indice} parte(s) y falló la {indice + 1}. "
+                    f"{mensaje_cliente}"
+                ).strip()
+            envios_repository.marcar_error(envio["id"], mensaje_cliente, f"parte {indice + 1}: {detalle}")
+            procesados["errores"] += 1
+            continue
+
+        envios_repository.marcar_enviado(envio["id"])
+        seguimiento_service.registrar_uso_codigo(
+            envio["destino_id"], envio["canal"], origen="envio_manual", mensajes=len(partes)
+        )
+        procesados["enviados"] += 1
+
+    return procesados

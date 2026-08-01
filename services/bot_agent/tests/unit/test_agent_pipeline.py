@@ -13,9 +13,6 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
-os.environ.setdefault("NOCODB_INVITACIONES_URL", "http://nocodb.test/invitaciones")
-os.environ.setdefault("NOCODB_REPORTES_URL", "http://nocodb.test/reportes")
-os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.application.agent_pipeline import AgentPipeline

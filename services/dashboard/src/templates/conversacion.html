@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block titulo %}{{ client_id }}{% endblock %}
+
+{# Quién habla. En el log hay tres voces (`author`): el cliente, la IA y el
+   dueño del negocio cuando escribe desde su teléfono. `direction` no basta
+   para distinguirlas: la IA y el dueño son las dos 'outbound'. #}
+{% macro quien(m) -%}
+  {%- if m.author == 'cliente' -%}{{ m.sender_name or 'Cliente' }}
+  {%- elif m.author == 'dueño' -%}Dueño del negocio
+  {%- elif m.author == 'ia' -%}Bot
+  {%- else -%}{{ m.sender_name or m.author }}{%- endif -%}
+{%- endmacro %}
+
+{% block contenido %}
+<h1>{{ resumen.nombre or client_id }}</h1>
+<p class="sub">
+  {{ client_id }} · canal {{ canal }} ·
+  {{ resumen.mensajes or 0 }} mensajes
+  {%- if resumen.primera %} · desde el {{ resumen.primera | fecha }}{% endif %} ·
+  <a href="/admin/logs">volver a la lista</a>
+</p>
+
+<div class="panel linea" style="justify-content:space-between">
+  <span class="sub" style="margin:0">Las horas son las del negocio, no las del servidor.</span>
+  <a class="boton mini" href="/admin/logs/{{ canal }}/{{ client_id }}{{ '' if internos else '?internos=1' }}">
+    {{ 'Ocultar' if internos else 'Ver' }} eventos técnicos ({{ resumen.eventos or 0 }})
+  </a>
+</div>
+
+<div class="panel chat">
+  {% if hay_mas %}
+  <a class="boton mini mas-antiguos"
+     href="/admin/logs/{{ canal }}/{{ client_id }}?antes={{ cursor }}{{ '&internos=1' if internos }}">
+    Cargar mensajes anteriores
+  </a>
+  {% endif %}
+
+  {% set ns = namespace(dia='') %}
+  {% for m in mensajes %}
+    {% if (m.created_at | dia_clave) != ns.dia %}
+      {% set ns.dia = m.created_at | dia_clave %}
+      <div class="separador-dia"><span>{{ m.created_at | dia_largo }}</span></div>
+    {% endif %}
+
+    {% if m.event_type == 'group_join' %}
+    <div class="nota-sistema">Se unió al grupo · {{ m.created_at | hora }}</div>
+
+    {% elif m.direction == 'internal' %}
+    <div class="burbuja internal">
+      <div class="meta">{{ m.created_at | hora }} · {{ m.tool_name }} · {{ m.status }}
+        {%- if m.duration_ms %} · {{ m.duration_ms }} ms{% endif %}</div>
+      <div class="texto">{{- m.text -}}</div>
+      {% if m.error %}<div class="error-linea">{{ m.error }}</div>{% endif %}
+      {% if m.entrada or m.salida %}
+      <details>
+        <summary>datos</summary>
+        <pre>entrada: {{ m.entrada }}
+salida: {{ m.salida }}</pre>
+      </details>
+      {% endif %}
+    </div>
+
+    {% else %}
+    <div class="burbuja {{ m.direction }} de-{{ m.author }}">
+      <div class="meta">
+        <span class="autor">{{ quien(m) }}</span> · {{ m.created_at | hora }}
+        {%- if m.message_type not in ('text', 'tool_event') %} · {{ m.message_type }}{% endif %}
+      </div>
+      <div class="texto">{{- m.text -}}</div>
+    </div>
+    {% endif %}
+  {% else %}
+  <div class="vacio">Sin mensajes.</div>
+  {% endfor %}
+</div>
+{% endblock %}

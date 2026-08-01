@@ -164,16 +164,12 @@ class RegistrarUsoLlmTests(unittest.TestCase):
         pipeline_mock.assert_not_called()
 
 
-_URL_DUMMY = "http://nocodb.test/api/v3/data/base/tabla/records"
-
-
 class FlushClienteTests(unittest.TestCase):
     def test_crea_fila_y_descuenta_exactamente_lo_aplicado(self):
         base = datetime.now()
         entry = {"hora": _hora(base), "autor": "cliente", "texto": "hola"}
         pipe = MagicMock()
-        with patch.object(settings, "NOCODB_SEGUIMIENTO_CLIENTES_URL", _URL_DUMMY), \
-                patch.object(svc.redis_client, "set", return_value=True), \
+        with patch.object(svc.redis_client, "set", return_value=True), \
                 patch.object(svc.redis_client, "lrange", return_value=[json.dumps(entry)]), \
                 patch.object(svc.redis_client, "hgetall", return_value={"costo_microusd": "5250"}), \
                 patch.object(svc.redis_client, "pipeline", return_value=pipe), \
@@ -192,18 +188,16 @@ class FlushClienteTests(unittest.TestCase):
         pipe.ltrim.assert_called_once_with(svc.scoped_key(svc.HISTORIAL_PREFIX, "telegram", "123"), 1, -1)
         delete_mock.assert_called()  # libera el candado
 
-    def test_candado_ocupado_no_toca_nocodb(self):
-        with patch.object(settings, "NOCODB_SEGUIMIENTO_CLIENTES_URL", _URL_DUMMY), \
-                patch.object(svc.redis_client, "set", return_value=False), \
+    def test_candado_ocupado_no_toca_la_base(self):
+        with patch.object(svc.redis_client, "set", return_value=False), \
                 patch.object(svc.SeguimientoRepository, "find_cliente") as find_mock:
             self.assertFalse(svc.flush_cliente("123", Channel.TELEGRAM))
         find_mock.assert_not_called()
 
-    def test_error_de_nocodb_conserva_el_buffer(self):
+    def test_error_de_la_base_conserva_el_buffer(self):
         entry = {"hora": _hora(datetime.now()), "autor": "cliente", "texto": "hola"}
         pipe = MagicMock()
-        with patch.object(settings, "NOCODB_SEGUIMIENTO_CLIENTES_URL", _URL_DUMMY), \
-                patch.object(svc.redis_client, "set", return_value=True), \
+        with patch.object(svc.redis_client, "set", return_value=True), \
                 patch.object(svc.redis_client, "lrange", return_value=[json.dumps(entry)]), \
                 patch.object(svc.redis_client, "hgetall", return_value={}), \
                 patch.object(svc.redis_client, "pipeline", return_value=pipe), \
@@ -216,10 +210,9 @@ class FlushClienteTests(unittest.TestCase):
 
 class FlushMesTests(unittest.TestCase):
     def test_actualiza_fila_existente(self):
-        record = {"id": 7, "fields": {"mes": "2026-07", "mensajes_bot": 10, "costo_microusd": 100}}
+        record = {"mes": "2026-07", "mensajes_bot": 10, "costo_microusd": 100}
         pipe = MagicMock()
-        with patch.object(settings, "NOCODB_RESUMEN_MENSUAL_URL", _URL_DUMMY), \
-                patch.object(svc.redis_client, "set", return_value=True), \
+        with patch.object(svc.redis_client, "set", return_value=True), \
                 patch.object(svc.redis_client, "hgetall", return_value={"mensajes_bot": "2", "costo_microusd": "50"}), \
                 patch.object(svc.redis_client, "pipeline", return_value=pipe), \
                 patch.object(svc.redis_client, "delete"), \
@@ -227,14 +220,13 @@ class FlushMesTests(unittest.TestCase):
                 patch.object(svc.SeguimientoRepository, "update_mes", return_value=True) as update_mock:
             self.assertTrue(svc.flush_mes("2026-07"))
         record_id, fields = update_mock.call_args.args
-        self.assertEqual(record_id, "7")
+        self.assertEqual(record_id, "2026-07")
         self.assertEqual(fields["mensajes_bot"], 12)
         self.assertEqual(fields["costo_microusd"], 150)
         pipe.hincrby.assert_any_call(svc._mes_key("2026-07"), "mensajes_bot", -2)
 
     def test_sin_deltas_no_escribe(self):
-        with patch.object(settings, "NOCODB_RESUMEN_MENSUAL_URL", _URL_DUMMY), \
-                patch.object(svc.redis_client, "set", return_value=True), \
+        with patch.object(svc.redis_client, "set", return_value=True), \
                 patch.object(svc.redis_client, "hgetall", return_value={}), \
                 patch.object(svc.redis_client, "delete"), \
                 patch.object(svc.SeguimientoRepository, "find_mes") as find_mock:
@@ -248,8 +240,7 @@ class HooksTests(unittest.TestCase):
     def test_log_inbound_registra_mensaje_de_cliente(self):
         from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
-        with patch("src.application.seguimiento_service.registrar_mensaje") as track_mock, \
-                patch.object(settings, "NOCODB_CONVERSATIONS_URL", ""):
+        with patch("src.application.seguimiento_service.registrar_mensaje") as track_mock:
             ConversationLogRepository.log_inbound(
                 client_id="123", canal=Channel.TELEGRAM, sender_name="German",
                 message_type="text", text="hola",
@@ -262,8 +253,7 @@ class HooksTests(unittest.TestCase):
     def test_log_inbound_ignora_eventos_que_no_son_mensajes(self):
         from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
-        with patch("src.application.seguimiento_service.registrar_mensaje") as track_mock, \
-                patch.object(settings, "NOCODB_CONVERSATIONS_URL", ""):
+        with patch("src.application.seguimiento_service.registrar_mensaje") as track_mock:
             ConversationLogRepository.log_inbound(
                 client_id="123", canal=Channel.TELEGRAM, sender_name="German",
                 message_type="text", text="", event_type="group_join",
@@ -273,8 +263,7 @@ class HooksTests(unittest.TestCase):
     def test_log_outbound_registra_mensaje_de_bot(self):
         from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
-        with patch("src.application.seguimiento_service.registrar_mensaje") as track_mock, \
-                patch.object(settings, "NOCODB_CONVERSATIONS_URL", ""):
+        with patch("src.application.seguimiento_service.registrar_mensaje") as track_mock:
             ConversationLogRepository.log_outbound(client_id="123", canal=Channel.TELEGRAM, text="buenas")
         kwargs = track_mock.call_args.kwargs
         self.assertEqual(kwargs["autor"], "bot")
@@ -283,8 +272,7 @@ class HooksTests(unittest.TestCase):
     def test_fallo_del_seguimiento_no_rompe_el_log(self):
         from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
-        with patch("src.application.seguimiento_service.registrar_mensaje", side_effect=RuntimeError("redis caído")), \
-                patch.object(settings, "NOCODB_CONVERSATIONS_URL", ""):
+        with patch("src.application.seguimiento_service.registrar_mensaje", side_effect=RuntimeError("redis caído")):
             # No debe lanzar: el log sigue su curso aunque el seguimiento falle.
             ConversationLogRepository.log_outbound(client_id="123", canal=Channel.TELEGRAM, text="buenas")
 

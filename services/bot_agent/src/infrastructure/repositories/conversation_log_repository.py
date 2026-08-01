@@ -1,14 +1,20 @@
+"""Log durable de conversaciones en Postgres.
+
+Antes vivía en NocoDB como un único JSON por conversación (`json_mensajes`), que
+se reescribía entero en cada mensaje: el costo de guardar crecía con el largo
+del chat y por eso existía un tope artificial de mensajes por conversación.
+
+Ahora cada mensaje es una fila de `conversation_messages`: guardar es un INSERT
+de costo constante, la purga por retención es un DELETE por fecha, y el visor
+de logs del dashboard pagina por índice. La API pública de la clase no cambió.
+"""
+
 import json
-import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-import httpx
-
-from src.core.config import settings
 from src.domain.entities import Channel, MessageType
-from src.infrastructure.repositories import nocodb_retention
+from src.infrastructure.repositories.postgres_conn import consultar, ejecutar
 
 
 class ConversationLogRepository:
@@ -34,7 +40,6 @@ class ConversationLogRepository:
             client_id=client_id,
             canal=canal,
             message={
-                "id": str(uuid.uuid4()),
                 "direction": "inbound",
                 "author": "cliente",
                 "sender_id": client_id,
@@ -42,7 +47,6 @@ class ConversationLogRepository:
                 "message_type": ConversationLogRepository._message_type_value(message_type),
                 "text": text or "",
                 "event_type": event_type or "message",
-                "created_at": ConversationLogRepository._now_iso(),
             },
         )
 
@@ -61,7 +65,6 @@ class ConversationLogRepository:
             client_id=client_id,
             canal=canal,
             message={
-                "id": str(uuid.uuid4()),
                 "direction": "outbound",
                 "author": "ia",
                 "sender_id": "bot",
@@ -69,7 +72,6 @@ class ConversationLogRepository:
                 "message_type": "text",
                 "text": text or "",
                 "event_type": event_type or "bot_reply",
-                "created_at": ConversationLogRepository._now_iso(),
             },
         )
 
@@ -91,7 +93,6 @@ class ConversationLogRepository:
             client_id=client_id,
             canal=canal,
             message={
-                "id": str(uuid.uuid4()),
                 "direction": "internal",
                 "author": "tool",
                 "sender_id": tool_name,
@@ -105,9 +106,123 @@ class ConversationLogRepository:
                 "output": output_data if output_data is not None else {},
                 "error": error or "",
                 "duration_ms": duration_ms,
-                "created_at": ConversationLogRepository._now_iso(),
             },
         )
+
+    @staticmethod
+    def append_message(client_id: str, canal: Channel | str, message: dict[str, Any]) -> bool:
+        """Guarda un mensaje del chat o un evento de herramienta.
+
+        Nunca propaga excepciones: perder una línea de log no puede tumbar la
+        atención de un cliente (mismo criterio que tenía la versión NocoDB).
+        """
+        canal_value = ConversationLogRepository._channel_value(canal)
+        try:
+            ejecutar(
+                """
+                INSERT INTO conversation_messages (
+                    client_id, canal, direction, author, sender_id, sender_name,
+                    message_type, text, event_type, tool_name, status,
+                    entrada, salida, error, duration_ms
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(client_id),
+                    canal_value,
+                    message.get("direction") or "",
+                    message.get("author") or "",
+                    str(message.get("sender_id") or "")[:120],
+                    str(message.get("sender_name") or "")[:200],
+                    message.get("message_type") or "text",
+                    message.get("text") or "",
+                    message.get("event_type") or "message",
+                    str(message.get("tool_name") or "")[:120],
+                    str(message.get("status") or "")[:40],
+                    ConversationLogRepository._json_o_nulo(message.get("input")),
+                    ConversationLogRepository._json_o_nulo(message.get("output")),
+                    message.get("error") or "",
+                    message.get("duration_ms"),
+                ),
+            )
+            return True
+        except Exception as e:
+            print(f"Error guardando mensaje de conversacion en Postgres: {e}")
+            return False
+
+    @staticmethod
+    def obtener_conversacion(client_id: str, canal: Channel | str, limite: int = 400) -> list[dict[str, Any]]:
+        """Últimos mensajes de una conversación, del más antiguo al más reciente.
+
+        La usa el visor de logs del dashboard a través de la base; el bot no
+        depende de ella para razonar (su contexto vive en Redis).
+        """
+        canal_value = ConversationLogRepository._channel_value(canal)
+        filas = consultar(
+            """
+            SELECT * FROM (
+                SELECT * FROM conversation_messages
+                WHERE client_id = %s AND canal = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+            ) AS ultimos
+            ORDER BY created_at ASC, id ASC
+            """,
+            (str(client_id), canal_value, int(limite)),
+        )
+        return filas
+
+    @staticmethod
+    def delete_conversation(client_id: str, canal: Channel | str) -> bool:
+        canal_value = ConversationLogRepository._channel_value(canal)
+        try:
+            ejecutar(
+                "DELETE FROM conversation_messages WHERE client_id = %s AND canal = %s",
+                (str(client_id), canal_value),
+            )
+            return True
+        except Exception as e:
+            print(f"Error eliminando conversacion en Postgres: {e}")
+            return False
+
+    @staticmethod
+    def purge_older_than(days: int, now: datetime | None = None) -> int:
+        """Borra los mensajes cuya última actividad supere `days` días.
+
+        La retención es una ventana deslizante POR CONVERSACIÓN: si un cliente
+        escribió ayer, no se borra nada suyo aunque tenga mensajes de hace un
+        mes. Por eso el corte se calcula sobre el último mensaje de cada
+        (client_id, canal), no mensaje a mensaje.
+
+        Devuelve cuántas conversaciones se eliminaron (no cuántas filas).
+        """
+        if days <= 0:
+            return 0
+
+        corte = (now or datetime.now().astimezone()) - timedelta(days=days)
+        try:
+            filas = consultar(
+                """
+                WITH vencidas AS (
+                    SELECT client_id, canal
+                    FROM conversation_messages
+                    GROUP BY client_id, canal
+                    HAVING MAX(created_at) < %s
+                ), borradas AS (
+                    DELETE FROM conversation_messages m
+                    USING vencidas v
+                    WHERE m.client_id = v.client_id AND m.canal = v.canal
+                    RETURNING m.client_id, m.canal
+                )
+                SELECT COUNT(DISTINCT (client_id, canal)) AS conversaciones FROM borradas
+                """,
+                (corte,),
+            )
+            return int(filas[0]["conversaciones"]) if filas else 0
+        except Exception as e:
+            print(f"Error purgando conversaciones vencidas en Postgres: {e}")
+            return 0
+
+    # --- Helpers -------------------------------------------------------------
 
     @staticmethod
     def _track_seguimiento(*, client_id: str, canal: Channel | str, autor: str, texto: str, nombre: str = "") -> None:
@@ -126,246 +241,14 @@ class ConversationLogRepository:
             print(f"Error en seguimiento de mensaje: {e}")
 
     @staticmethod
-    def append_message(client_id: str, canal: Channel | str, message: dict[str, Any]) -> bool:
-        if not settings.NOCODB_CONVERSATIONS_URL:
-            return False
-
-        canal_value = ConversationLogRepository._channel_value(canal)
+    def _json_o_nulo(valor: Any) -> str | None:
+        """Serializa a JSON para una columna jsonb; los vacíos quedan en NULL."""
+        if valor is None or valor == {} or valor == []:
+            return None
         try:
-            record = ConversationLogRepository.find_by_client_channel(client_id, canal_value)
-            if record:
-                record_id = ConversationLogRepository._record_id(record)
-                conversation = ConversationLogRepository._conversation_from_record(record, client_id, canal_value)
-                conversation["messages"].append(message)
-                # Ventana deslizante: cada mensaje re-escribe el JSON completo,
-                # así que sin tope el guardado se degrada con clientes muy activos.
-                max_messages = settings.CONVERSATION_LOG_MAX_MESSAGES
-                if max_messages > 0:
-                    conversation["messages"] = conversation["messages"][-max_messages:]
-                conversation["updated_at"] = ConversationLogRepository._now_iso()
-                return ConversationLogRepository.update_conversation(record_id, conversation)
-
-            now = ConversationLogRepository._now_iso()
-            conversation = {
-                "schema_version": 1,
-                "client_id": str(client_id),
-                "canal": canal_value,
-                "created_at": now,
-                "updated_at": now,
-                "messages": [message],
-            }
-            return ConversationLogRepository.create_conversation(client_id, canal_value, conversation)
-        except Exception as e:
-            print(f"Error guardando conversacion en NocoDB: {e}")
-            return False
-
-    @staticmethod
-    def find_by_client_channel(client_id: str, canal: Channel | str) -> dict[str, Any] | None:
-        canal_value = ConversationLogRepository._channel_value(canal)
-        where = (
-            f'(client_id,eq,{ConversationLogRepository._where_value(client_id)})'
-            f'~and(canal,eq,{ConversationLogRepository._where_value(canal_value)})'
-        )
-        url = ConversationLogRepository._url_with_params(
-            settings.NOCODB_CONVERSATIONS_URL,
-            {"where": where, "pageSize": 1},
-        )
-        response = httpx.get(url, headers=ConversationLogRepository._headers(), timeout=10.0)
-        response.raise_for_status()
-        records = ConversationLogRepository._records_from_response(response.json())
-        return records[0] if records else None
-
-    @staticmethod
-    def create_conversation(client_id: str, canal: Channel | str, conversation: dict[str, Any]) -> bool:
-        data = {
-            "client_id": str(client_id),
-            "canal": ConversationLogRepository._channel_value(canal),
-            "json_mensajes": json.dumps(conversation, ensure_ascii=False),
-        }
-        response = httpx.post(
-            ConversationLogRepository._insert_url(settings.NOCODB_CONVERSATIONS_URL),
-            headers=ConversationLogRepository._headers(),
-            json={"fields": data},
-            timeout=10.0,
-        )
-        response.raise_for_status()
-        return True
-
-    @staticmethod
-    def update_conversation(record_id: str, conversation: dict[str, Any]) -> bool:
-        if not record_id:
-            return False
-
-        response = httpx.patch(
-            ConversationLogRepository._base_records_url(settings.NOCODB_CONVERSATIONS_URL),
-            headers=ConversationLogRepository._headers(),
-            json=[
-                {
-                    "id": record_id,
-                    "fields": {
-                        "json_mensajes": json.dumps(conversation, ensure_ascii=False),
-                    },
-                }
-            ],
-            timeout=10.0,
-        )
-        response.raise_for_status()
-        return True
-
-    @staticmethod
-    def delete_conversation(client_id: str, canal: Channel | str) -> bool:
-        if not settings.NOCODB_CONVERSATIONS_URL:
-            return False
-
-        canal_value = ConversationLogRepository._channel_value(canal)
-        try:
-            record = ConversationLogRepository.find_by_client_channel(client_id, canal_value)
-            if not record:
-                return True
-            record_id = ConversationLogRepository._record_id(record)
-            if not record_id:
-                return False
-            response = httpx.request(
-                "DELETE",
-                ConversationLogRepository._base_records_url(settings.NOCODB_CONVERSATIONS_URL),
-                headers=ConversationLogRepository._headers(),
-                json=[{"id": record_id}],
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            return True
-        except Exception as e:
-            print(f"Error eliminando conversacion en NocoDB: {e}")
-            return False
-
-    @staticmethod
-    def purge_older_than(days: int, now: datetime | None = None) -> int:
-        """Borra las conversaciones cuya última actividad supere `days` días.
-
-        "Última actividad" = `updated_at` del log (o, en su defecto, la fecha del
-        último mensaje / creación). Recorre toda la tabla paginando y borra por
-        lotes. Devuelve cuántas conversaciones se eliminaron.
-        """
-        if not settings.NOCODB_CONVERSATIONS_URL:
-            return 0
-
-        url = settings.NOCODB_CONVERSATIONS_URL
-        try:
-            expired_ids = [
-                nocodb_retention.record_id(record)
-                for record in nocodb_retention.iter_records(url)
-                if nocodb_retention.is_expired(
-                    ConversationLogRepository._last_activity(record), days, now
-                )
-            ]
-            return nocodb_retention.delete_records(url, expired_ids)
-        except Exception as e:
-            print(f"Error purgando conversaciones vencidas en NocoDB: {e}")
-            return 0
-
-    @staticmethod
-    def _last_activity(record: dict[str, Any]) -> datetime | None:
-        """Marca de tiempo más reciente registrada en una conversación."""
-        fields = nocodb_retention.record_fields(record)
-        raw = fields.get("json_mensajes")
-        if isinstance(raw, dict):
-            data = raw
-        elif isinstance(raw, str) and raw.strip():
-            try:
-                data = json.loads(raw)
-            except Exception:
-                data = {}
-        else:
-            data = {}
-
-        candidates: list[Any] = [data.get("updated_at"), data.get("created_at")]
-        messages = data.get("messages")
-        if isinstance(messages, list):
-            candidates.extend(
-                msg.get("created_at") for msg in messages if isinstance(msg, dict)
-            )
-
-        parsed = [
-            dt
-            for dt in (nocodb_retention.parse_timestamp(value) for value in candidates)
-            if dt is not None
-        ]
-        return max(parsed) if parsed else None
-
-    @staticmethod
-    def _conversation_from_record(record: dict[str, Any], client_id: str, canal: str) -> dict[str, Any]:
-        fields = record.get("fields", record)
-        raw = fields.get("json_mensajes")
-        if isinstance(raw, dict):
-            data = raw
-        elif isinstance(raw, str) and raw.strip():
-            try:
-                data = json.loads(raw)
-            except Exception:
-                data = {}
-        else:
-            data = {}
-
-        now = ConversationLogRepository._now_iso()
-        messages = data.get("messages")
-        if not isinstance(messages, list):
-            messages = []
-
-        return {
-            "schema_version": data.get("schema_version") or 1,
-            "client_id": str(data.get("client_id") or client_id),
-            "canal": str(data.get("canal") or canal),
-            "created_at": data.get("created_at") or now,
-            "updated_at": data.get("updated_at") or now,
-            "messages": messages,
-        }
-
-    @staticmethod
-    def _records_from_response(data: dict[str, Any]) -> list[dict[str, Any]]:
-        records = data.get("records") or data.get("list") or data.get("data") or []
-        return [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
-
-    @staticmethod
-    def _record_id(record: dict[str, Any]) -> str:
-        for key in ("id", "Id", "ID", "_id", "ncRecordId", "rowId"):
-            value = record.get(key)
-            if value:
-                return str(value)
-        fields = record.get("fields") or {}
-        if isinstance(fields, dict):
-            for key in ("id", "Id", "ID", "_id", "ncRecordId", "rowId"):
-                value = fields.get(key)
-                if value:
-                    return str(value)
-        return ""
-
-    @staticmethod
-    def _headers() -> dict[str, str]:
-        return {"xc-token": settings.NOCODB_TOKEN, "Content-Type": "application/json"}
-
-    @staticmethod
-    def _insert_url(url: str) -> str:
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
-        query["insertAt"] = ["0"]
-        return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
-
-    @staticmethod
-    def _base_records_url(url: str) -> str:
-        return urlunparse(urlparse(url)._replace(query=""))
-
-    @staticmethod
-    def _url_with_params(url: str, params: dict[str, Any]) -> str:
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
-        for key, value in params.items():
-            query[key] = [str(value)]
-        return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
-
-    @staticmethod
-    def _where_value(value: str) -> str:
-        escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
+            return json.dumps(valor, ensure_ascii=False, default=str)
+        except Exception:
+            return json.dumps({"valor": str(valor)}, ensure_ascii=False)
 
     @staticmethod
     def _channel_value(canal: Channel | str) -> str:
@@ -387,7 +270,3 @@ class ConversationLogRepository:
             "celery": "Celery",
         }
         return names.get(prefix, prefix.replace("_", " ").title())
-
-    @staticmethod
-    def _now_iso() -> str:
-        return datetime.now().astimezone().isoformat(timespec="seconds")

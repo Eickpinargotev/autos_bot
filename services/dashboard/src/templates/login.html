@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titulo %}Ingresar{% endblock %}
+
+{% block contenido %}
+<div class="panel login">
+  <h1>Ingresar</h1>
+  <p class="sub">Panel de operación del bot.</p>
+
+  <form method="post" action="/login">
+    <input type="hidden" name="siguiente" value="{{ siguiente }}">
+    <label for="usuario">Usuario</label>
+    <input id="usuario" name="usuario" autocomplete="username" autofocus required>
+    <label for="password">Contraseña</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <p></p>
+    <button class="primario" style="width:100%">Entrar</button>
+  </form>
+
+  <p class="sub" style="margin-top:14px">
+    <a href="/recuperar">Olvidé mi contraseña</a>
+  </p>
+</div>
+{% endblock %}

@@ -1,5 +1,13 @@
 # Catedra sobre puertos, dominios, Docker, EasyPanel y despliegue de este proyecto
 
+> **Nota (actualizada):** este documento usa `nocodb` como ejemplo didáctico de cómo
+> EasyPanel enruta dominios a contenedores; la explicación sigue siendo válida, pero
+> **NocoDB ya no forma parte del sistema**. El servicio al que hay que asignarle un
+> dominio hoy es **`dashboard` (puerto 8020)**, y opcionalmente `whatsapp_webhook`
+> (8010) si WhatsApp está activo. Sustituye mentalmente `nocodb:8080` por
+> `dashboard:8020` al leer los ejemplos.
+
+
 Este documento explica desde la base que esta pasando cuando levantas este proyecto con Docker y cuando luego lo subes a un servidor con EasyPanel. La idea no es solo saber que linea tocar, sino entender el modelo mental completo: que es un puerto, que significa exponer un servicio, que papel juega un dominio, que hace un reverse proxy, que guarda Docker en volumenes y por que EasyPanel puede darte una URL publica sin que tu tengas que publicar manualmente cada puerto.
 
 ## 1. La idea original: un servidor, una IP y muchos servicios

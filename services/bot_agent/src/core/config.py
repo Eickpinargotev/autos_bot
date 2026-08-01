@@ -24,24 +24,24 @@ class Settings(BaseSettings):
     MAX_INFO_MESSAGES_PER_5_MIN: int = 2
     # Retención del historial de conversaciones: se conserva hasta N días desde la
     # ÚLTIMA interacción (ventana deslizante). Pasado ese plazo de inactividad el
-    # estado en Redis expira solo y la purga programada borra el log en NocoDB.
+    # estado en Redis expira solo y la purga programada borra el log en Postgres.
     CONVERSATION_RETENTION_DAYS: int = 20
-    # Tope de mensajes conservados por conversación en el log de NocoDB
-    # (json_mensajes). Sin tope, cada mensaje re-escribe un JSON cada vez más
-    # grande (crecimiento O(n²) en tráfico) hasta volver lento el guardado.
-    CONVERSATION_LOG_MAX_MESSAGES: int = 400
-    NOCODB_INVITACIONES_URL: str = ""
-    NOCODB_REPORTES_URL: str = ""
-    NOCODB_CONVERSATIONS_URL: str = "http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5"
-    NOCODB_CONVERSATION_SHOTS_URL: str = ""
-    NOCODB_KEYWORD_REGISTROS_URL: str = "http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz"
-    NOCODB_RAG_CHUNKS_URL: str = "http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61"
-    NOCODB_UNANSWERED_QUESTIONS_URL: str = "http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n"
-    NOCODB_RAG_WEBHOOK_TOKEN: str = ""
-    NOCODB_TOKEN: str = ""
-    # Seguimiento por cliente y resumen mensual (base LOGs_Autos_Mensajes).
-    NOCODB_SEGUIMIENTO_CLIENTES_URL: str = "http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/m0z6xtcemlnwtu7/records?pageSize=25"
-    NOCODB_RESUMEN_MENSUAL_URL: str = "http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mk51gipqv4xblxk/records?pageSize=25"
+    # --- WhatsApp vía WasenderAPI ------------------------------------------
+    # Sin credenciales el canal queda INACTIVO (el sender falla con un mensaje
+    # claro y el webhook responde 503), nunca abierto a medias.
+    WASENDER_API_URL: str = "https://wasenderapi.com"
+    WASENDER_API_KEY: str = ""
+    # Secreto que firma/acompaña los webhooks entrantes de WasenderAPI.
+    WASENDER_WEBHOOK_SECRET: str = ""
+    WASENDER_TIMEOUT_SECONDS: float = 20.0
+    # Token compartido con el dashboard para los endpoints internos del bot
+    # (p. ej. re-indexar un contenido de la base de conocimiento recién editado).
+    # Vacío = deshabilitados.
+    INTERNAL_API_TOKEN: str = ""
+    # Espera aleatoria entre las partes de un mensaje en cadena. Un envío a
+    # ritmo constante es la firma más obvia de un bot.
+    ENVIO_DELAY_MIN_SEGUNDOS: float = 1.0
+    ENVIO_DELAY_MAX_SEGUNDOS: float = 6.0
     # Precios de gpt-5.4-mini (USD por millón de tokens). Si cambias
     # OPENAI_MODEL, actualiza estos tres valores en el mismo despliegue: el
     # costo acumulado se calcula con ellos.

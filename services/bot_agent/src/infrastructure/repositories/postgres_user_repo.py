@@ -1,79 +1,12 @@
 import datetime
-import threading
 
-import psycopg2
-
-from src.core.config import settings
 from src.domain.entities import Channel
+from src.infrastructure.repositories.postgres_conn import _SharedConnection, run_query
 
 
 def subject_id(channel: Channel | str, user_id: str) -> str:
     channel_value = channel.value if isinstance(channel, Channel) else channel
     return f"{channel_value}:{user_id}"
-
-
-class _SharedConnection:
-    """Conexión a Postgres compartida por proceso.
-
-    Antes cada instancia de repositorio abría su propia conexión (una por
-    mensaje entrante) y nunca la cerraba: bajo carga se agotan las conexiones
-    del servidor. psycopg2 permite compartir una conexión entre hilos (los
-    cursores no); el candado solo serializa la creación/reconexión.
-
-    La conexión trabaja en autocommit: todas las operaciones de estos repos son
-    sentencias sueltas, y así dos hilos no pueden confirmar transacciones a
-    medias del otro.
-    """
-
-    _lock = threading.Lock()
-    _conn = None
-
-    @classmethod
-    def get(cls):
-        with cls._lock:
-            if cls._conn is None or cls._conn.closed:
-                conn = psycopg2.connect(settings.POSTGRES_URL)
-                conn.autocommit = True
-                _create_tables(conn)
-                cls._conn = conn
-            return cls._conn
-
-    @classmethod
-    def discard(cls):
-        with cls._lock:
-            if cls._conn is not None:
-                try:
-                    cls._conn.close()
-                except Exception:
-                    pass
-                cls._conn = None
-
-
-def run_query(operation):
-    """Ejecuta `operation(conn)`; si la conexión murió, reconecta y reintenta una vez."""
-    try:
-        return operation(_SharedConnection.get())
-    except (psycopg2.OperationalError, psycopg2.InterfaceError):
-        _SharedConnection.discard()
-        return operation(_SharedConnection.get())
-
-
-def _create_tables(conn):
-    with conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS users_blocked (
-                user_id VARCHAR(50) PRIMARY KEY,
-                reason TEXT,
-                blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS dictamen_registered_users (
-                subject_id VARCHAR(80) PRIMARY KEY,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
 
 
 class PostgresUserRepo:

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block titulo %}Clientes{% endblock %}
+
+{% block contenido %}
+<h1>Actividad por cliente</h1>
+<p class="sub">
+  Quién consume qué en el periodo {{ periodo.id }}, sin entrar a cada conversación.
+  Las columnas de conversaciones, derivaciones e intervenciones son acumuladas: no
+  se reinician al cerrar un periodo.
+</p>
+
+<div class="cifras">
+  <div class="cifra">
+    <div class="etiqueta">Clientes con actividad</div>
+    <div class="valor">{{ totales.clientes }}</div>
+    <div class="nota">{{ totales.conversaciones }} conversaciones iniciadas</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Respondidos por la IA</div>
+    <div class="valor">{{ totales.mensajes_llm }}</div>
+    <div class="nota">{{ totales.mensajes_codigo }} automáticos</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Derivados a asesor</div>
+    <div class="valor">{{ totales.derivaciones }}</div>
+    <div class="nota">El bot pidió ayuda humana</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Atendidos por una persona</div>
+    <div class="valor">{{ totales.intervenciones }}</div>
+    <div class="nota">Alguien escribió y el bot se calló</div>
+  </div>
+</div>
+
+<div class="panel tabla-scroll" style="margin-top:16px">
+  <table>
+    <thead>
+      <tr>
+        <th>Cliente</th><th>Canal</th>
+        <th class="num">Conversaciones</th>
+        <th class="num">Con IA</th><th class="num">Automáticos</th>
+        <th class="num">Derivaciones</th><th class="num">Intervenciones</th>
+        <th class="num">Costo real</th><th class="num">Facturado</th>
+        <th>Última actividad</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in filas %}
+      <tr>
+        <td>{{ f.nombre or f.client_id }}<div style="font-size:11px;color:var(--suave)">{{ f.client_id }}</div></td>
+        <td>{{ f.canal }}</td>
+        <td class="num">{{ f.conversaciones_iniciadas or 0 }}</td>
+        <td class="num">{{ f.mensajes_llm }}</td>
+        <td class="num">{{ f.mensajes_codigo }}</td>
+        <td class="num">{{ f.derivaciones_asesor or 0 }}</td>
+        <td class="num">
+          {{ f.intervenciones_humano or 0 }}
+          {% if f.ultima_intervencion_humano %}
+          <div style="font-size:11px;color:var(--alerta)">{{ f.ultima_intervencion_humano | fecha }}</div>
+          {% endif %}
+        </td>
+        <td class="num">{{ f.real_microusd | usd }}</td>
+        <td class="num">{{ f.cliente_microusd | usd }}</td>
+        <td>{{ f.ultima_interaccion | fecha }}</td>
+        <td>
+          {% if f.client_id and f.canal %}
+          <a class="boton mini" href="/admin/logs/{{ f.canal }}/{{ f.client_id }}">Ver chat</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="11" class="vacio">Todavía no hay actividad de clientes.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

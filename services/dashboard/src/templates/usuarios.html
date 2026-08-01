@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block titulo %}Usuarios{% endblock %}
+
+{% block contenido %}
+<h1>Usuarios</h1>
+<p class="sub">
+  <strong>Administrador</strong>: ve todo, incluidos los costos reales y los logs.
+  <strong>Cliente</strong>: ve su consumo facturado, las ciudades, los mensajes y los envíos.
+</p>
+
+{% if nueva_password %}
+<div class="panel" style="border-color: var(--acento)">
+  <strong>Contraseña de «{{ nueva_cuenta }}»</strong>
+  <p class="sub" style="margin:6px 0">
+    Se muestra una sola vez. Cópiala ahora; después solo queda guardada cifrada y
+    la única salida es generar otra.
+  </p>
+  <span class="credencial">{{ nueva_password }}</span>
+</div>
+{% endif %}
+
+{% if password_fuera_del_entorno %}
+<div class="mensaje aviso">
+  Tu contraseña de administrador se cambió desde el panel o recuperándola por Telegram,
+  así que <strong>ya no es la de <code>ADMIN_PASSWORD</code> en el <code>.env</code></strong>.
+  Si actualizas esa variable, el próximo arranque volverá a aplicarla.
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2 style="margin-top:0">Nuevo usuario</h2>
+  <p class="sub">La contraseña se genera sola y se muestra una vez al crearlo.</p>
+  <form class="linea" method="post" action="/admin/usuarios">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div>
+      <label for="nombre">Usuario</label>
+      <input id="nombre" name="nombre" required>
+    </div>
+    <div>
+      <label for="rol">Rol</label>
+      <select id="rol" name="rol">
+        <option value="cliente">Cliente</option>
+        <option value="admin">Administrador</option>
+      </select>
+    </div>
+    <button class="primario">Crear</button>
+  </form>
+</div>
+
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th>Acciones</th></tr>
+    </thead>
+    <tbody>
+      {% for c in cuentas %}
+      <tr>
+        <td>{{ c.usuario }}</td>
+        <td>{{ c.rol }}</td>
+        <td>
+          <span class="pastilla {{ 'ok' if c.activo else 'alerta' }}">{{ 'activo' if c.activo else 'inactivo' }}</span>
+          {% if c.debe_cambiar_password %}<span class="pastilla alerta">clave provisional</span>{% endif %}
+        </td>
+        <td>{{ c.ultimo_acceso | fecha or 'nunca' }}</td>
+        <td style="white-space:nowrap">
+          {% if c.rol == 'cliente' and c.activo %}
+          <form method="post" action="/admin/usuarios/{{ c.id }}/entrar" style="display:inline"
+                onsubmit="return confirm('Vas a ver el panel de {{ c.usuario }} tal como lo ve esa cuenta. El acceso queda registrado. ¿Continuar?')">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini">Entrar a su cuenta</button>
+          </form>
+          {% endif %}
+
+          <form method="post" action="/admin/usuarios/{{ c.id }}/password" style="display:inline"
+                onsubmit="return confirm('Se generará una contraseña nueva para {{ c.usuario }} y se cerrarán sus sesiones. ¿Continuar?')">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini">Nueva contraseña</button>
+          </form>
+
+          {% if c.id != usuario.id %}
+          <form method="post" action="/admin/usuarios/{{ c.id }}/activo" style="display:inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini">{{ 'Desactivar' if c.activo else 'Activar' }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Accesos a cuentas de clientes</h2>
+<p class="sub">Queda registrado cada vez que se entra al panel de un cliente.</p>
+<div class="panel tabla-scroll">
+  <table>
+    <thead><tr><th>Cuándo</th><th>Administrador</th><th>Cuenta</th><th>Hasta</th><th>IP</th></tr></thead>
+    <tbody>
+      {% for s in suplantaciones %}
+      <tr>
+        <td>{{ s.inicio_en | fecha }}</td>
+        <td>{{ s.admin or '—' }}</td>
+        <td>{{ s.objetivo or '—' }}</td>
+        <td>{% if s.fin_en %}{{ s.fin_en | fecha }}{% else %}<span class="pastilla alerta">en curso</span>{% endif %}</td>
+        <td>{{ s.ip }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="vacio">Todavía no has entrado a ninguna cuenta.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

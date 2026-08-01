@@ -8,8 +8,6 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
-os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "")
-os.environ.setdefault("NOCODB_CONVERSATION_SHOTS_URL", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.application.agent_pipeline import TurnResult
@@ -73,15 +71,10 @@ class ConversationShotTests(unittest.TestCase):
         self.assertEqual(shot["turn"]["events"][2]["text"], "Puede consultarlo.")
         self.assertEqual(shot["review"]["status"], "unreviewed")
 
-    def test_repository_saves_expected_nocodb_fields(self):
+    def test_repository_saves_expected_columns(self):
         shot = {"turn": {"user_message": "hola"}}
-        response = MagicMock()
-        response.raise_for_status.return_value = None
 
-        with patch("src.infrastructure.evals.conversation_shots.settings.NOCODB_CONVERSATION_SHOTS_URL", "http://nocodb.test/shots"), patch(
-            "src.infrastructure.evals.conversation_shots.settings.NOCODB_TOKEN",
-            "token",
-        ), patch("src.infrastructure.evals.conversation_shots.httpx.post", return_value=response) as post_mock:
+        with patch("src.infrastructure.evals.conversation_shots.ejecutar", return_value=1) as ejecutar_mock:
             result = ConversationShotRepository.save(
                 fecha_hora="2026-06-06 17:45:33",
                 id_user="5061",
@@ -90,20 +83,18 @@ class ConversationShotTests(unittest.TestCase):
             )
 
         self.assertTrue(result)
-        payload = post_mock.call_args.kwargs["json"]["fields"]
-        self.assertEqual(payload["fecha_hora"], "2026-06-06 17:45:33")
-        self.assertEqual(payload["id_user"], "5061")
-        self.assertEqual(payload["chanel"], "whatsapp")
-        self.assertFalse(payload["reviewed"])
-        self.assertEqual(json.loads(payload["json"])["turn"]["user_message"], "hola")
-        self.assertNotIn("shot_id", json.loads(payload["json"]))
-        self.assertNotIn("tools", json.loads(payload["json"]))
+        sql, params = ejecutar_mock.call_args.args
+        self.assertIn("INSERT INTO conversation_shots", sql)
+        fecha_hora, id_user, canal, shot_json = params
+        self.assertEqual(fecha_hora, "2026-06-06 17:45:33")
+        self.assertEqual(id_user, "5061")
+        self.assertEqual(canal, "whatsapp")
+        self.assertEqual(json.loads(shot_json)["turn"]["user_message"], "hola")
+        self.assertNotIn("shot_id", json.loads(shot_json))
+        self.assertNotIn("tools", json.loads(shot_json))
 
     def test_tool_logger_records_sanitized_tool_event_in_active_shot(self):
-        with ShotTraceCollector() as collector, patch(
-            "src.infrastructure.logging.tool_call_logger.settings.NOCODB_CONVERSATIONS_URL",
-            "",
-        ):
+        with ShotTraceCollector() as collector:
             ToolCallLogger.success(
                 client_id="5061",
                 canal=Channel.WHATSAPP,
@@ -188,9 +179,9 @@ class ConversationShotTests(unittest.TestCase):
         save_mock.assert_not_called()
 
     def test_repository_failure_does_not_raise(self):
-        with patch("src.infrastructure.evals.conversation_shots.settings.NOCODB_CONVERSATION_SHOTS_URL", "http://nocodb.test/shots"), patch(
-            "src.infrastructure.evals.conversation_shots.httpx.post",
-            side_effect=RuntimeError("nocodb down"),
+        with patch(
+            "src.infrastructure.evals.conversation_shots.ejecutar",
+            side_effect=RuntimeError("base caída"),
         ):
             result = ConversationShotRepository.save(
                 fecha_hora="2026-06-06 17:45:33",

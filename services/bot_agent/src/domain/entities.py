@@ -11,6 +11,10 @@ class MessageType(Enum):
     AUDIO = "audio"
     IMAGE = "image"
     DOCUMENT = "document"
+    # Los stickers se distinguen de OTHER porque merecen otra respuesta: no son
+    # una consulta que el bot no pueda leer, son un gesto. Contestarles con "no
+    # podemos ver imágenes" suena a error donde no lo hubo.
+    STICKER = "sticker"
     OTHER = "other"
 
 @dataclass
@@ -36,6 +40,9 @@ class InboundMessage:
     raw_payload: Optional[dict[str, Any]] = None
     from_me: bool = False
     event_type: str = "message"
+    # Id del mensaje en el proveedor. En WhatsApp sirve para saber si un mensaje
+    # saliente lo mandó el bot o una persona del negocio (comparten número).
+    message_id: str = ""
 
 @dataclass
 class OutboundMessage:

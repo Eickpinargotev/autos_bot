@@ -1,15 +1,11 @@
 import json
 from contextvars import ContextVar
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-import httpx
-
-from src.core.config import settings
 from src.domain.entities import Channel
-from src.infrastructure.repositories import nocodb_retention
+from src.infrastructure.repositories.postgres_conn import ejecutar
 
 
 _active_collector: ContextVar["ShotTraceCollector | None"] = ContextVar("active_shot_collector", default=None)
@@ -178,6 +174,13 @@ class ConversationShotBuilder:
 
 
 class ConversationShotRepository:
+    """Persistencia de los shots en Postgres.
+
+    Antes esto vivía en una tabla opcional de NocoDB que había que configurar
+    con una URL; ahora la tabla existe siempre y el shot completo se guarda como
+    JSONB, así que el dashboard puede filtrarlo y leerlo sin deserializar texto.
+    """
+
     @staticmethod
     def save(
         *,
@@ -186,64 +189,35 @@ class ConversationShotRepository:
         chanel: Channel | str,
         shot: dict[str, Any],
     ) -> bool:
-        if not settings.NOCODB_CONVERSATION_SHOTS_URL:
-            return False
-
         try:
-            response = httpx.post(
-                ConversationShotRepository._insert_url(settings.NOCODB_CONVERSATION_SHOTS_URL),
-                headers=ConversationShotRepository._headers(),
-                json={
-                    "fields": {
-                        "fecha_hora": fecha_hora,
-                        "id_user": str(id_user),
-                        "chanel": ConversationShotBuilder._channel_value(chanel),
-                        "reviewed": False,
-                        "json": json.dumps(ConversationShotRepository._jsonable(shot), ensure_ascii=False),
-                    }
-                },
-                timeout=10.0,
+            ejecutar(
+                """
+                INSERT INTO conversation_shots (fecha_hora, id_user, canal, revisado, shot)
+                VALUES (COALESCE(%s::timestamptz, NOW()), %s, %s, FALSE, %s)
+                """,
+                (
+                    fecha_hora or None,
+                    str(id_user),
+                    ConversationShotBuilder._channel_value(chanel),
+                    json.dumps(ConversationShotRepository._jsonable(shot), ensure_ascii=False),
+                ),
             )
-            response.raise_for_status()
             return True
         except Exception as exc:
-            print(f"Error guardando conversation shot en NocoDB: {exc}")
+            print(f"Error guardando conversation shot en Postgres: {exc}")
             return False
 
     @staticmethod
     def purge_older_than(days: int, now: datetime | None = None) -> int:
-        """Borra los shots cuya fecha (`fecha_hora`) supere `days` días.
-
-        Mismo criterio de retención que el log de conversaciones. Si la tabla de
-        shots no está configurada, no hace nada. Devuelve cuántos se eliminaron.
-        """
-        if not settings.NOCODB_CONVERSATION_SHOTS_URL:
+        """Borra los shots más viejos que `days`. Mismo criterio que el log."""
+        if days <= 0:
             return 0
-
-        url = settings.NOCODB_CONVERSATION_SHOTS_URL
+        corte = (now or datetime.now().astimezone()) - timedelta(days=days)
         try:
-            expired_ids = [
-                nocodb_retention.record_id(record)
-                for record in nocodb_retention.iter_records(url)
-                if nocodb_retention.is_expired(
-                    nocodb_retention.record_fields(record).get("fecha_hora"), days, now
-                )
-            ]
-            return nocodb_retention.delete_records(url, expired_ids)
+            return ejecutar("DELETE FROM conversation_shots WHERE fecha_hora < %s", (corte,))
         except Exception as exc:
-            print(f"Error purgando conversation shots vencidos en NocoDB: {exc}")
+            print(f"Error purgando conversation shots vencidos: {exc}")
             return 0
-
-    @staticmethod
-    def _headers() -> dict[str, str]:
-        return {"xc-token": settings.NOCODB_TOKEN, "Content-Type": "application/json"}
-
-    @staticmethod
-    def _insert_url(url: str) -> str:
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
-        query["insertAt"] = ["0"]
-        return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
 
     @staticmethod
     def _jsonable(value: Any) -> Any:

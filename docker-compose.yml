@@ -6,25 +6,18 @@ x-bot-environment: &bot-environment
   OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
   EVAL_JUDGE_MODEL: ${EVAL_JUDGE_MODEL:-gpt-4o-mini}
   POSTGRES_URL: postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
-  NOCODB_URL: http://nocodb:8080
-  NOCODB_API_KEY: ${NOCODB_API_KEY}
-  NOCODB_TABLE_LOGS: ${NOCODB_TABLE_LOGS}
   REDIS_URL: redis://redis:6379/0
   QDRANT_URL: http://qdrant:6333
-  NOCODB_INVITACIONES_URL: ${NOCODB_INVITACIONES_URL}
-  NOCODB_REPORTES_URL: ${NOCODB_REPORTES_URL}
-  NOCODB_CONVERSATIONS_URL: ${NOCODB_CONVERSATIONS_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5}
-  NOCODB_CONVERSATION_SHOTS_URL: ${NOCODB_CONVERSATION_SHOTS_URL:-}
-  NOCODB_KEYWORD_REGISTROS_URL: ${NOCODB_KEYWORD_REGISTROS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz}
-  NOCODB_RAG_CHUNKS_URL: ${NOCODB_RAG_CHUNKS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61}
-  NOCODB_UNANSWERED_QUESTIONS_URL: ${NOCODB_UNANSWERED_QUESTIONS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n}
-  NOCODB_SEGUIMIENTO_CLIENTES_URL: ${NOCODB_SEGUIMIENTO_CLIENTES_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/m0z6xtcemlnwtu7/records?pageSize=25}
-  NOCODB_RESUMEN_MENSUAL_URL: ${NOCODB_RESUMEN_MENSUAL_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mk51gipqv4xblxk/records?pageSize=25}
-  NOCODB_RAG_WEBHOOK_TOKEN: ${NOCODB_RAG_WEBHOOK_TOKEN:-}
   RAG_CONVERSATION_HISTORY_LIMIT: ${RAG_CONVERSATION_HISTORY_LIMIT:-5}
   RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
   RAG_SYNC_TTL_SECONDS: ${RAG_SYNC_TTL_SECONDS:-300}
-  NOCODB_TOKEN: ${NOCODB_TOKEN}
+  # WhatsApp (WasenderAPI). Sin credenciales el canal queda inactivo: el sender
+  # falla con un mensaje claro y el webhook responde 503, nunca abierto.
+  WASENDER_API_URL: ${WASENDER_API_URL:-https://wasenderapi.com}
+  WASENDER_API_KEY: ${WASENDER_API_KEY:-}
+  WASENDER_WEBHOOK_SECRET: ${WASENDER_WEBHOOK_SECRET:-}
+  # Token compartido con el dashboard para los endpoints internos del bot.
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
   GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE: ${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
   OUTBOUND_IMAGE_TIMEOUT_SECONDS: ${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
   OUTBOUND_IMAGE_MAX_BYTES: ${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
@@ -78,28 +71,41 @@ services:
       - autos_qdrant_data:/qdrant/storage
     restart: unless-stopped
 
-  nocodb:
-    image: nocodb/nocodb:2026.07.0
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+      target: prod
     environment:
-      HOST: 0.0.0.0
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
+      # OBLIGATORIO en producción: sin esto el servicio no arranca.
+      SESSION_SECRET: ${SESSION_SECRET}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      # Cuenta de administrador. El .env manda: si cambias ADMIN_PASSWORD aquí,
+      # el próximo arranque la aplica. Si la cambias desde el panel o la
+      # recuperas por Telegram, el arranque NO la pisa.
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      # Único destino del código de recuperación de la contraseña.
+      ADMIN_TELEGRAM_CHAT_ID: ${ADMIN_TELEGRAM_CHAT_ID}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      ENVIO_DELAY_MIN_SEGUNDOS: ${ENVIO_DELAY_MIN_SEGUNDOS:-1}
+      ENVIO_DELAY_MAX_SEGUNDOS: ${ENVIO_DELAY_MAX_SEGUNDOS:-6}
+      BOT_WEBHOOK_URL: http://whatsapp_webhook:8010
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      # Dominio público del servicio de webhooks. El panel lo usa para armar la
+      # URL que se copia en WasenderAPI; sin él las URLs salen incompletas.
+      PUBLIC_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_BASE_URL:-}
+      ZONA_HORARIA: ${ZONA_HORARIA:-America/Costa_Rica}
     expose:
-      - "8080"
+      - "8020"
     networks:
       - default
       - easypanel
-    volumes:
-      - autos_nocodb_data:/usr/app/data
+    depends_on:
+      - postgres
     restart: unless-stopped
-
-  nocodb_data_migrate:
-    image: alpine:3.20
-    profiles:
-      - migrate
-    command: sh -c "cp -r /seed/. /target/ && chmod -R 777 /target"
-    volumes:
-      - ./data/nocodb_metadata:/seed:ro
-      - autos_nocodb_data:/target
-    restart: "no"
 
   bot_agent:
     build: *bot-build
@@ -109,7 +115,6 @@ services:
     depends_on:
       - postgres
       - redis
-      - nocodb
       - qdrant
     restart: unless-stopped
 
@@ -139,12 +144,18 @@ services:
     environment: *bot-environment
     expose:
       - "8010"
+    # Va en `easypanel` porque tiene que ser ALCANZABLE DESDE INTERNET: es la
+    # URL que se pega en WasenderAPI. Necesita su propio dominio en EasyPanel,
+    # igual que el dashboard. Lo que lo protege no es la red sino el token de
+    # cada cliente (`/webhooks/wasender/<token>`): sin token válido, 401.
+    networks:
+      - default
+      - easypanel
     volumes:
       - ./mensajes.json:/mensajes.json:ro
     depends_on:
       - postgres
       - redis
-      - nocodb
       - qdrant
     command: uvicorn src.infrastructure.webhooks.app:app --host 0.0.0.0 --port 8010
     restart: unless-stopped
@@ -156,8 +167,6 @@ volumes:
     name: autos_redis_data
   autos_qdrant_data:
     name: autos_qdrant_data
-  autos_nocodb_data:
-    name: autos_nocodb_data
 
 networks:
   default:

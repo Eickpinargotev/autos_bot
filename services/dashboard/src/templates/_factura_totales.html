@@ -1,0 +1,38 @@
+{# Fragmento que se recarga solo cada pocos segundos. Sin <html>: se inyecta
+   dentro del contenedor de factura.html. #}
+<div class="cifras">
+  <div class="cifra destacada">
+    <div class="etiqueta">Total del periodo</div>
+    <div class="valor">{{ totales.cliente_microusd | usd }}</div>
+    <div class="nota">Desde el {{ periodo.abierto_en | fecha }}</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Mensajes atendidos</div>
+    <div class="valor">{{ totales.mensajes }}</div>
+    <div class="nota">{{ totales.eventos }} operaciones registradas</div>
+  </div>
+  {% for categoria in categorias %}
+  <div class="cifra">
+    <div class="etiqueta">
+      {% if categoria.categoria == 'llm' %}Atención con inteligencia artificial{% else %}Mensajes automáticos{% endif %}
+    </div>
+    <div class="valor">{{ categoria.cliente_microusd | usd }}</div>
+    <div class="nota">{{ categoria.mensajes }} mensajes</div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if serie %}
+{% set tope = serie | map(attribute='cliente_microusd') | map('int') | max %}
+<div class="panel" style="margin-top:16px">
+  <strong>Consumo por día</strong>
+  <div class="barras">
+    {% for dia in serie %}
+    <div class="dia" title="{{ dia.dia }}: {{ dia.cliente_microusd | usd }}">
+      <div class="valor" style="height: {{ (dia.cliente_microusd / tope * 100) if tope else 0 }}%"></div>
+      <div class="etiqueta">{{ dia.dia.day if dia.dia else '' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

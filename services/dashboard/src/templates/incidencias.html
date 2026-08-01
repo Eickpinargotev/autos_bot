@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block titulo %}Incidencias{% endblock %}
+
+{% block contenido %}
+<h1>Incidencias de envío</h1>
+<p class="sub">
+  Errores que el cliente escaló tras agotar los reintentos. Incluyen el detalle
+  técnico completo para poder arreglar la causa.
+  {% if solo_abiertas %}<a href="/admin/incidencias">Ver todas</a>
+  {% else %}<a href="/admin/incidencias?abiertas=1">Ver solo abiertas</a>{% endif %}
+</p>
+
+{% for i in incidencias %}
+<div class="panel">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <strong>Envío #{{ i.envio_id or '(eliminado)' }}</strong>
+    <span class="pastilla {{ 'alerta' if i.estado == 'abierta' else 'ok' }}">{{ i.estado }}</span>
+    <span style="color:var(--suave);font-size:13px">
+      reportado por {{ i.reportado_por }} el {{ i.creado_en | fecha }}
+    </span>
+  </div>
+
+  <pre style="white-space:pre-wrap;font-size:12px;background:var(--fondo);padding:10px;border-radius:8px;margin-top:10px">{{ i.detalle }}</pre>
+
+  {% if i.estado == 'abierta' %}
+  <form class="linea" method="post" action="/admin/incidencias/{{ i.id }}/revisada">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="nota" placeholder="Qué se hizo / cuál era la causa">
+    <button class="primario">Marcar revisada</button>
+  </form>
+  {% elif i.nota_admin %}
+  <p class="sub" style="margin:8px 0 0">{{ i.nota_admin }}</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="panel vacio">No hay incidencias.</div>
+{% endfor %}
+{% endblock %}

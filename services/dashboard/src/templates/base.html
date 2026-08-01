@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Panel{% endblock %} · Escuela de manejo</title>
+  {# El ?v= se sube al cambiar el CSS o el JS: sin él, un navegador con la
+     versión anterior en caché mezclaría estilos viejos con el marcado nuevo. #}
+  <link rel="stylesheet" href="/static/app.css?v=5">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14'>📊</text></svg>">
+</head>
+{% import "_iconos.html" as iconos %}
+<body data-csrf="{{ csrf }}" class="{{ 'con-panel' if usuario else 'suelto' }}">
+
+{% if usuario %}
+{# Menú lateral: una sección por área de trabajo. La lista sale de
+   core/navegacion.py, no se escribe a mano aquí. #}
+<aside class="lateral" id="lateral">
+  <div class="lateral-cabecera">
+    <span class="logo">EM</span>
+    <span class="marca">Escuela de manejo</span>
+  </div>
+
+  <nav class="lateral-nav">
+    {% for seccion in secciones %}
+      <div class="grupo">
+        <span class="grupo-titulo">{{ seccion.titulo }}</span>
+        {% for pagina in seccion.paginas %}
+          <a href="{{ pagina.url }}" class="{{ 'activo' if pagina.activa }}">
+            {{ iconos.icono(pagina.icono) }}<span>{{ pagina.etiqueta }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </nav>
+
+  {# La cuenta vive abajo del lateral; su menú se abre hacia arriba. #}
+  <div class="cuenta" data-menu>
+    <button class="cuenta-boton" type="button" data-abre-menu>
+      <span class="avatar">{{ usuario.usuario[:2] | upper }}</span>
+      <span class="cuenta-datos">
+        <span class="cuenta-nombre">{{ usuario.usuario }}</span>
+        <span class="cuenta-rol">{{ usuario.rol }}</span>
+      </span>
+      <span class="cuenta-flecha">⌃</span>
+    </button>
+    <div class="menu" hidden>
+      {% if es_admin %}<a href="/admin/configuracion">Ajustes del sistema</a>{% endif %}
+      <a href="/password">Mi cuenta</a>
+      <form method="post" action="/logout">
+        <button class="menu-salir">Cerrar sesión</button>
+      </form>
+    </div>
+  </div>
+</aside>
+
+<div class="velo" data-alternar="lateral" hidden></div>
+{% endif %}
+
+<div class="contenedor">
+  {% if usuario %}
+  <header class="superior">
+    <button class="icono" type="button" data-alternar="lateral" aria-label="Mostrar u ocultar el menú">
+      {{ iconos.icono_lateral() }}
+    </button>
+
+    <nav class="miga">
+      {% if seccion_actual %}<span>{{ seccion_actual }}</span><span class="miga-sep">›</span>{% endif %}
+      <span class="miga-actual">{{ pagina_actual or self.titulo() }}</span>
+    </nav>
+  </header>
+  {% endif %}
+
+  {% if usuario and usuario.suplantado_por %}
+  <div class="suplantando">
+    Estás dentro de la cuenta de <strong>{{ usuario.usuario }}</strong> y ves exactamente su panel.
+    Cualquier cambio queda a nombre de esa cuenta.
+    <form method="post" action="/salir-de-cuenta" style="display:inline">
+      <button class="mini">Volver a mi cuenta</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <main>
+    {% block contenido %}{% endblock %}
+  </main>
+</div>
+
+{# Confirmaciones y resultados salen como avisos flotantes abajo a la derecha,
+   no como una franja que empuja la página: el resultado de guardar no debería
+   mover de sitio lo que estabas mirando. Los de éxito se van solos; los
+   errores se quedan hasta que los cierres. #}
+<div class="avisos" aria-live="polite">
+  {% if aviso %}<div class="toast" data-auto>{{ aviso }}<button class="cerrar" aria-label="Cerrar">×</button></div>{% endif %}
+  {% if error %}<div class="toast malo">{{ error }}<button class="cerrar" aria-label="Cerrar">×</button></div>{% endif %}
+</div>
+
+<script src="/static/app.js?v=5"></script>
+</body>
+</html>

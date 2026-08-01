@@ -1,82 +1,72 @@
 import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
-os.environ.setdefault("NOCODB_INVITACIONES_URL", "http://nocodb.test/invitaciones")
-os.environ.setdefault("NOCODB_REPORTES_URL", "http://nocodb.test/reportes")
-os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.domain.entities import Channel
 from src.infrastructure.repositories.keyword_registry_repository import KeywordRegistryRepository
 
+_MODULO = "src.infrastructure.repositories.keyword_registry_repository"
+
 
 class KeywordRegistryRepositoryTests(unittest.TestCase):
-    def test_register_if_missing_creates_record_when_absent(self):
-        get_response = MagicMock()
-        get_response.json.return_value = {"list": []}
-        get_response.raise_for_status.return_value = None
-        post_response = MagicMock()
-        post_response.raise_for_status.return_value = None
+    def test_register_if_missing_es_atomico(self):
+        """Registrar-si-no-existe se resuelve en una sola sentencia.
 
-        with patch("src.infrastructure.repositories.keyword_registry_repository.httpx.get", return_value=get_response) as get_mock, patch(
-            "src.infrastructure.repositories.keyword_registry_repository.httpx.post",
-            return_value=post_response,
-        ) as post_mock:
-            result = KeywordRegistryRepository.register_if_missing("5061", "Cliente", Channel.WHATSAPP, "tareas")
+        Con SELECT + INSERT en dos pasos, dos mensajes simultáneos del mismo
+        cliente podían crear filas duplicadas; el ON CONFLICT lo impide en la
+        propia base.
+        """
+        with patch(f"{_MODULO}.ejecutar", return_value=1) as ejecutar_mock:
+            resultado = KeywordRegistryRepository.register_if_missing(
+                "5061", "Cliente", Channel.WHATSAPP, "tareas"
+            )
 
-        self.assertTrue(result)
-        self.assertIn("where=", get_mock.call_args.args[0])
-        post_mock.assert_called_once()
-        fields = post_mock.call_args.kwargs["json"]["fields"]
-        self.assertEqual(fields["registro"], "5061")
-        self.assertEqual(fields["nombre"], "Cliente")
-        self.assertEqual(fields["canal"], "whatsapp")
-        self.assertEqual(fields["palabra clave"], "tareas")
-        self.assertIn("fecha de creacion", fields)
+        self.assertTrue(resultado)
+        ejecutar_mock.assert_called_once()
+        sql, params = ejecutar_mock.call_args.args
+        self.assertIn("ON CONFLICT (registro, canal) DO NOTHING", sql)
+        self.assertEqual(params, ("5061", "whatsapp", "Cliente", "tareas"))
 
-    def test_register_if_missing_skips_existing_record(self):
-        get_response = MagicMock()
-        get_response.json.return_value = {"list": [{"id": "rec1", "fields": {"registro": "5061"}}]}
-        get_response.raise_for_status.return_value = None
+    def test_register_if_missing_usa_nombre_por_defecto(self):
+        with patch(f"{_MODULO}.ejecutar", return_value=1) as ejecutar_mock:
+            KeywordRegistryRepository.register_if_missing("5061", "", Channel.TELEGRAM, "transporte")
 
-        with patch("src.infrastructure.repositories.keyword_registry_repository.httpx.get", return_value=get_response), patch(
-            "src.infrastructure.repositories.keyword_registry_repository.httpx.post"
-        ) as post_mock:
-            result = KeywordRegistryRepository.register_if_missing("5061", "Cliente", Channel.WHATSAPP, "transporte")
+        _, params = ejecutar_mock.call_args.args
+        self.assertEqual(params[2], "Desconocido")
 
-        self.assertTrue(result)
-        post_mock.assert_not_called()
+    def test_register_if_missing_no_propaga_errores_de_base(self):
+        """El registro es accesorio: no puede romper la atención al cliente."""
+        with patch(f"{_MODULO}.ejecutar", side_effect=RuntimeError("db caída")):
+            self.assertFalse(
+                KeywordRegistryRepository.register_if_missing("5061", "Cliente", Channel.WHATSAPP, "tareas")
+            )
 
-    def test_delete_removes_existing_record(self):
-        get_response = MagicMock()
-        get_response.json.return_value = {"list": [{"id": "rec1", "fields": {"registro": "5061"}}]}
-        get_response.raise_for_status.return_value = None
-        delete_response = MagicMock()
-        delete_response.raise_for_status.return_value = None
+    def test_delete_borra_por_registro_y_canal(self):
+        with patch(f"{_MODULO}.ejecutar", return_value=1) as ejecutar_mock:
+            self.assertTrue(KeywordRegistryRepository.delete("5061", Channel.WHATSAPP))
 
-        with patch("src.infrastructure.repositories.keyword_registry_repository.httpx.get", return_value=get_response), patch(
-            "src.infrastructure.repositories.keyword_registry_repository.httpx.request",
-            return_value=delete_response,
-        ) as request_mock:
-            result = KeywordRegistryRepository.delete("5061", Channel.WHATSAPP)
+        sql, params = ejecutar_mock.call_args.args
+        self.assertIn("DELETE FROM keyword_registros", sql)
+        self.assertEqual(params, ("5061", "whatsapp"))
 
-        self.assertTrue(result)
-        request_mock.assert_called_once()
-        self.assertEqual(request_mock.call_args.args[0], "DELETE")
-        self.assertEqual(request_mock.call_args.kwargs["json"], [{"id": "rec1"}])
-
-    def test_exists_returns_true_when_record_is_present(self):
-        get_response = MagicMock()
-        get_response.json.return_value = {"list": [{"id": "rec1", "fields": {"registro": "5061"}}]}
-        get_response.raise_for_status.return_value = None
-
-        with patch("src.infrastructure.repositories.keyword_registry_repository.httpx.get", return_value=get_response):
+    def test_exists_devuelve_true_cuando_hay_fila(self):
+        with patch(f"{_MODULO}.consultar_uno", return_value={"id": 1, "registro": "5061"}):
             self.assertTrue(KeywordRegistryRepository.exists("5061", Channel.WHATSAPP))
+
+    def test_exists_devuelve_false_cuando_no_hay_fila(self):
+        with patch(f"{_MODULO}.consultar_uno", return_value=None):
+            self.assertFalse(KeywordRegistryRepository.exists("5061", Channel.WHATSAPP))
+
+    def test_exists_no_propaga_errores_de_base(self):
+        """`exists` corre en el camino caliente de fragment_catalog."""
+        with patch(f"{_MODULO}.consultar_uno", side_effect=RuntimeError("db caída")):
+            self.assertFalse(KeywordRegistryRepository.exists("5061", Channel.WHATSAPP))
 
 
 if __name__ == "__main__":

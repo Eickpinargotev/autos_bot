@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block titulo %}Clientes{% endblock %}
+
+{% block contenido %}
+<h1>Clientes</h1>
+<p class="sub">Los negocios que atendemos. Entra a uno para ver su actividad, su gasto y su configuración de WhatsApp.</p>
+
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>Cliente</th><th>Número</th><th>Cuenta de acceso</th>
+        <th>Estado</th><th>Último evento</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for n in negocios %}
+      <tr>
+        <td>
+          <a href="/admin/negocios/{{ n.id }}">{{ n.nombre }}</a>
+          <div style="font-size:11px;color:var(--suave)">{{ n.slug }}</div>
+        </td>
+        <td>{{ n.numero or '—' }}</td>
+        <td>
+          {% if n.cuenta %}{{ n.cuenta }}
+          {% else %}<span style="color:var(--tenue)">sin vincular</span>{% endif %}
+        </td>
+        <td><span class="estado {{ 'si' if n.activo else 'no' }}">{{ 'Activo' if n.activo else 'Inactivo' }}</span></td>
+        <td>
+          {% if n.ultimo_evento_en %}{{ n.ultimo_evento_en | fecha }}
+          {% else %}<span style="color:var(--tenue)">sin tráfico</span>{% endif %}
+        </td>
+        <td class="acciones">
+          <a class="icono-accion" href="/admin/negocios/{{ n.id }}" aria-label="Abrir perfil" title="Abrir perfil">
+            {{ iconos.icono('flecha') }}
+          </a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="vacio">Todavía no hay clientes.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p style="margin-top:14px">
+  <button class="boton mini" data-abre="nuevo-cliente">Nuevo cliente</button>
+</p>
+
+<dialog class="flotante" id="nuevo-cliente">
+  <div class="cabecera">
+    <h2>Nuevo cliente</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <p class="sub" style="margin-top:0">
+      Al crearlo se le asigna su webhook. Esa URL es suya y no cambia mientras exista.
+    </p>
+    <form method="post" action="/admin/negocios">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div style="margin-bottom:12px">
+        <label for="nombre">Nombre del negocio</label>
+        <input id="nombre" name="nombre" required placeholder="Escuela de manejo" style="width:100%">
+      </div>
+      <div style="margin-bottom:16px">
+        <label for="numero">Número de WhatsApp (opcional)</label>
+        <input id="numero" name="numero" placeholder="50688888888" style="width:100%">
+      </div>
+      <div class="linea" style="justify-content:flex-end">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Crear cliente</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{% endblock %}

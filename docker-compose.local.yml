@@ -1,3 +1,64 @@
+# Compose LOCAL: publica puertos, monta el código con bind mount y construye
+# la etapa `dev` (con pytest). Para la nube, ver docker-compose.yml.
+
+x-bot-environment: &bot-environment
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+  EVAL_JUDGE_MODEL: ${EVAL_JUDGE_MODEL:-gpt-4o-mini}
+  POSTGRES_URL: postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
+  REDIS_URL: redis://redis:6379/0
+  QDRANT_URL: http://qdrant:6333
+  RAG_CONVERSATION_HISTORY_LIMIT: ${RAG_CONVERSATION_HISTORY_LIMIT:-5}
+  RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
+  RAG_SYNC_TTL_SECONDS: ${RAG_SYNC_TTL_SECONDS:-300}
+  # WhatsApp (WasenderAPI). Sin credenciales el canal queda inactivo.
+  WASENDER_API_URL: ${WASENDER_API_URL:-https://wasenderapi.com}
+  WASENDER_API_KEY: ${WASENDER_API_KEY:-}
+  WASENDER_WEBHOOK_SECRET: ${WASENDER_WEBHOOK_SECRET:-}
+  # Token compartido con el dashboard para los endpoints internos del bot.
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+  GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE: ${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
+  OUTBOUND_IMAGE_TIMEOUT_SECONDS: ${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
+  OUTBOUND_IMAGE_MAX_BYTES: ${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
+  PUB_DELAY_1_SEC: ${PUB_DELAY_1_SEC}
+  PUB_DELAY_2_SEC: ${PUB_DELAY_2_SEC}
+  PUB_DELAY_3_SEC: ${PUB_DELAY_3_SEC}
+  MESSAGE_BUFFER_SECONDS: ${MESSAGE_BUFFER_SECONDS:-15}
+  MSG_DELAY_MIN: ${MSG_DELAY_MIN}
+  MSG_DELAY_MAX: ${MSG_DELAY_MAX}
+
+x-dashboard-environment: &dashboard-environment
+  POSTGRES_URL: postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
+  SESSION_SECRET: ${SESSION_SECRET:-secreto-solo-para-desarrollo-local}
+  # En local no hay HTTPS: con COOKIE_SECURE=true el navegador no mandaría la cookie.
+  COOKIE_SECURE: "false"
+  # Cuenta de administrador. El .env manda: si cambias ADMIN_PASSWORD aquí, el
+  # próximo arranque la aplica. Si la cambias desde el panel o la recuperas por
+  # Telegram, el arranque NO la pisa (ver usuarios.sincronizar_admin).
+  ADMIN_USER: ${ADMIN_USER:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  # Único destino del código de recuperación. Sin acceso a este Telegram nadie
+  # puede recuperar la cuenta, aunque conozca el usuario.
+  ADMIN_TELEGRAM_CHAT_ID: ${ADMIN_TELEGRAM_CHAT_ID:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+  # Espera aleatoria entre las partes de un mismo mensaje, para que una cadena
+  # de envíos no salga a ritmo constante (la firma más obvia de un bot).
+  ENVIO_DELAY_MIN_SEGUNDOS: ${ENVIO_DELAY_MIN_SEGUNDOS:-1}
+  ENVIO_DELAY_MAX_SEGUNDOS: ${ENVIO_DELAY_MAX_SEGUNDOS:-6}
+  BOT_WEBHOOK_URL: http://whatsapp_webhook:8010
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+  # En local el webhook no es alcanzable desde internet: para probar con
+  # WasenderAPI de verdad hay que exponer el 8010 con un túnel (ngrok, cloudflared)
+  # y poner aquí esa URL. Sin eso, el panel muestra la ruta y avisa de que falta.
+  PUBLIC_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_BASE_URL:-http://localhost:8010}
+  ZONA_HORARIA: ${ZONA_HORARIA:-America/Costa_Rica}
+
+x-bot-build: &bot-build
+  context: ./services/bot_agent
+  dockerfile: Dockerfile
+  target: dev
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,6 +78,17 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    # AOF (appendonly) + maxmemory/volatile-lru: ver nota en docker-compose.yml.
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy volatile-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant_db
@@ -27,102 +99,38 @@ services:
       - ./data/qdrant_storage:/qdrant/storage
     restart: unless-stopped
 
-  nocodb:
-    image: nocodb/nocodb:2026.07.0
-    container_name: nocodb_app
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+      target: dev
+    container_name: dashboard_app
+    environment: *dashboard-environment
     ports:
-      - "8080:8080"
+      - "8020:8020"
     volumes:
-      - ./data/nocodb_metadata:/usr/app/data
+      - ./services/dashboard:/app
+    depends_on:
+      - postgres
     restart: unless-stopped
 
   bot_agent:
-    build:
-      context: ./services/bot_agent
-      dockerfile: Dockerfile
-      target: dev
+    build: *bot-build
     container_name: bot_agent_telegram
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
-      - EVAL_JUDGE_MODEL=${EVAL_JUDGE_MODEL:-gpt-4o-mini}
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
-      - NOCODB_URL=http://nocodb:8080
-      - NOCODB_API_KEY=${NOCODB_API_KEY}
-      - NOCODB_TABLE_LOGS=${NOCODB_TABLE_LOGS}
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - NOCODB_INVITACIONES_URL=${NOCODB_INVITACIONES_URL}
-      - NOCODB_REPORTES_URL=${NOCODB_REPORTES_URL}
-      - NOCODB_CONVERSATIONS_URL=${NOCODB_CONVERSATIONS_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5}
-      - NOCODB_CONVERSATION_SHOTS_URL=${NOCODB_CONVERSATION_SHOTS_URL:-}
-      - NOCODB_KEYWORD_REGISTROS_URL=${NOCODB_KEYWORD_REGISTROS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz}
-      - NOCODB_RAG_CHUNKS_URL=${NOCODB_RAG_CHUNKS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61}
-      - NOCODB_UNANSWERED_QUESTIONS_URL=${NOCODB_UNANSWERED_QUESTIONS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n}
-      - NOCODB_SEGUIMIENTO_CLIENTES_URL=${NOCODB_SEGUIMIENTO_CLIENTES_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/m0z6xtcemlnwtu7/records?pageSize=25}
-      - NOCODB_RESUMEN_MENSUAL_URL=${NOCODB_RESUMEN_MENSUAL_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mk51gipqv4xblxk/records?pageSize=25}
-      - NOCODB_RAG_WEBHOOK_TOKEN=${NOCODB_RAG_WEBHOOK_TOKEN:-}
-      - RAG_CONVERSATION_HISTORY_LIMIT=${RAG_CONVERSATION_HISTORY_LIMIT:-5}
-      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
-      - RAG_SYNC_TTL_SECONDS=${RAG_SYNC_TTL_SECONDS:-300}
-      - NOCODB_TOKEN=${NOCODB_TOKEN}
-      - GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE=${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
-      - OUTBOUND_IMAGE_TIMEOUT_SECONDS=${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
-      - OUTBOUND_IMAGE_MAX_BYTES=${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
-      - PUB_DELAY_1_SEC=${PUB_DELAY_1_SEC}
-      - PUB_DELAY_2_SEC=${PUB_DELAY_2_SEC}
-      - PUB_DELAY_3_SEC=${PUB_DELAY_3_SEC}
-      - MESSAGE_BUFFER_SECONDS=${MESSAGE_BUFFER_SECONDS:-15}
-      - MSG_DELAY_MIN=${MSG_DELAY_MIN}
-      - MSG_DELAY_MAX=${MSG_DELAY_MAX}
+    environment: *bot-environment
     volumes:
       - ./services/bot_agent:/app
       - ./mensajes.json:/mensajes.json:ro
     depends_on:
       - postgres
       - redis
-      - nocodb
       - qdrant
     restart: unless-stopped
 
   celery_worker:
-    build:
-      context: ./services/bot_agent
-      dockerfile: Dockerfile
-      target: dev
+    build: *bot-build
     container_name: bot_agent_worker
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
-      - EVAL_JUDGE_MODEL=${EVAL_JUDGE_MODEL:-gpt-4o-mini}
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - NOCODB_INVITACIONES_URL=${NOCODB_INVITACIONES_URL}
-      - NOCODB_REPORTES_URL=${NOCODB_REPORTES_URL}
-      - NOCODB_CONVERSATIONS_URL=${NOCODB_CONVERSATIONS_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5}
-      - NOCODB_CONVERSATION_SHOTS_URL=${NOCODB_CONVERSATION_SHOTS_URL:-}
-      - NOCODB_KEYWORD_REGISTROS_URL=${NOCODB_KEYWORD_REGISTROS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz}
-      - NOCODB_RAG_CHUNKS_URL=${NOCODB_RAG_CHUNKS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61}
-      - NOCODB_UNANSWERED_QUESTIONS_URL=${NOCODB_UNANSWERED_QUESTIONS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n}
-      - NOCODB_SEGUIMIENTO_CLIENTES_URL=${NOCODB_SEGUIMIENTO_CLIENTES_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/m0z6xtcemlnwtu7/records?pageSize=25}
-      - NOCODB_RESUMEN_MENSUAL_URL=${NOCODB_RESUMEN_MENSUAL_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mk51gipqv4xblxk/records?pageSize=25}
-      - NOCODB_RAG_WEBHOOK_TOKEN=${NOCODB_RAG_WEBHOOK_TOKEN:-}
-      - RAG_CONVERSATION_HISTORY_LIMIT=${RAG_CONVERSATION_HISTORY_LIMIT:-5}
-      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
-      - RAG_SYNC_TTL_SECONDS=${RAG_SYNC_TTL_SECONDS:-300}
-      - NOCODB_TOKEN=${NOCODB_TOKEN}
-      - GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE=${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
-      - OUTBOUND_IMAGE_TIMEOUT_SECONDS=${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
-      - OUTBOUND_IMAGE_MAX_BYTES=${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
-      - PUB_DELAY_1_SEC=${PUB_DELAY_1_SEC}
-      - PUB_DELAY_2_SEC=${PUB_DELAY_2_SEC}
-      - PUB_DELAY_3_SEC=${PUB_DELAY_3_SEC}
-      - MESSAGE_BUFFER_SECONDS=${MESSAGE_BUFFER_SECONDS:-15}
-      - MSG_DELAY_MIN=${MSG_DELAY_MIN}
-      - MSG_DELAY_MAX=${MSG_DELAY_MAX}
+    environment: *bot-environment
     volumes:
       - ./services/bot_agent:/app
       - ./mensajes.json:/mensajes.json:ro
@@ -130,7 +138,8 @@ services:
       - postgres
       - redis
       - qdrant
-    # -B: corre el scheduler beat embebido (purga diaria del historial vencido).
+    # -B: corre el scheduler beat embebido (purga diaria del historial vencido y
+    #     drenaje de la cola de envíos manuales del dashboard).
     # -s: el archivo de agenda va a /tmp para no tocar el código montado.
     # --pool=threads --concurrency=20: tareas I/O-bound (esperan al LLM). Ver nota
     #   detallada en docker-compose.yml (igual que --statedb).
@@ -138,62 +147,19 @@ services:
     restart: unless-stopped
 
   whatsapp_webhook:
-    build:
-      context: ./services/bot_agent
-      dockerfile: Dockerfile
-      target: dev
+    build: *bot-build
     container_name: whatsapp_webhook
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
-      - EVAL_JUDGE_MODEL=${EVAL_JUDGE_MODEL:-gpt-4o-mini}
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-mi_usuario_db}:${POSTGRES_PASSWORD:-mi_password_seguro}@postgres:5432/${POSTGRES_DB:-mi_base_de_datos}
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - NOCODB_INVITACIONES_URL=${NOCODB_INVITACIONES_URL}
-      - NOCODB_REPORTES_URL=${NOCODB_REPORTES_URL}
-      - NOCODB_CONVERSATIONS_URL=${NOCODB_CONVERSATIONS_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mjgl77lakf4yfu1/records?pageSize=25&viewId=vw9rg1umoeoa3fv5}
-      - NOCODB_CONVERSATION_SHOTS_URL=${NOCODB_CONVERSATION_SHOTS_URL:-}
-      - NOCODB_KEYWORD_REGISTROS_URL=${NOCODB_KEYWORD_REGISTROS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mkzxugucz0hw8jm/records?pageSize=25&viewId=vw9k9ye2nq4vkiyz}
-      - NOCODB_RAG_CHUNKS_URL=${NOCODB_RAG_CHUNKS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/mlk30zxjzj4lfd8/records?pageSize=25&viewId=vwg13qjbfyahfw61}
-      - NOCODB_UNANSWERED_QUESTIONS_URL=${NOCODB_UNANSWERED_QUESTIONS_URL:-http://nocodb:8080/api/v3/data/pw9kkys1galzvcp/m3s3ug74dil489y/records?pageSize=25&viewId=vwkfzfhfedwl5u2n}
-      - NOCODB_SEGUIMIENTO_CLIENTES_URL=${NOCODB_SEGUIMIENTO_CLIENTES_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/m0z6xtcemlnwtu7/records?pageSize=25}
-      - NOCODB_RESUMEN_MENSUAL_URL=${NOCODB_RESUMEN_MENSUAL_URL:-http://nocodb:8080/api/v3/data/p4f9fruiaxeixtc/mk51gipqv4xblxk/records?pageSize=25}
-      - NOCODB_RAG_WEBHOOK_TOKEN=${NOCODB_RAG_WEBHOOK_TOKEN:-}
-      - RAG_CONVERSATION_HISTORY_LIMIT=${RAG_CONVERSATION_HISTORY_LIMIT:-5}
-      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
-      - RAG_SYNC_TTL_SECONDS=${RAG_SYNC_TTL_SECONDS:-300}
-      - NOCODB_TOKEN=${NOCODB_TOKEN}
-      - GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE=${GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE:-https://drive.google.com/uc?export=download&id={image_id}}
-      - OUTBOUND_IMAGE_TIMEOUT_SECONDS=${OUTBOUND_IMAGE_TIMEOUT_SECONDS:-30}
-      - OUTBOUND_IMAGE_MAX_BYTES=${OUTBOUND_IMAGE_MAX_BYTES:-15000000}
-      - PUB_DELAY_1_SEC=${PUB_DELAY_1_SEC}
-      - PUB_DELAY_2_SEC=${PUB_DELAY_2_SEC}
-      - PUB_DELAY_3_SEC=${PUB_DELAY_3_SEC}
-      - MESSAGE_BUFFER_SECONDS=${MESSAGE_BUFFER_SECONDS:-15}
-      - MSG_DELAY_MIN=${MSG_DELAY_MIN}
-      - MSG_DELAY_MAX=${MSG_DELAY_MAX}
+    environment: *bot-environment
+    ports:
+      - "8010:8010"
     volumes:
       - ./services/bot_agent:/app
       - ./mensajes.json:/mensajes.json:ro
     depends_on:
       - postgres
       - redis
-      - nocodb
       - qdrant
     command: uvicorn src.infrastructure.webhooks.app:app --host 0.0.0.0 --port 8010
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: redis_cache
-    # AOF (appendonly) + maxmemory/volatile-lru: ver nota en docker-compose.yml.
-    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy volatile-lru
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
     restart: unless-stopped
 
 volumes:

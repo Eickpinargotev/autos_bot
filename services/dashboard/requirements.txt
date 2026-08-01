@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+jinja2
+psycopg2-binary
+pydantic
+pydantic-settings
+python-multipart
+bcrypt
+httpx
+# Base de zonas horarias para `zoneinfo`. La imagen slim de Debian no trae
+# /usr/share/zoneinfo, así que sin esto el panel no podría mostrar las horas en
+# la zona del negocio (ZONA_HORARIA) y caería a la del contenedor (UTC).
+tzdata

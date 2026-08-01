@@ -210,7 +210,9 @@ class _DecisionAgent:
                 ],
                 **_decision_llm_kwargs(),
             )
-            seguimiento_service.registrar_uso_llm(client_id, canal, getattr(completion, "usage", None))
+            seguimiento_service.registrar_uso_llm(
+                client_id, canal, getattr(completion, "usage", None), origen="agente"
+            )
             data = json.loads(completion.choices[0].message.content or "{}")
             decision = self._validated_decision(data, text)
             self._log_decision(client_id, canal, input_data, decision, started, "success")
@@ -386,7 +388,9 @@ class FollowupAgent:
                 ],
                 **_decision_llm_kwargs(),
             )
-            seguimiento_service.registrar_uso_llm(client_id, canal, getattr(completion, "usage", None))
+            seguimiento_service.registrar_uso_llm(
+                client_id, canal, getattr(completion, "usage", None), origen="recordatorio"
+            )
             data = json.loads(completion.choices[0].message.content or "{}")
             message = str(data.get("message") or "").strip()
             decision = FollowupDecision(send=bool(data.get("send")) and bool(message), message=message)

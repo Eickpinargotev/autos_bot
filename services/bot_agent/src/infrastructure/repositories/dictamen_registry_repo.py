@@ -1,12 +1,13 @@
 from src.domain.entities import Channel
-from src.infrastructure.repositories.postgres_user_repo import run_query, subject_id
+from src.infrastructure.repositories.postgres_conn import run_query
+from src.infrastructure.repositories.postgres_user_repo import subject_id
 
 
 class DictamenRegistryRepo:
     """Registro de usuarios que ya pasaron por el flujo de dictamen.
 
-    Usa la conexión compartida de postgres_user_repo (que también crea la
-    tabla dictamen_registered_users) para no abrir una conexión por instancia.
+    Usa la conexión compartida de postgres_conn (que también crea la tabla
+    dictamen_registered_users) para no abrir una conexión por instancia.
     """
 
     def is_registered(self, channel: Channel | str, user_id: str) -> bool:

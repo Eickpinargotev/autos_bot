@@ -7,8 +7,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
-os.environ.setdefault("NOCODB_CONVERSATIONS_URL", "http://nocodb.test/conversations")
-os.environ.setdefault("NOCODB_TOKEN", "test-token")
+os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.domain.entities import Channel
 from src.application.unified_agent import SupervisorAgent
@@ -18,14 +17,12 @@ from src.infrastructure.repositories.conversation_log_repository import Conversa
 
 
 class ConversationToolLoggingTests(unittest.TestCase):
-    def test_log_tool_event_creates_new_conversation(self):
+    def test_log_tool_event_inserta_una_fila_con_todo_el_detalle(self):
+        """Cada evento es un INSERT: guardar no depende del largo del chat."""
         with patch(
-            "src.infrastructure.repositories.conversation_log_repository.ConversationLogRepository.find_by_client_channel",
-            return_value=None,
-        ), patch(
-            "src.infrastructure.repositories.conversation_log_repository.ConversationLogRepository.create_conversation",
-            return_value=True,
-        ) as create_mock:
+            "src.infrastructure.repositories.conversation_log_repository.ejecutar",
+            return_value=1,
+        ) as ejecutar_mock:
             result = ConversationLogRepository.log_tool_event(
                 client_id="5061",
                 canal=Channel.WHATSAPP,
@@ -37,42 +34,32 @@ class ConversationToolLoggingTests(unittest.TestCase):
             )
 
         self.assertTrue(result)
-        conversation = create_mock.call_args.args[2]
-        message = conversation["messages"][0]
-        self.assertEqual(message["direction"], "internal")
-        self.assertEqual(message["author"], "tool")
-        self.assertEqual(message["message_type"], "tool_event")
-        self.assertEqual(message["event_type"], "tool_call")
-        self.assertEqual(message["tool_name"], "rag.answer_question")
-        self.assertEqual(message["status"], "success")
-        self.assertEqual(message["input"]["question"], "Tienen alquiler?")
-        self.assertEqual(message["output"]["has_answer"], True)
-        self.assertEqual(message["duration_ms"], 12)
+        sql, params = ejecutar_mock.call_args.args
+        self.assertIn("INSERT INTO conversation_messages", sql)
 
-    def test_log_tool_event_appends_to_existing_conversation(self):
-        stored = {
-            "id": "rec1",
-            "fields": {
-                "json_mensajes": json.dumps(
-                    {
-                        "schema_version": 1,
-                        "client_id": "5061",
-                        "canal": "whatsapp",
-                        "created_at": "2026-01-01T00:00:00-06:00",
-                        "updated_at": "2026-01-01T00:00:00-06:00",
-                        "messages": [{"id": "old", "direction": "inbound"}],
-                    }
-                )
-            },
-        }
+        (
+            client_id, canal, direction, author, _sender_id, _sender_name,
+            message_type, _text, event_type, tool_name, status,
+            entrada, salida, _error, duration_ms,
+        ) = params
 
+        self.assertEqual(client_id, "5061")
+        self.assertEqual(canal, "whatsapp")
+        self.assertEqual(direction, "internal")
+        self.assertEqual(author, "tool")
+        self.assertEqual(message_type, "tool_event")
+        self.assertEqual(event_type, "tool_call")
+        self.assertEqual(tool_name, "rag.answer_question")
+        self.assertEqual(status, "success")
+        self.assertEqual(json.loads(entrada)["question"], "Tienen alquiler?")
+        self.assertEqual(json.loads(salida)["has_answer"], True)
+        self.assertEqual(duration_ms, 12)
+
+    def test_log_tool_event_guarda_el_error(self):
         with patch(
-            "src.infrastructure.repositories.conversation_log_repository.ConversationLogRepository.find_by_client_channel",
-            return_value=stored,
-        ), patch(
-            "src.infrastructure.repositories.conversation_log_repository.ConversationLogRepository.update_conversation",
-            return_value=True,
-        ) as update_mock:
+            "src.infrastructure.repositories.conversation_log_repository.ejecutar",
+            return_value=1,
+        ) as ejecutar_mock:
             result = ConversationLogRepository.log_tool_event(
                 client_id="5061",
                 canal="whatsapp",
@@ -82,22 +69,31 @@ class ConversationToolLoggingTests(unittest.TestCase):
             )
 
         self.assertTrue(result)
-        record_id, conversation = update_mock.call_args.args
-        self.assertEqual(record_id, "rec1")
-        self.assertEqual(len(conversation["messages"]), 2)
-        self.assertEqual(conversation["messages"][0]["direction"], "inbound")
-        self.assertEqual(conversation["messages"][1]["tool_name"], "reception.decide")
-        self.assertEqual(conversation["messages"][1]["status"], "error")
-        self.assertEqual(conversation["messages"][1]["error"], "boom")
+        _, params = ejecutar_mock.call_args.args
+        self.assertEqual(params[9], "reception.decide")
+        self.assertEqual(params[10], "error")
+        self.assertEqual(params[13], "boom")
+        # Sin datos de entrada/salida se guarda NULL, no un "{}" inútil.
+        self.assertIsNone(params[11])
+        self.assertIsNone(params[12])
+
+    def test_fallo_de_la_base_no_rompe_el_turno(self):
+        """Perder una línea de log jamás debe tumbar la atención al cliente."""
+        with patch(
+            "src.infrastructure.repositories.conversation_log_repository.ejecutar",
+            side_effect=RuntimeError("db caída"),
+        ):
+            self.assertFalse(
+                ConversationLogRepository.log_tool_event(
+                    client_id="5061", canal="whatsapp", tool_name="rag.search", status="success"
+                )
+            )
 
     def test_tool_call_logger_sanitizes_sensitive_and_long_values(self):
         with patch(
             "src.infrastructure.logging.tool_call_logger.ConversationLogRepository.log_tool_event",
             return_value=True,
-        ) as log_mock, patch(
-            "src.infrastructure.logging.tool_call_logger.settings.NOCODB_TOKEN",
-            "test-token",
-        ):
+        ) as log_mock:
             ToolCallLogger.success(
                 client_id="5061",
                 canal="whatsapp",

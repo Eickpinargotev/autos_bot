@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block titulo %}Mensajes{% endblock %}
+
+{# Un mensaje por fila plegada: la lista cabe de un vistazo y solo se despliega
+   el que se va a editar. Antes se pintaban todas las partes de todos los
+   mensajes a la vez y la página era un muro de formularios. #}
+
+{% block contenido %}
+<h1>Mensajes</h1>
+<p class="sub">
+  Cada mensaje tiene una <strong>clave</strong> con la que se identifica al enviarlo,
+  y puede tener varias partes que salen una tras otra. Los adjuntos se comprueban
+  al guardar, no al enviar: un enlace roto se descubre aquí y no cuando ya es tarde.
+</p>
+
+{% for p in plantillas %}
+<details class="panel plegable" {{ 'open' if abierto == p.id }}>
+  <summary>
+    <span class="clave">{{ p.clave }}</span>
+    <span class="sub" style="margin:0">{{ p.nombre }}</span>
+    <span style="flex:1"></span>
+    {% if p.problemas %}
+    <span class="estado no" style="color:var(--error)">{{ p.problemas | length }} por revisar</span>
+    {% else %}
+    <span class="estado si">{{ p.partes | length }} parte{{ '' if p.partes | length == 1 else 's' }}</span>
+    {% endif %}
+  </summary>
+
+  <div class="plegable-cuerpo">
+    {% if p.problemas %}
+    <ul class="lista-problemas">
+      {% for problema in p.problemas %}<li>{{ problema }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <form class="linea" method="post" action="/mensajes/{{ p.id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div><label>Clave</label><input name="clave" value="{{ p.clave }}" required></div>
+      <div><label>Nombre</label><input name="nombre" value="{{ p.nombre }}"></div>
+      <button class="mini">Guardar</button>
+    </form>
+
+    {% for parte in p.partes %}
+    <div class="parte">
+      <form method="post" action="/mensajes/{{ p.id }}/parte/{{ parte.orden }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <div class="linea" style="margin-bottom:6px">
+          <label style="margin:0">Parte {{ parte.orden }}</label>
+          <span style="flex:1"></span>
+          {% if parte.media_ref and parte.media_ok %}
+          <span class="estado si">adjunto verificado</span>
+          {% endif %}
+        </div>
+        <textarea name="texto" rows="4">{{ parte.texto }}</textarea>
+        <div class="campos">
+          <div>
+            <label>Adjunto</label>
+            <select name="media_tipo">
+              <option value="" {{ 'selected' if not parte.media_tipo }}>Sin adjunto</option>
+              <option value="imagen" {{ 'selected' if parte.media_tipo == 'imagen' }}>Imagen</option>
+              <option value="video" {{ 'selected' if parte.media_tipo == 'video' }}>Video</option>
+            </select>
+          </div>
+          <div>
+            <label>ID o enlace de Google Drive</label>
+            <input name="media_ref" value="{{ parte.media_ref }}"
+                   placeholder="Pega el enlace de Drive o el ID; se extrae solo">
+          </div>
+        </div>
+        {% if parte.media_ref and parte.media_ok is false %}
+        <p class="error-linea">{{ parte.media_error }}</p>
+        {% endif %}
+        <div class="linea" style="justify-content:flex-end;margin-top:8px">
+          <button class="mini">Guardar parte</button>
+        </div>
+      </form>
+      <form method="post" action="/mensajes/parte/{{ parte.id }}/eliminar" class="quitar-parte">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="icono-accion peligro" title="Eliminar la parte {{ parte.orden }}"
+                aria-label="Eliminar la parte {{ parte.orden }}">{{ iconos.icono('basura') }}</button>
+      </form>
+    </div>
+    {% endfor %}
+
+    <div class="linea" style="margin-top:12px">
+      <form method="post" action="/mensajes/{{ p.id }}/parte">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini">Añadir parte</button>
+      </form>
+      <form method="post" action="/mensajes/{{ p.id }}/revisar">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini">Revisar adjuntos</button>
+      </form>
+      <span style="flex:1"></span>
+      <button class="icono-accion peligro" data-abre="borrar-{{ p.id }}"
+              title="Eliminar el mensaje" aria-label="Eliminar el mensaje">{{ iconos.icono('basura') }}</button>
+    </div>
+  </div>
+</details>
+
+<dialog class="flotante" id="borrar-{{ p.id }}">
+  <div class="cabecera">
+    <h2>¿Eliminar «{{ p.clave }}»?</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <p style="margin-top:0">
+      Se borra con todas sus partes. Los envíos ya hechos conservan su copia, así que
+      no cambia nada de lo que ya salió.
+    </p>
+    <form method="post" action="/mensajes/{{ p.id }}/eliminar" class="linea" style="justify-content:flex-end">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini" type="button" data-cierra>Cancelar</button>
+      <button class="primario">Sí, eliminar</button>
+    </form>
+  </div>
+</dialog>
+{% else %}
+<div class="panel vacio">Todavía no hay mensajes.</div>
+{% endfor %}
+
+<p style="margin-top:14px">
+  <button class="boton mini" data-abre="nuevo-mensaje">Nuevo mensaje</button>
+</p>
+
+<dialog class="flotante" id="nuevo-mensaje">
+  <div class="cabecera">
+    <h2>Nuevo mensaje</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/mensajes">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div style="margin-bottom:12px">
+        <label for="clave">Clave</label>
+        <input id="clave" name="clave" required placeholder="ALAJUELA" style="width:100%">
+      </div>
+      <div style="margin-bottom:16px">
+        <label for="nombre">Nombre descriptivo (opcional)</label>
+        <input id="nombre" name="nombre" style="width:100%">
+      </div>
+      <div class="linea" style="justify-content:flex-end">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Crear</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{% endblock %}

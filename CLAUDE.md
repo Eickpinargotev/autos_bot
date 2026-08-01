@@ -3,9 +3,15 @@
 Reglas operativas para cualquier agente (Claude u otro) que trabaje en este repo.
 Léelas antes de tocar código. Para el panorama general del producto, ver `README.md`.
 
-El proyecto es un bot de recepción (Telegram/WhatsApp) para una escuela de manejo,
-hecho con **LangGraph**, orquestado con **Docker Compose**. El código del bot está en
-`services/bot_agent/`.
+El proyecto tiene dos servicios propios, orquestados con **Docker Compose**:
+
+- `services/bot_agent/` — bot de recepción (Telegram/WhatsApp) hecho con **LangGraph**.
+- `services/dashboard/` — panel de operación (FastAPI + Jinja, sin Node): facturación
+  en vivo, catálogos editables, envíos manuales y toda la trazabilidad.
+
+**La fuente de verdad es Postgres.** NocoDB fue retirado del sistema: sus datos ya
+están migrados y no queda ni el servicio ni las variables. No agregues dependencias
+nuevas hacia él.
 
 ---
 
@@ -32,7 +38,20 @@ Siempre dentro del contenedor (etapa `dev`):
 ```bash
 docker compose -f docker-compose.local.yml run --rm bot_agent pytest
 docker compose -f docker-compose.local.yml run --rm bot_agent pytest tests/unit   # subconjunto
+docker compose -f docker-compose.local.yml run --rm dashboard pytest              # dashboard
 ```
+
+Los tests del **dashboard** corren contra Postgres de verdad, a propósito: lo que
+prueban es SQL (índices únicos parciales, `ON CONFLICT`, `FOR UPDATE SKIP LOCKED`) y
+con la base simulada no se probaría nada de eso. Pero usan una base **aparte**
+(`<base>_test`, creada sola la primera vez): vacían tablas antes de cada caso, y
+hacerlo sobre la base de desarrollo borraría los usuarios del panel y tus datos.
+No cambies eso en `tests/conftest.py`.
+
+Los tests del **bot**, en cambio, tienen el acceso a Postgres neutralizado por
+`tests/conftest.py`: cada módulo importa `ejecutar`/`consultar` por nombre, así
+que el fixture los sustituye módulo por módulo. **Si agregas un repositorio
+nuevo, añádelo a `_MODULOS_CON_POSTGRES`** o sus tests escribirán en la base real.
 
 - Config de pytest: `services/bot_agent/pytest.ini` (`pythonpath = .` para resolver `from src...`).
 - `docker compose run` inyecta `.env` (incl. `OPENAI_API_KEY`) en el contenedor, así que el
@@ -60,8 +79,9 @@ Hay **tres niveles** de tests; respétalos al escribir nuevos:
 
 - `docker-compose.yml` → **NUBE** (EasyPanel). Es el archivo por defecto. Usa volúmenes con
   nombre, red externa `easypanel`, `expose` sin publicar puertos, y build `target: prod`.
+  El servicio `dashboard` expone el 8020 y va en la red `easypanel` (tiene su propio dominio).
 - `docker-compose.local.yml` → **LOCAL**. Publica puertos, bind-mount del código y build
-  `target: dev`.
+  `target: dev`. El dashboard queda en http://localhost:8020.
 - Tras cualquier cambio a compose/Dockerfile, valida **ambos**:
   ```bash
   docker compose -f docker-compose.yml config -q
@@ -93,6 +113,43 @@ Reglas para cambios:
 - Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §7). No metas
   texto de negocio en el código ni en los prompts.
 
+El **dashboard** (`services/dashboard/src/`) sigue la misma separación:
+- `db/migrations/*.sql` — el esquema COMPLETO de Postgres, incluidas las tablas que
+  usa el bot. El bot nunca hace DDL (solo `users_blocked` y `dictamen_registered_users`,
+  que son suyas desde antes). Las migraciones se aplican al arrancar el dashboard.
+- `services/` — la lógica (facturación, ciudades, mensajería, usuarios, trazabilidad).
+- `routes/` — solo HTTP: validar, delegar y redirigir. Toda ruta de `/admin/*` depende
+  de `security.requiere_admin`, que es la ÚNICA puerta del rol administrador.
+- Sin Node ni build de frontend: Jinja del lado del servidor y ~130 líneas de JS propio
+  (`static/app.js`) para el refresco del panel, la edición de celdas y los dos menús
+  (lateral y cuenta). No metas un framework de frontend ni CDNs.
+- El visor de conversaciones (`/admin/logs/{canal}/{client_id}`) **pagina por cursor**
+  (`?antes=<id>`), no por OFFSET: el chat se lee desde el final y con OFFSET habría que
+  descartar todas las filas nuevas en cada tanda, además de descolocarse si llega un
+  mensaje mientras se lee. La búsqueda del listado es **solo por número** a propósito
+  (buscar texto obliga a recorrer todo el historial). Las horas se muestran en
+  `settings.ZONA_HORARIA` (Costa Rica), no en la del servidor.
+- `core/navegacion.py` — el menú lateral por secciones y la miga de pan salen de ahí,
+  no de la plantilla. Una página nueva del panel se declara en esa lista (con su
+  icono, de `templates/_iconos.html`); ocultar un enlace NO restringe nada, el acceso
+  lo sigue decidiendo `requiere_admin` en la ruta.
+- `templates/base.html` define el armazón (lateral + barra superior + contenido). Las
+  clases que usan las páginas (`panel`, `cifra`, `pastilla`, `tabla-scroll`…) son un
+  vocabulario cerrado: reutilízalas en vez de inventar estilos por página. Si cambias
+  `static/app.css` o `app.js`, sube el `?v=` de ambos enlaces en `base.html` o los
+  navegadores servirán la versión vieja en caché.
+
+Facturación (lo más sensible del dashboard):
+- `uso_eventos` es el libro mayor: una fila por hecho facturable, con el costo YA
+  congelado. **Nunca se recalcula el pasado**; cambiar una tarifa solo afecta a lo
+  que venga después.
+- El costo REAL se calcula en un solo lugar: `seguimiento_service.costo_microusd`.
+  SQL solo aplica el margen de venta. No dupliques esa fórmula.
+- El periodo abierto y la tarifa vigente se resuelven DENTRO del INSERT
+  (`billing_repository`), sin caché: así un cierre de periodo o un cambio de precios
+  no deja eventos mal imputados.
+- Todo el dinero es un ENTERO en micro-USD. Nada de flotantes acumulados.
+
 Documentación de referencia (mantenerla al día si tocas esas áreas):
 - `docs/operacion_escala_y_trazabilidad.md` — concurrencia, buffers, garantías
   anti-duplicados/cruces, capacidad y trazado de herramientas.
@@ -104,10 +161,13 @@ Retención del historial (20 días desde la última interacción, ventana desliz
   ajusta esa variable; no hardcodees el número en otra parte.
 - **Redis** (`conversation_state:*`) usa TTL deslizante: `ConversationStateRepo.set`
   reescribe la clave con `ex=...` en cada interacción.
-- **NocoDB** (log durable y *shots*) se purga con la tarea Celery `purge_expired_conversations`,
+- **Postgres** (log durable y *shots*) se purga con la tarea Celery `purge_expired_conversations`,
   agendada por **Celery beat**. Por eso el `celery_worker` corre con `-B` en ambos compose: si
-  tocas ese comando, conserva el beat o la purga deja de ejecutarse. Helpers de borrado:
-  `infrastructure/repositories/nocodb_retention.py`. Tests: `tests/unit/test_conversation_retention.py`.
+  tocas ese comando, se pierden la purga Y el drenaje de la cola de envíos manuales.
+- La retención es **por conversación, no por mensaje**: el corte se compara con
+  `MAX(created_at)` de cada `(client_id, canal)`. Si se comparara mensaje a mensaje, a un
+  cliente activo se le borraría el arranque de su conversación. Helpers de fechas:
+  `infrastructure/repositories/fechas.py`. Tests: `tests/unit/test_conversation_retention.py`.
 
 ## 5. Diseño conversacional (playbooks + mensajes curados)
 
@@ -162,6 +222,10 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
   `./mensajes.json:/mensajes.json:ro` en los 3 servicios. El loader es
   `src/application/message_catalog.py` (busca primero `/mensajes.json`). No lo muevas ni
   dupliques.
+- **WhatsApp (WasenderAPI) manda la media por URL, no como binario.** Telegram sube el
+  archivo; Wasender recibe un enlace. Por eso `ChannelSenderRegistry` pregunta si el sender
+  tiene `send_image_url_sync` antes de descargar nada. Los marcadores `Imagen=` y `Video=`
+  aceptan tanto un ID de Drive como una URL completa.
 - **Los prompts deben ser genéricos.** El test `tests/unit/test_prompt_contracts.py` prohíbe
   términos específicos del catálogo en `UNIFIED_AGENT_PROMPT` y `FOLLOWUP_AGENT_PROMPT`
   (p. ej. `casco`, `programar cita`, `qué pasa si pierde`). Usa ejemplos genéricos.
@@ -178,8 +242,28 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
     proceso por usuario.
   - El `visibility_timeout` de Celery debe superar el countdown más largo agendado
     (`celery_app.py`); si agregas un delay mayor, inclúyelo en `_max_countdown_seconds`.
-- **El webhook de RAG exige `NOCODB_RAG_WEBHOOK_TOKEN`** (503 si falta). No lo
-  "arregles" abriéndolo: escribe en la base de conocimiento (ver `docs/seguridad.md`).
+- **Los endpoints con efectos se apagan si falta su secreto, nunca se abren.**
+  `POST /webhooks/wasender` exige `WASENDER_WEBHOOK_SECRET` (hace que el bot conteste y
+  gaste tokens) y `POST /internal/rag/sync/{id}` exige `INTERNAL_API_TOKEN` (escribe en la
+  base de conocimiento). Sin el secreto responden **503**. No los "arregles" quitando el
+  guardarraíl (ver `docs/seguridad.md`).
+- **Un webhook por cliente (negocio), y el token de la ruta ES la credencial.**
+  `POST /webhooks/wasender/{token}` resuelve la fila de `clientes_whatsapp`; un token
+  desconocido o inactivo responde **401**. Se administra en el perfil del cliente (`/admin/negocios/{id}`). Ojo con la
+  palabra "cliente": ahí significa el NEGOCIO (la escuela de manejo), no la persona que
+  escribe al bot — esa es la de `/admin/clientes` y `seguimiento_clientes`.
+- **En WhatsApp el bot y el dueño comparten número: los mensajes salientes son
+  ambiguos.** Antes de tratar un `fromMe` como intervención humana hay que preguntarle a
+  `outbound_registry.es_envio_del_bot`. Si se salta ese paso, el bot lee su propia
+  respuesta como una intervención y se bloquea solo 12 días en el primer turno.
+- **El dashboard no arranca sin `SESSION_SECRET`.** Es deliberado: con un secreto vacío
+  las cookies de sesión serían falsificables y nadie lo notaría.
+- **`requiere_admin` es la única puerta del rol administrador.** Toda ruta que muestre
+  costo real, logs, tarifas, periodos, incidencias o usuarios debe depender de ella.
+  Los tests `tests/test_acceso.py` recorren la lista completa de rutas `/admin/*`:
+  si agregas una, agrégala también ahí.
+- **El nombre de columna que llega de un formulario se valida contra una lista blanca**
+  (`ciudades.CAMPOS_EDITABLES`). Interpolar ese nombre en el SQL sin validarlo es inyección.
 
 ## 8. Convenciones del repo
 

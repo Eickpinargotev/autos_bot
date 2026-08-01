@@ -19,7 +19,7 @@ Cliente → canal (Telegram long-polling / webhook)
        → Celery (cola en Redis) → process_buffered_messages (worker, 20 hilos)
        → candado por conversación → drenado atómico → FlowGraph (LangGraph)
        → LLM (recepción / clasificador / RAG) → respuestas → canal
-       → NocoDB (log durable) + shots de trazado
+       → Postgres (log durable) + shots de trazado
 ```
 
 ### Garantías por capa
@@ -54,7 +54,7 @@ Dimensionado actual (objetivo ~5.000 conversaciones/día, picos de ~200 chats/mi
 | Redis | AOF + `maxmemory` (default 512mb) + `volatile-lru` | Sin `maxmemory` un pico de tráfico termina en OOM-kill del proceso. `volatile-lru` desaloja solo claves con TTL (estados inactivos) y nunca las colas de Celery. |
 | Postgres | Conexión compartida por proceso (`_SharedConnection`) con autocommit y reintento ante desconexión | Antes se abría una conexión por mensaje sin cerrarla: bajo carga se agotaban las conexiones del servidor. |
 | Telegram | `concurrent_updates(True)` + orquestador en `asyncio.to_thread` | Un cliente lento no congela el event loop del bot para el resto. |
-| NocoDB (log) | `CONVERSATION_LOG_MAX_MESSAGES=400` por conversación | El log re-escribe el JSON completo por mensaje; sin tope crece O(n²). |
+| Log de conversaciones | Una fila por mensaje en `conversation_messages` | Antes era un JSON por conversación que se reescribía entero en cada mensaje (crecimiento O(n²) en tráfico), y por eso había un tope artificial de 400 mensajes. Ahora guardar es un `INSERT` de costo constante y el tope desapareció. |
 | Celery | `task_ignore_result=True` | Nadie consulta resultados; evita llenar Redis con `celery-task-meta-*`. |
 
 **El techo real es el rate limit de OpenAI**, no CPU/RAM/Redis. Señales de saturación
@@ -74,14 +74,15 @@ Para replicar: separar `celery beat` en su propio servicio.
 
 ## 3. Trazabilidad
 
-Cada conversación es reconstruible end-to-end desde NocoDB, sin acceso al servidor:
+Cada conversación es reconstruible end-to-end desde el dashboard (`/admin/logs`), sin
+acceso al servidor ni a la base:
 
 | Qué se registra | Dónde | Detalle |
 | --------------- | ----- | ------- |
-| Mensajes del cliente (inbound) | Tabla de conversaciones (`json_mensajes`) | id UUID, autor, tipo, texto, timestamp. |
+| Mensajes del cliente (inbound) | `conversation_messages` | Autor, tipo, texto, timestamp. Una fila por mensaje. |
 | Respuestas del bot (outbound) | Ídem | Se registran en el punto de envío (`ChannelSenderRegistry.send`, canal Telegram). |
 | **Cada llamada a herramienta/LLM** | Ídem, como evento `tool_call` | `reception.decide`, `classifier.classify_reply`, `rag.search` (con chunks, scores y fuentes), `rag.generate_answer`, `publicidad.*`, `unanswered_question.create`. Incluye input, output, duración en ms y errores. |
-| *Shots* de conversación (turno completo: estado antes/después + eventos) | Tabla de shots (si `NOCODB_CONVERSATION_SHOTS_URL` está configurada) | Los recolecta `ShotTraceCollector` con `contextvars` (aislado por hilo). Sirven como dataset de regresión/evaluación. |
+| *Shots* de conversación (turno completo: estado antes/después + eventos) | `conversation_shots` (JSONB) | Los recolecta `ShotTraceCollector` con `contextvars` (aislado por hilo). Sirven como dataset de regresión/evaluación. |
 | Preguntas que el RAG no pudo responder | Tabla de preguntas sin respuesta | Alimenta la mejora de la base de conocimiento. |
 | Derivaciones a humano | Tabla de reportes | Con resumen generado por el LLM (contexto del historial incluido). |
 
@@ -94,14 +95,12 @@ Reglas del trazado (`ToolCallLogger`):
 - **El trazado nunca rompe el flujo**: los errores de registro se tragan (best effort);
   la conversación siempre tiene prioridad sobre el log.
 
-### Límite conocido (aceptado)
+### Límite resuelto al migrar a Postgres
 
-El log de NocoDB se actualiza con **leer-modificar-escribir** sin candado
-(`append_message`). Si el proceso del bot (inbound) y el worker (outbound/tools)
-escriben el MISMO registro en el mismo instante, puede perderse una línea del log
-(gana el último escritor). No cruza conversaciones ni afecta el estado del flujo —
-solo el log durable puede perder una entrada en una carrera improbable. Si algún día
-importa, el fix es un candado Redis por `client_id:canal` alrededor del append.
+Cuando el log vivía en NocoDB se actualizaba con **leer-modificar-escribir** sin
+candado: si el proceso del bot (inbound) y el worker (outbound/tools) escribían el
+mismo registro a la vez, se perdía una línea del log. Con una fila por mensaje ese
+problema desapareció: dos `INSERT` concurrentes no compiten por nada.
 
 ---
 
@@ -110,14 +109,16 @@ importa, el fix es un candado Redis por `client_id:canal` alrededor del append.
 - **Redis**: estado activo, TTL deslizante de `CONVERSATION_RETENTION_DAYS` (20 días);
   AOF acota la pérdida ante caída dura a ~1s. Perder Redis = los usuarios activos
   vuelven al intake; el historial durable no se toca.
-- **NocoDB**: log durable; purga diaria por Celery beat (`purge_expired_conversations`).
-- **Postgres**: bloqueos y registro de dictamen (sin conversaciones).
+- **Postgres**: fuente de verdad — log durable, seguimiento, facturación, catálogos,
+  envíos, bloqueos y registro de dictamen. La purga diaria por Celery beat
+  (`purge_expired_conversations`) borra el historial vencido; el corte se calcula con
+  `MAX(created_at)` **por conversación**, no mensaje a mensaje, para no borrarle el
+  arranque del chat a un cliente activo.
 - **Qdrant**: base de conocimiento del RAG (sin datos de clientes).
 
 ## 5. Seguimiento por cliente y resumen mensual
 
-Tablas en la base **LOGs_Autos_Mensajes** de NocoDB (creadas en la versión
-`2026.07.0`):
+Tablas en Postgres (`services/dashboard/src/db/migrations/001_esquema_inicial.sql`):
 
 - **`seguimiento_clientes`** (una fila por `client_id` + `canal`): contador de
   conversaciones iniciadas (una "conversación" dura hasta
@@ -139,9 +140,42 @@ Diseño (en `application/seguimiento_service.py`):
   del RAG (text-embedding-3-small) no se contabilizan (costo despreciable).
 - **Robustez**: los eventos se acumulan primero en Redis con operaciones
   atómicas (`RPUSH`/`HINCRBY`, claves `seguimiento_*` con `scoped_key` y
-  `resumen_mensual_deltas:<mes>`); el volcado a NocoDB toma un candado no
+  `resumen_mensual_deltas:<mes>`); el volcado a Postgres toma un candado no
   bloqueante por fila y solo descuenta del buffer lo efectivamente escrito.
-  Si NocoDB está caído, los deltas quedan en Redis y los re-intenta la tarea
+  Si la base está caída, los deltas quedan en Redis y los re-intenta la tarea
   de Celery beat `flush_seguimiento_pendiente` (cada 5 minutos).
 - Estas tablas NO entran en la purga de retención: son la vista de largo
   plazo para dar seguimiento a cada cliente.
+
+## 6. Facturación y cola de envíos manuales
+
+**Libro mayor (`uso_eventos`).** Una fila por hecho facturable, con el costo REAL y el
+de venta **congelados en la fila**. Consecuencia deliberada: cambiar una tarifa nunca
+reescribe el pasado, y el histórico es auditable.
+
+- El periodo abierto y la tarifa vigente se resuelven **dentro del propio INSERT**
+  (`billing_repository`), no con una caché en el proceso. Con caché, los eventos
+  posteriores a un cierre de periodo o a un cambio de precios caerían en el sitio
+  equivocado durante toda la ventana de caché.
+- Un índice único parcial garantiza que **solo exista un periodo abierto** a la vez:
+  dos cierres simultáneos no pueden partir la factura en dos.
+- La fórmula del costo real vive en un único lugar (`seguimiento_service.costo_microusd`);
+  el SQL solo aplica el margen de venta. No está duplicada.
+- Un fallo al anotar el consumo **no interrumpe la atención al cliente**: se registra el
+  error y el turno sigue.
+
+**Cola de envíos (`envios`).** El dashboard solo inserta filas en estado `pendiente`;
+enviarlas es cosa del bot, que es el proceso con los canales configurados. Los dos
+servicios se comunican **por tabla, no por HTTP**: un reinicio de cualquiera de los dos
+no pierde ni duplica envíos.
+
+- `tomar_pendientes` usa `FOR UPDATE SKIP LOCKED`: si algún día corren dos workers, cada
+  uno se lleva filas distintas y un mismo envío nunca sale dos veces.
+- `rescatar_atascados` devuelve a la cola lo que lleva demasiado en `enviando` (solo
+  puede pasar si el worker murió justo después de tomarlo); sin esto quedaría trabado
+  para siempre en un estado que la interfaz no deja tocar.
+- El error se guarda **separado**: `error_cliente` es la parte accionable que ve quien
+  hizo el envío ("no se pudo abrir la imagen, revisa que el enlace sea público");
+  `error_tecnico` es la traza completa y solo la ve el administrador. La causa real de
+  un 4xx se lee del **cuerpo** de la respuesta, no del mensaje de la excepción.
+- Los envíos manuales se facturan como categoría `codigo`: no pasan por el modelo.

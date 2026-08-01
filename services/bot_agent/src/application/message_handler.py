@@ -4,7 +4,17 @@ from src.infrastructure.repositories.conversation_log_repository import Conversa
 
 class MessageHandler:
     @staticmethod
-    def handle_incoming_message(user_id: str, content: str, msg_type: MessageType, user_name: str = "Desconocido", is_command: bool = False, channel: Channel | str = Channel.TELEGRAM):
+    def handle_incoming_message(
+        user_id: str,
+        content: str,
+        msg_type: MessageType,
+        user_name: str = "Desconocido",
+        is_command: bool = False,
+        channel: Channel | str = Channel.TELEGRAM,
+        from_me: bool = False,
+        event_type: str = "message",
+        message_id: str = "",
+    ):
         channel_value = channel if isinstance(channel, Channel) else Channel(channel)
         inbound = InboundMessage(
             channel=channel_value,
@@ -12,6 +22,9 @@ class MessageHandler:
             user_name=user_name,
             message_type=msg_type,
             text=content,
+            from_me=from_me,
+            event_type=event_type,
+            message_id=message_id,
         )
         actions = ConversationOrchestrator().handle(inbound)
         for action in actions:

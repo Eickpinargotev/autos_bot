@@ -2,27 +2,34 @@
 
 Agente conversacional de recepción para Telegram/WhatsApp: un **agente único con LLM** orquestado con **LangGraph** (ver `docs/modelo_unico.md`).
 Interpreta lenguaje natural (sin regex ni listas de palabras clave), responde con RAG sobre
-una base de conocimiento y registra las conversaciones en NocoDB.
+una base de conocimiento y registra todo en Postgres, que se consulta desde un
+**dashboard propio** (`services/dashboard/`) con roles, facturación en vivo,
+catálogos editables y envíos manuales.
 
 ## Arquitectura
 
-El proyecto es un monorepo orquestado con Docker Compose. Un único servicio de aplicación
-(`bot_agent`) se ejecuta en tres roles a partir de la **misma imagen**:
+El proyecto es un monorepo orquestado con Docker Compose. El servicio de aplicación
+del bot (`bot_agent`) se ejecuta en tres roles a partir de la **misma imagen**:
 
 | Servicio            | Rol                                                              |
 | ------------------- | --------------------------------------------------------------- |
 | `bot_agent`         | Bot de Telegram (long-polling)                                  |
 | `whatsapp_webhook`  | API FastAPI/uvicorn para el webhook de WhatsApp (puerto 8010)   |
-| `celery_worker`     | Tareas en segundo plano (recordatorios, publicidad, purga de historial) |
+| `celery_worker`     | Tareas en segundo plano (recordatorios, publicidad, purga de historial, cola de envíos manuales) |
+
+Y un segundo servicio propio, con su imagen y su dominio:
+
+| Servicio    | Rol                                                              |
+| ----------- | ---------------------------------------------------------------- |
+| `dashboard` | Panel de operación (FastAPI + Jinja, puerto 8020). Roles `admin` y `cliente`. |
 
 Infraestructura de apoyo:
 
 | Servicio    | Uso                                                          |
 | ----------- | ------------------------------------------------------------ |
-| `postgres`  | Usuarios bloqueados y registro de dictamen (no almacena conversaciones) |
+| `postgres`  | **Fuente de verdad**: conversaciones, seguimiento, facturación, catálogos, envíos y usuarios del panel |
 | `redis`     | Estado/historial activo de la conversación, buffer de mensajes y broker/result backend de Celery |
 | `qdrant`    | Base vectorial para el RAG (`escuela_manejo_kb`)             |
-| `nocodb`    | Panel de administración y registro durable de conversaciones/datos |
 
 El código del bot sigue una organización por capas en `services/bot_agent/src/`
 (`domain/`, `application/`, `infrastructure/`, `core/`).
@@ -36,7 +43,7 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 ├── mensajes.json               # Catálogo de mensajes del bot (montado en /mensajes.json)
 ├── services/
 │   └── bot_agent/              # Servicio del bot (Dockerfile, src/, tests/)
-├── data/                       # Estado persistente local (nocodb metadata, qdrant)
+├── data/                       # Estado persistente local (qdrant)
 ├── docs/                       # Documentación versionada
 │   ├── operacion_escala_y_trazabilidad.md  # concurrencia, anti-duplicados, capacidad, trazado
 │   ├── seguridad.md                        # postura de seguridad + checklist de despliegue
@@ -60,11 +67,18 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 
 Requiere un archivo `.env` en la raíz (no versionado). Variables principales:
 `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `POSTGRES_USER/PASSWORD/DB`,
-`NOCODB_TOKEN`, `NOCODB_API_KEY` y las URLs `NOCODB_*` (ver los compose para la lista completa).
+`SESSION_SECRET` (dashboard), y opcionalmente `WASENDER_API_KEY` +
+`PUBLIC_WEBHOOK_BASE_URL` para WhatsApp e `INTERNAL_API_TOKEN` para el reindexado
+inmediato del RAG. Ver los compose para la lista completa.
 
-> **Seguridad:** el webhook de sincronización RAG queda **deshabilitado** (503) hasta
-> que definas `NOCODB_RAG_WEBHOOK_TOKEN`; sin él, el RAG se actualiza igual por
-> sincronización lazy cada 5 min. Checklist completo en `docs/seguridad.md`.
+> **WhatsApp:** la URL del webhook de cada cliente y los eventos que hay que activar
+> en WasenderAPI están en el perfil del cliente (`/admin/negocios/{id}`) del panel y explicados en
+> `docs/whatsapp_wasender.md`.
+
+> **Seguridad:** el dashboard **no arranca** sin `SESSION_SECRET` (con un secreto vacío
+> las cookies serían falsificables). El webhook de WhatsApp y el endpoint interno del RAG
+> quedan **deshabilitados** (503) mientras falte su secreto, nunca abiertos.
+> Checklist completo en `docs/seguridad.md`.
 
 ### Local
 
@@ -72,8 +86,17 @@ Requiere un archivo `.env` en la raíz (no versionado). Variables principales:
 docker compose -f docker-compose.local.yml up --build
 ```
 
-Expone Postgres (5432), Redis (6379), Qdrant (6333/6334), NocoDB (8080) y monta
-`./services/bot_agent` en `/app` para recarga del código.
+Expone Postgres (5432), Redis (6379), Qdrant (6333/6334), el webhook (8010) y el
+**dashboard en http://localhost:8020**, y monta el código de ambos servicios para
+recarga en caliente.
+
+La primera vez, el dashboard crea el usuario administrador y **imprime en los logs
+una contraseña temporal** (o usa `ADMIN_BOOTSTRAP_PASSWORD`). Se pide cambiarla al
+entrar:
+
+```bash
+docker compose -f docker-compose.local.yml logs dashboard | grep -A2 "administrador"
+```
 
 ### Nube (EasyPanel)
 
@@ -82,7 +105,57 @@ docker compose up --build -d
 ```
 
 Usa volúmenes con nombre, la red externa `easypanel` y no publica puertos directamente
-(el reverse proxy de EasyPanel los enruta). Ver `docs/despliegue_docker_easypanel.md`.
+(el reverse proxy de EasyPanel los enruta). El `dashboard` expone el 8020 y está en la
+red `easypanel`, listo para que le asignes su propio dominio.
+Ver `docs/despliegue_docker_easypanel.md`.
+
+## Dashboard
+
+Panel propio en `services/dashboard/`: FastAPI + Jinja renderizado en el servidor, sin
+Node, sin build y sin CDNs. Todo el JavaScript propio son ~130 líneas para refrescar el
+panel de consumo, guardar celdas al editarlas y abrir los menús; el resto son formularios
+HTML normales, que siguen funcionando aunque el script no cargue.
+
+La navegación está organizada en un menú lateral por secciones —Facturación, Clientes,
+Agente IA, Mensajería y Configuración—, con una barra superior que indica dónde estás y
+el menú de la cuenta. Las secciones y sus páginas se declaran en un solo sitio,
+`src/core/navegacion.py`: añadir una página al panel es añadir una línea ahí (y su ruta,
+que es quien decide de verdad el acceso). `/admin/configuracion` reúne en una pantalla
+todo lo que hay configurado —tarifa vigente, periodo abierto, cuentas, sesiones,
+recuperación por Telegram y envíos— sin mostrar nunca el valor de un secreto.
+
+### Roles
+
+| | `cliente` | `admin` |
+| --- | --- | --- |
+| Su consumo facturado, en vivo | ✅ | ✅ |
+| Ciudades, mensajes, enviar, historial de envíos | ✅ | ✅ |
+| **Costo real del proveedor y margen** | ❌ | ✅ |
+| Logs de conversación, reportes, incidencias | ❌ | ✅ |
+| Tarifas, cierre de periodos, usuarios, base de conocimiento | ❌ | ✅ |
+
+`security.requiere_admin` es la única puerta del rol administrador: un `cliente` recibe
+403 aunque escriba la URL a mano, y los tests recorren la lista completa de rutas
+`/admin/*` para que no se escape ninguna.
+
+### Cómo se factura
+
+Dos categorías, porque no cuestan lo mismo:
+
+- **`llm`** — el turno pasó por el modelo. Se cobra el costo real de los tokens
+  multiplicado por el margen de la tarifa vigente.
+- **`codigo`** — mensaje disparado por un algoritmo, sin modelo de por medio: la palabra
+  clave `tareas`/`transporte`, la bienvenida al grupo, las secuencias programadas y los
+  envíos manuales. No tiene costo de proveedor y se cobra una tarifa fija por mensaje.
+
+Cada hecho facturable es una fila de `uso_eventos` con **el costo ya congelado**. Cambiar
+una tarifa mañana no reescribe lo de hoy: el histórico es auditable. Todo el dinero se
+guarda como entero en micro-USD, así que las sumas no acumulan error de punto flotante.
+
+**El "reset" no borra nada.** Cerrar un periodo congela sus totales y abre uno nuevo: el
+cliente ve su contador en cero, el administrador conserva el historial completo con quién
+lo cerró y cuándo, y puede volver a sumar un periodo cerrado al actual si el clic fue un
+error.
 
 ## Retención del historial de conversaciones
 
@@ -97,7 +170,7 @@ defecto `20`). Se aplica en dos capas, según dónde vive el historial:
 | Dónde vive                          | Cómo se borra                                                                 |
 | ----------------------------------- | ---------------------------------------------------------------------------- |
 | **Redis** — estado/historial activo (`conversation_state:*`, `state:*`) | TTL deslizante: cada interacción reescribe la clave con un vencimiento de 20 días, así Redis la expira sola tras la inactividad. |
-| **NocoDB** — log durable (tabla de conversaciones y, si está activa, la de *shots*) | Purga programada: una tarea de Celery (`purge_expired_conversations`) recorre la tabla a diario y elimina los registros cuya última actividad supere los 20 días. |
+| **Postgres** — log durable (`conversation_messages` y `conversation_shots`) | Purga programada: una tarea de Celery (`purge_expired_conversations`) borra a diario las conversaciones cuya **última** actividad supere los 20 días. El corte es por conversación, no por mensaje: a un cliente activo no se le borra el arranque de su chat. |
 
 La purga la dispara **Celery beat**, embebido en el `celery_worker` (se ejecuta
 con `worker -B`). Corre una vez al día (≈02:00 hora de Costa Rica). No hace falta
@@ -114,7 +187,9 @@ Dónde vive cada cosa (importante para no confundir "memoria" con "se pierde al 
 | Dato | Almacén | Durabilidad |
 | ---- | ------- | ----------- |
 | **Estado activo de la conversación** (en qué paso del flujo va cada usuario + historial reciente) | **Redis** (`conversation_state:*`, `state:*`) | En memoria **con persistencia a disco** (volumen + AOF). |
-| **Registro durable de conversaciones** (el log que se ve en el panel) | **NocoDB** | Persistente en disco. |
+| **Registro durable de conversaciones** (el log que se ve en el dashboard) | **Postgres** (`conversation_messages`) | Persistente en disco. |
+| **Facturación** (`uso_eventos`, `tarifas`, `periodos_facturacion`) | **Postgres** | Persistente en disco. |
+| **Catálogos y envíos** (ciudades, plantillas, envíos, incidencias) | **Postgres** | Persistente en disco. |
 | **Usuarios bloqueados y registro de dictamen** | **Postgres** | Persistente en disco. |
 | **Base de conocimiento del RAG** | **Qdrant** | Persistente en disco. |
 
@@ -132,7 +207,7 @@ con `redis-server --appendonly yes` y un volumen montado (`/data`). Lo activamos
 Qué implica en la práctica: si Redis perdiera esa ventana, lo único afectado sería
 "en qué nodo del flujo estaba cada conversación activa" (esos usuarios volverían al
 intake). El **historial guardado de las conversaciones no se pierde**, porque su copia
-durable está en **NocoDB**, no en Redis.
+durable está en **Postgres**, no en Redis.
 
 > Sobre carga: Redis maneja decenas de miles de operaciones por segundo. A ritmos como
 > ~200 chats/minuto (≈3–4 mensajes/s) Redis no es el cuello de botella; lo son las
@@ -186,8 +261,10 @@ paralelo**.
 `pip` en tu máquina: los tests se ejecutan dentro del contenedor, en el mismo entorno
 que la app.
 
-- Dependencias de producción: `services/bot_agent/requirements.txt`
-- Dependencias de desarrollo/test: `services/bot_agent/requirements-dev.txt` (incluye `pytest`)
+- Dependencias de producción: `services/<servicio>/requirements.txt`
+- Dependencias de desarrollo/test: `services/<servicio>/requirements-dev.txt` (incluye `pytest`)
+
+Ambos servicios (`bot_agent` y `dashboard`) siguen la misma estructura.
 
 El `Dockerfile` es multi-stage:
 - etapa `prod` (final, por defecto) → la usa la nube (`docker-compose.yml`), sin pytest.
@@ -208,7 +285,16 @@ docker compose -f docker-compose.local.yml run --rm bot_agent pytest
 
 # Subconjunto / un archivo:
 docker compose -f docker-compose.local.yml run --rm bot_agent pytest tests/unit
+
+# Suite del dashboard:
+docker compose -f docker-compose.local.yml run --rm dashboard pytest
 ```
+
+Los tests del **dashboard** corren contra Postgres de verdad —lo que prueban es SQL
+(índices únicos parciales, `ON CONFLICT`, `FOR UPDATE SKIP LOCKED`)— pero sobre una
+base **aparte** (`<base>_test`, creada automáticamente), para no tocar tus datos de
+desarrollo. Cubren el aislamiento por rol, la máquina de estados de los envíos y el
+ciclo de los periodos de facturación.
 
 Hay **dos niveles** de tests:
 

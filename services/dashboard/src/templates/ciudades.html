@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block titulo %}Ciudades{% endblock %}
+
+{% block contenido %}
+<h1>Ciudades</h1>
+<p class="sub">
+  Los cinco mensajes que el bot envía cuando alguien pregunta por una ciudad.
+  Se guardan al salir de cada celda. Para adjuntar media, escribe
+  <code>Imagen=ID_o_URL</code> o <code>Video=ID_o_URL</code> dentro del texto.
+</p>
+
+<div class="panel">
+  <form class="linea" method="get" action="/ciudades">
+    <input name="q" value="{{ busqueda }}" placeholder="Buscar ciudad…">
+    <button>Buscar</button>
+  </form>
+  <form method="post" action="/ciudades" style="margin-top:10px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="primario">Agregar ciudad</button>
+  </form>
+</div>
+
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>Ciudad</th>
+        <th>Mensaje 1</th><th>Mensaje 2</th><th>Mensaje 3</th>
+        <th>Mensaje 4 (enlace del grupo)</th><th>Mensaje 5</th>
+        <th>Facebook</th><th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ciudad in ciudades %}
+        {% include "_ciudad_fila.html" %}
+      {% else %}
+        <tr><td colspan="8" class="vacio">No hay ciudades. Agrega la primera.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

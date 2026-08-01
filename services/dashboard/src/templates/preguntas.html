@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block titulo %}Preguntas sin respuesta{% endblock %}
+
+{% block contenido %}
+<h1>Preguntas sin respuesta</h1>
+<p class="sub">
+  Lo que los clientes preguntaron y el bot no supo contestar. Cada una es una
+  candidata a entrar en <a href="/admin/rag">la base de conocimiento</a>.
+</p>
+
+<div class="panel tabla-scroll">
+  <table>
+    <thead><tr><th>Fecha</th><th>Pregunta</th><th></th></tr></thead>
+    <tbody>
+      {% for p in preguntas %}
+      <tr>
+        <td style="white-space:nowrap">{{ p.creado_en | fecha }}</td>
+        <td>{{ p.pregunta }}</td>
+        <td>
+          {% if p.atendida %}<span class="pastilla ok">atendida</span>
+          {% else %}
+          <form method="post" action="/admin/preguntas/{{ p.id }}/atendida">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini">Marcar atendida</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="vacio">No hay preguntas pendientes.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

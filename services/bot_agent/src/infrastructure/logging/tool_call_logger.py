@@ -3,7 +3,6 @@ from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from src.core.config import settings
 from src.domain.entities import Channel
 from src.infrastructure.evals.conversation_shots import ShotTraceCollector
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
@@ -169,7 +168,8 @@ class ToolCallLogger:
 
     @staticmethod
     def _enabled(client_id: str, canal: Channel | str) -> bool:
-        return bool(client_id and canal and settings.NOCODB_CONVERSATIONS_URL)
+        # Sin cliente ni canal no hay conversación a la que atribuir el evento.
+        return bool(client_id and canal)
 
     @staticmethod
     def _duration_ms(started: float) -> int:
