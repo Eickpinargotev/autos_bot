@@ -206,17 +206,32 @@ def test_el_webhook_no_cambia_al_editar_la_configuracion():
         cliente["id"], nombre="Escuela de manejo CR", numero="50611112222",
         zona_horaria="America/Costa_Rica",
     )
-    clientes_whatsapp.actualizar_credenciales(cliente["id"], "https://wasenderapi.com", "clave")
+    clientes_whatsapp.actualizar_credenciales(cliente["id"], api_key="clave")
 
     assert clientes_whatsapp.obtener(cliente["id"])["webhook_token"] == token
 
 
-def test_la_clave_guardada_no_se_borra_al_dejar_el_campo_vacio():
+def test_lo_guardado_no_se_borra_al_dejar_el_campo_vacio():
+    """El formulario nunca muestra lo guardado, así que enviarlo en blanco es lo
+    normal cuando solo se estaba cambiando el otro campo."""
     cliente = clientes_whatsapp.crear("Escuela de manejo")
-    clientes_whatsapp.actualizar_credenciales(cliente["id"], "", "clave-secreta")
-    clientes_whatsapp.actualizar_credenciales(cliente["id"], "https://wasenderapi.com", "")
+    clientes_whatsapp.actualizar_credenciales(cliente["id"], api_key="clave-secreta")
+    clientes_whatsapp.actualizar_credenciales(cliente["id"], webhook_secret="firma")
 
-    assert clientes_whatsapp.obtener(cliente["id"])["wasender_api_key"] == "clave-secreta"
+    guardado = clientes_whatsapp.obtener(cliente["id"])
+    assert guardado["wasender_api_key"] == "clave-secreta"
+    assert guardado["wasender_webhook_secret"] == "firma"
+
+
+def test_no_se_pide_una_url_de_api_por_cliente(sesion_admin):
+    """El dominio de WasenderAPI es del proveedor y el mismo para todos: vive en
+    el entorno, no en la ficha de cada cliente."""
+    cliente = clientes_whatsapp.crear("Escuela de manejo")
+    cuerpo = sesion_admin.get(f"/admin/negocios/{cliente['id']}").text
+
+    assert "wasender_api_url" not in cuerpo
+    assert "API Access Token" in cuerpo
+    assert "Webhook Secret" in cuerpo
 
 
 def test_eliminar_el_cliente_se_lleva_su_webhook():

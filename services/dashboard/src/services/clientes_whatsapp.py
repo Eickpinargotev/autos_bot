@@ -231,28 +231,34 @@ def actualizar_config(
     )
 
 
-def actualizar_credenciales(cliente_id: int, api_url: str = "", api_key: str = "") -> None:
-    """Guarda las credenciales de WasenderAPI del negocio.
+def actualizar_credenciales(cliente_id: int, api_key: str = "", webhook_secret: str = "") -> None:
+    """Guarda las dos credenciales que WasenderAPI entrega por sesión.
 
-    Una clave vacía significa «no la toques», no «bórrala»: el formulario nunca
-    muestra la clave guardada, así que enviar el campo en blanco es lo normal
-    cuando solo se estaba cambiando otra cosa. Para quitarla de verdad está
-    `borrar_credencial`.
+    Son exactamente las de su pantalla: el **API Access Token** (para enviar) y
+    el **Webhook Secret** (que acompaña a cada evento entrante). No se pide una
+    URL: el dominio de WasenderAPI es el mismo para todos y vive en el entorno.
+
+    Un campo vacío significa «no lo toques», no «bórralo»: el formulario nunca
+    muestra lo guardado, así que enviarlo en blanco es lo normal cuando solo se
+    estaba cambiando lo otro. Para quitarlos de verdad está `borrar_credenciales`.
     """
-    pool.ejecutar(
-        "UPDATE clientes_whatsapp SET wasender_api_url = %s WHERE id = %s",
-        (str(api_url or "").strip()[:200], int(cliente_id)),
-    )
     if str(api_key or "").strip():
         pool.ejecutar(
             "UPDATE clientes_whatsapp SET wasender_api_key = %s WHERE id = %s",
             (str(api_key).strip(), int(cliente_id)),
         )
+    if str(webhook_secret or "").strip():
+        pool.ejecutar(
+            "UPDATE clientes_whatsapp SET wasender_webhook_secret = %s WHERE id = %s",
+            (str(webhook_secret).strip(), int(cliente_id)),
+        )
 
 
-def borrar_credencial(cliente_id: int) -> int:
+def borrar_credenciales(cliente_id: int) -> int:
     return pool.ejecutar(
-        "UPDATE clientes_whatsapp SET wasender_api_key = '' WHERE id = %s", (int(cliente_id),)
+        "UPDATE clientes_whatsapp SET wasender_api_key = '', wasender_webhook_secret = '' "
+        "WHERE id = %s",
+        (int(cliente_id),),
     )
 
 

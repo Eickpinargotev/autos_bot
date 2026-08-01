@@ -42,7 +42,8 @@ def por_token(token: str) -> dict[str, Any] | None:
     try:
         fila = consultar_uno(
             """
-            SELECT id, nombre, slug, webhook_token, wasender_api_key, numero, activo
+            SELECT id, nombre, slug, webhook_token, wasender_api_key,
+                   wasender_webhook_secret, numero, activo
             FROM clientes_whatsapp
             WHERE webhook_token = %s AND activo
             """,

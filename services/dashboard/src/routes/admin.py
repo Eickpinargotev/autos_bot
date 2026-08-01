@@ -166,17 +166,19 @@ def negocio_wasender(
     request: Request,
     negocio_id: int,
     csrf: str = Form(""),
-    wasender_api_url: str = Form(""),
     wasender_api_key: str = Form(""),
+    wasender_webhook_secret: str = Form(""),
     usuario=Depends(security.requiere_admin),
 ):
-    """Credenciales de envío del negocio.
+    """Las dos credenciales que WasenderAPI entrega por sesión.
 
-    La clave solo se escribe: no vuelve a mostrarse en el formulario. Dejar el
-    campo vacío significa «no la cambies», no «bórrala».
+    Solo se escriben: no vuelven a mostrarse en el formulario. Dejar un campo
+    vacío significa «no lo cambies», no «bórralo».
     """
     security.verificar_csrf(request, csrf)
-    clientes_whatsapp.actualizar_credenciales(negocio_id, wasender_api_url, wasender_api_key)
+    clientes_whatsapp.actualizar_credenciales(
+        negocio_id, api_key=wasender_api_key, webhook_secret=wasender_webhook_secret
+    )
     return RedirectResponse(
         f"/admin/negocios/{negocio_id}?aviso={quote('Credenciales guardadas')}", status_code=303
     )

@@ -105,23 +105,30 @@
   </div>
   <div class="cuerpo">
     <p class="sub" style="margin-top:0">
-      Lo que se necesita para <strong>enviar</strong> mensajes desde el número de este
-      cliente. Si se dejan vacías se usa la credencial global del despliegue.
+      Las dos credenciales de la pantalla de tu sesión en WasenderAPI, copiadas tal cual.
+      No hay que poner ninguna URL: el dominio de WasenderAPI es el mismo para todos
+      y ya está configurado en el despliegue.
     </p>
     <form method="post" action="/admin/negocios/{{ negocio.id }}/wasender">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <div style="margin-bottom:12px">
-        <label for="wa-url">URL de la API</label>
-        <input id="wa-url" name="wasender_api_url" style="width:100%"
-               value="{{ negocio.wasender_api_url }}" placeholder="https://wasenderapi.com">
+      <div style="margin-bottom:14px">
+        <label for="wa-key">API Access Token</label>
+        <input id="wa-key" name="wasender_api_key" type="password" autocomplete="off" style="width:100%"
+               placeholder="{{ 'guardado — escribe otro para reemplazarlo' if negocio.wasender_api_key else 'sin configurar' }}">
+        <p class="sub" style="margin:4px 0 0">Autentica los mensajes que se envían desde este número.</p>
       </div>
       <div style="margin-bottom:8px">
-        <label for="wa-key">API key</label>
-        <input id="wa-key" name="wasender_api_key" type="password" autocomplete="off" style="width:100%"
-               placeholder="{{ 'guardada — escribe una nueva para reemplazarla' if negocio.wasender_api_key else 'sin configurar' }}">
+        <label for="wa-secret">Webhook Secret</label>
+        <input id="wa-secret" name="wasender_webhook_secret" type="password" autocomplete="off" style="width:100%"
+               placeholder="{{ 'guardado — escribe otro para reemplazarlo' if negocio.wasender_webhook_secret else 'opcional, sin configurar' }}">
+        <p class="sub" style="margin:4px 0 0">
+          Opcional. Si lo pones, cada evento entrante tendrá que traerlo: además de saber
+          a qué cliente va (eso lo dice el token de la URL), se comprueba que lo mandó
+          WasenderAPI de verdad.
+        </p>
       </div>
-      <p class="sub" style="margin:0 0 16px">
-        La clave guardada no se muestra. Dejar el campo vacío la conserva.
+      <p class="sub" style="margin:12px 0 16px">
+        Lo guardado no se muestra. Dejar un campo vacío lo conserva.
       </p>
       <div class="linea" style="justify-content:flex-end">
         <button class="mini" type="button" data-cierra>Cancelar</button>

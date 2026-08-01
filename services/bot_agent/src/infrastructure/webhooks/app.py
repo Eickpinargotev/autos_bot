@@ -35,11 +35,31 @@ def health():
 
 
 @app.post("/webhooks/wasender/{token}")
-async def wasender_webhook_cliente(token: str, payload: dict[str, Any]):
-    """Eventos de WhatsApp del negocio dueño de ese token."""
+async def wasender_webhook_cliente(
+    token: str,
+    payload: dict[str, Any],
+    x_webhook_signature: str = Header(default=""),
+):
+    """Eventos de WhatsApp del negocio dueño de ese token.
+
+    Dos comprobaciones que responden a preguntas distintas:
+
+    1. El **token de la ruta** dice a QUÉ negocio va dirigido el evento. Es
+       obligatorio: sin él no se sabría de quién es la conversación.
+    2. El **secreto de WasenderAPI** (cabecera `X-Webhook-Signature`), si el
+       negocio lo tiene configurado, demuestra que el evento lo mandó
+       WasenderAPI y no alguien que consiguió la URL. Es opcional porque no
+       todas las sesiones lo tienen, pero en cuanto se configura se exige: que
+       una credencial puesta se pueda saltar omitiéndola sería peor que no
+       tenerla.
+    """
     cliente = clientes_whatsapp_repo.por_token(token)
     if not cliente:
         raise HTTPException(status_code=401, detail="Webhook token desconocido o inactivo")
+
+    secreto = str(cliente.get("wasender_webhook_secret") or "")
+    if secreto and not hmac.compare_digest(x_webhook_signature, secreto):
+        raise HTTPException(status_code=401, detail="Firma del webhook inválida")
 
     clientes_whatsapp_repo.registrar_evento(cliente["id"], wasender.nombre_evento(payload))
     return _procesar_evento(payload)

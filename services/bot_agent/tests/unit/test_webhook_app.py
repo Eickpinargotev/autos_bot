@@ -183,6 +183,48 @@ class WebhookPorClienteTests(unittest.TestCase):
                 asyncio.run(webhook_app.wasender_webhook_cliente("inventado", {}))
         self.assertEqual(ctx.exception.status_code, 401)
 
+    def test_si_el_negocio_tiene_secreto_se_exige(self):
+        """Una credencial configurada no puede saltarse omitiéndola."""
+        cliente = {"id": 7, "nombre": "Escuela", "wasender_webhook_secret": "s3creto"}
+        with patch(
+            "src.infrastructure.webhooks.app.clientes_whatsapp_repo.por_token", return_value=cliente
+        ), patch(
+            "src.infrastructure.webhooks.app.MessageHandler.handle_incoming_message"
+        ) as handler_mock:
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(webhook_app.wasender_webhook_cliente("token-bueno", {}, x_webhook_signature=""))
+        self.assertEqual(ctx.exception.status_code, 401)
+        handler_mock.assert_not_called()
+
+    def test_con_el_secreto_correcto_pasa(self):
+        cliente = {"id": 7, "nombre": "Escuela", "wasender_webhook_secret": "s3creto"}
+        with patch(
+            "src.infrastructure.webhooks.app.clientes_whatsapp_repo.por_token", return_value=cliente
+        ), patch(
+            "src.infrastructure.webhooks.app.clientes_whatsapp_repo.registrar_evento"
+        ), patch(
+            "src.infrastructure.webhooks.app.MessageHandler.handle_incoming_message"
+        ):
+            resultado = asyncio.run(
+                webhook_app.wasender_webhook_cliente("token-bueno", {}, x_webhook_signature="s3creto")
+            )
+        self.assertEqual(resultado["status"], "ignored")
+
+    def test_sin_secreto_configurado_manda_solo_el_token(self):
+        """No todas las sesiones de WasenderAPI tienen secreto; sin él el token basta."""
+        cliente = {"id": 7, "nombre": "Escuela", "wasender_webhook_secret": ""}
+        with patch(
+            "src.infrastructure.webhooks.app.clientes_whatsapp_repo.por_token", return_value=cliente
+        ), patch(
+            "src.infrastructure.webhooks.app.clientes_whatsapp_repo.registrar_evento"
+        ), patch(
+            "src.infrastructure.webhooks.app.MessageHandler.handle_incoming_message"
+        ):
+            resultado = asyncio.run(
+                webhook_app.wasender_webhook_cliente("token-bueno", {}, x_webhook_signature="")
+            )
+        self.assertEqual(resultado["status"], "ignored")
+
     def test_token_valido_procesa_y_deja_rastro(self):
         cliente = {"id": 7, "nombre": "Escuela de manejo"}
         evento = {
