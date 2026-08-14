@@ -562,7 +562,7 @@ class AgentPipeline:
             ConversationStateRepo.clear(state["channel"], state["user_id"])
             return {"replies": []}
 
-        reason = f"Ciudad '{city_text}' no se encontró en la lista de invitaciones."
+        reason = f"No hay ningún mensaje para la ciudad '{city_text}'."
         self._create_report_and_block(state["channel"], state["user_id"], user_name, state["stored"], reason)
         return {"replies": [self.HANDOFF_DEFAULT_MESSAGE]}
 

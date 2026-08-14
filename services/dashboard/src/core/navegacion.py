@@ -4,20 +4,43 @@ Vive aquí y no en la plantilla porque es la única lista que sabe qué páginas
 existen y quién puede verlas: el sidebar, la miga de pan y el título de cada
 página se derivan de ella. Añadir una página es añadir una línea.
 
+## El vocabulario: plataforma, proyecto, cliente
+
+Tres cosas distintas que antes se llamaban todas «cliente»:
+
+* **Base de Control** es la PLATAFORMA. Es la marca del panel y no cambia.
+* Un **proyecto** es cada uno de nuestros clientes (hoy «Escuela de Manejo»):
+  su número de WhatsApp, su bot, su conocimiento y su factura. Un proyecto tiene
+  **un único usuario asignado** — no varios: quien lo administra es una persona,
+  con su nombre, y esa cuenta es su llave.
+* Un **cliente** es la persona que le escribe al bot. Solo aparece dentro del
+  panel de un proyecto.
+
 ## Los dos menús no son el mismo con cosas ocultas
 
-Son dos trabajos distintos, y la palabra «Clientes» significa algo distinto en
-cada uno:
+Son dos trabajos distintos:
 
-* **Administrador** (nosotros). Sus clientes son los **negocios** a los que les
-  prestamos el servicio. Su trabajo es facturarles, ver qué falló y entrar a su
-  perfil cuando reclaman algo. Por eso ve incidencias técnicas y conversaciones
-  —para resolver problemas—, y NO ve el conocimiento, las preguntas ni los
-  reportes: ese es el trabajo del negocio, no el nuestro.
-* **Negocio** (nuestro cliente). Sus clientes son las **personas que le escriben
-  al bot**. Administra su catálogo, su base de conocimiento y sus mensajes.
-  **No ve las conversaciones**: son de sus clientes, y para lo que él necesita ya
-  están los reportes y las preguntas sin responder.
+* **Administrador** (nosotros). Ve la lista de **proyectos**. Su trabajo es
+  facturarlos, ver qué falló y entrar a su perfil cuando reclaman algo. Por eso
+  ve incidencias técnicas y conversaciones —para resolver problemas—, y NO ve el
+  conocimiento, las preguntas ni los reportes: ese es el trabajo del proyecto,
+  no el nuestro.
+* **Proyecto** (nuestro cliente). Administra su catálogo, su base de
+  conocimiento y sus mensajes. **No ve las conversaciones**: son de sus
+  clientes, y para lo que él necesita ya están los reportes y las preguntas sin
+  responder. Tampoco ve el costo real: eso es nuestro margen, no su factura.
+
+## Lo de la cuenta no se repite en el lateral, ni es una página
+
+El menú de la cuenta (abajo del lateral, con el avatar) lleva a lo que es «del
+sistema y de quien lo usa»: las cuentas de acceso y los ajustes. Tenerlas ADEMÁS
+como una sección del lateral era la misma lista dos veces en la misma pantalla.
+
+«Mi cuenta» ya no está en esta lista porque **dejó de ser una página**: ver con
+qué cuenta estás dentro y cambiar la contraseña son cosas que se hacen sin salir
+de donde estabas, así que viven en una ventana flotante declarada en
+`templates/base.html`. Como página era un panel de «sesiones abiertas» y un rol
+que decía «cliente», que no le servían a nadie.
 
 OJO: esto solo decide qué se *muestra*. Quién puede *entrar* lo deciden las
 dependencias de la ruta (`requiere_admin` / `requiere_negocio`); ocultar un
@@ -34,9 +57,32 @@ SECCIONES_ADMIN: list[dict[str, Any]] = [
     {
         "titulo": "Operación",
         "paginas": [
-            {"etiqueta": "Clientes", "url": "/admin/negocios", "icono": "clientes", "prefijo": True},
-            {"etiqueta": "Conversaciones", "url": "/admin/logs", "icono": "chat", "prefijo": True},
+            # La URL sigue siendo `/admin/negocios`: cambiar la etiqueta no
+            # obliga a romper los enlaces que ya existen ni el histórico.
+            {"etiqueta": "Proyectos", "url": "/admin/negocios", "icono": "clientes", "prefijo": True},
+            # "Conversaciones" NO va aquí. Una lista con los clientes de todos
+            # los proyectos mezclados no se puede leer: un chat solo se entiende
+            # dentro del proyecto al que le escribieron. Se entra por el perfil
+            # del proyecto, que además es donde ya se estaba mirando su
+            # actividad. Las rutas `/admin/logs*` siguen existiendo (el enlace
+            # directo a un chat funciona), solo se quita el atajo del menú:
+            # ocultar un enlace no restringe nada — eso lo decide `requiere_admin`.
+            # Los bloqueos SÍ van en el menú, aunque las conversaciones no: son
+            # pocos, se buscan por número y la lista no pierde sentido al
+            # mezclar proyectos (además dice a cuál pertenece cada uno). Lo que
+            # no se podía hacer sin entrar a la base era levantarlos.
+            {"etiqueta": "Bloqueos", "url": "/admin/bloqueos", "icono": "candado"},
             {"etiqueta": "Incidencias", "url": "/admin/incidencias", "icono": "alerta"},
+            # Oculta: se entra por el perfil del cliente, pero la página existe
+            # y necesita su miga de pan cuando se abre un chat a pantalla
+            # completa (por ejemplo desde un enlace directo).
+            {
+                "etiqueta": "Conversaciones",
+                "url": "/admin/logs",
+                "icono": "chat",
+                "prefijo": True,
+                "oculta": True,
+            },
         ],
     },
     {
@@ -47,11 +93,29 @@ SECCIONES_ADMIN: list[dict[str, Any]] = [
             {"etiqueta": "Tarifas", "url": "/admin/tarifas", "icono": "etiqueta"},
         ],
     },
+    # La sección «Sistema» (cuentas, ajustes, mi cuenta) NO va aquí: vive en el
+    # menú de la cuenta, al pie del lateral. Estaba en los dos sitios a la vez.
+]
+
+# Páginas que existen y se alcanzan desde el menú de la cuenta, no desde el
+# lateral. Están declaradas igual porque la miga de pan y el título salen de
+# esta misma lista: sin ellas, entrar a «Cuentas de acceso» dejaba la cabecera
+# sin decir dónde estabas.
+SECCIONES_DE_CUENTA: list[dict[str, Any]] = [
     {
         "titulo": "Sistema",
         "paginas": [
             {"etiqueta": "Cuentas de acceso", "url": "/admin/usuarios", "icono": "usuario"},
             {"etiqueta": "Ajustes del sistema", "url": "/admin/configuracion", "icono": "ajustes"},
+        ],
+    },
+    {
+        "titulo": "Cuenta",
+        "paginas": [
+            # Solo queda `/password`, que es la pantalla del cambio OBLIGATORIO
+            # del primer ingreso (a la que redirige `/` cuando la contraseña es
+            # provisional). El cambio voluntario ya no es una página: está en la
+            # ventana de «Mi cuenta».
             {"etiqueta": "Mi cuenta", "url": "/password", "icono": "llave"},
         ],
     },
@@ -59,7 +123,7 @@ SECCIONES_ADMIN: list[dict[str, Any]] = [
 
 SECCIONES_NEGOCIO: list[dict[str, Any]] = [
     {
-        "titulo": "Mi negocio",
+        "titulo": "Mi proyecto",
         "paginas": [
             {"etiqueta": "Clientes", "url": "/clientes", "icono": "clientes"},
             {"etiqueta": "Reportes", "url": "/reportes", "icono": "documento"},
@@ -76,16 +140,19 @@ SECCIONES_NEGOCIO: list[dict[str, Any]] = [
     {
         "titulo": "Mensajería",
         "paginas": [
+            # Aquí hubo una entrada «Ciudades» (oculta, como segunda pestaña de
+            # Mensajes). Ya no existe: era un segundo catálogo con los mismos
+            # textos y las mismas claves que «Mensajes».
             {"etiqueta": "Mensajes", "url": "/mensajes", "icono": "chat"},
-            {"etiqueta": "Ciudades", "url": "/ciudades", "icono": "mapa"},
+            # «Palabras clave» SÍ es una entrada propia: no es otro catálogo de
+            # textos, es otra cosa. Un mensaje lo mandas tú a quien elijas; una
+            # palabra clave la dispara el cliente escribiéndola y arrastra el
+            # bloqueo de la conversación y unos recordatorios a futuro.
+            # Mezclarlas en la misma pantalla no dejaba ver cuál de las dos
+            # cosas estabas tocando.
+            {"etiqueta": "Palabras clave", "url": "/palabras-clave", "icono": "etiqueta"},
             {"etiqueta": "Enviar", "url": "/enviar", "icono": "enviar"},
             {"etiqueta": "Envíos", "url": "/envios", "icono": "bandeja"},
-        ],
-    },
-    {
-        "titulo": "Cuenta",
-        "paginas": [
-            {"etiqueta": "Mi cuenta", "url": "/password", "icono": "llave"},
         ],
     },
 ]
@@ -116,3 +183,31 @@ def ubicacion(secciones: list[dict[str, Any]]) -> tuple[str, str]:
             if pagina["activa"]:
                 return seccion["titulo"], pagina["etiqueta"]
     return "", ""
+
+
+def migas(es_admin: bool, ruta: str) -> list[dict[str, str]]:
+    """Los tramos de la miga de pan, cada uno con su enlace.
+
+    La miga era texto muerto: decía «Operación › Clientes» y no se podía volver
+    a Operación ni a Clientes desde ahí. Ahora cada tramo lleva a algún sitio:
+
+    * La **sección** no tiene página propia (es un título del menú), así que
+      lleva a su primera página visible. Es lo que uno espera al pulsarla:
+      «llévame a esta parte del panel».
+    * La **página** lleva a sí misma, que es lo útil cuando estás en un detalle:
+      desde el perfil de un cliente, «Clientes» te devuelve al listado.
+
+    Las páginas del menú de la cuenta también se resuelven aquí; si no, entrar a
+    «Cuentas de acceso» dejaba la cabecera muda.
+    """
+    propias = SECCIONES_ADMIN if es_admin else SECCIONES_NEGOCIO
+    for seccion in [*propias, *SECCIONES_DE_CUENTA]:
+        for pagina in seccion["paginas"]:
+            if not _activa(pagina, ruta):
+                continue
+            primera = next((p for p in seccion["paginas"] if not p.get("oculta")), pagina)
+            return [
+                {"etiqueta": seccion["titulo"], "url": primera["url"]},
+                {"etiqueta": pagina["etiqueta"], "url": pagina["url"]},
+            ]
+    return []

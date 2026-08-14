@@ -1,106 +1,45 @@
-"""Catálogos editables: ciudades, plantillas de mensaje y base de conocimiento."""
+"""Catálogos editables: mensajes, palabras clave y base de conocimiento."""
 
-import httpx
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from src.core import security
-from src.core.config import settings
 from src.core.plantillas import render
-from src.services import ciudades as svc_ciudades
-from src.services import mensajeria, trazabilidad
+from src.services import bot_interno
+from src.services import mensajeria, palabras_clave, trazabilidad
 
 router = APIRouter()
 
 
-# --- Ciudades ----------------------------------------------------------------
-
-@router.get("/ciudades")
-def listar_ciudades(request: Request, usuario=Depends(security.requiere_negocio)):
-    busqueda = request.query_params.get("q", "")
-    filas = svc_ciudades.listar(busqueda)
-    return render(
-        request,
-        "ciudades.html",
-        usuario,
-        ciudades=[{**fila, "avisos": svc_ciudades.avisos(fila)} for fila in filas],
-        busqueda=busqueda,
-        campos=svc_ciudades.CAMPOS_EDITABLES,
-    )
-
-
-@router.post("/ciudades")
-def crear_ciudad(request: Request, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)):
-    security.verificar_csrf(request, csrf)
-    fila = svc_ciudades.crear(usuario["usuario"])
-    return RedirectResponse(
-        url=f"/ciudades?aviso=Ciudad creada (inactiva hasta que la completes).#ciudad-{fila['id']}",
-        status_code=303,
-    )
-
-
-@router.post("/ciudades/{ciudad_id}/campo")
-def guardar_campo(
-    request: Request,
-    ciudad_id: int,
-    campo: str = Form(...),
-    valor: str = Form(""),
-    csrf: str = Form(""),
-    usuario=Depends(security.requiere_negocio),
-):
-    """Guarda una celda y devuelve la fila repintada (edición en línea)."""
-    security.verificar_csrf(request, csrf)
-    try:
-        fila = svc_ciudades.actualizar_campo(ciudad_id, campo, valor, usuario["usuario"])
-    except ValueError as e:
-        return render(request, "_error_inline.html", usuario, detalle=str(e))
-
-    return render(
-        request,
-        "_ciudad_fila.html",
-        usuario,
-        ciudad={**fila, "avisos": svc_ciudades.avisos(fila)},
-        campos=svc_ciudades.CAMPOS_EDITABLES,
-    )
-
-
-@router.post("/ciudades/{ciudad_id}/activo")
-def alternar_ciudad(
-    request: Request, ciudad_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
-):
-    security.verificar_csrf(request, csrf)
-    svc_ciudades.alternar_activo(ciudad_id, usuario["usuario"])
-    return RedirectResponse(url="/ciudades", status_code=303)
-
-
-@router.post("/ciudades/{ciudad_id}/eliminar")
-def eliminar_ciudad(
-    request: Request, ciudad_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
-):
-    security.verificar_csrf(request, csrf)
-    svc_ciudades.eliminar(ciudad_id)
-    return RedirectResponse(url="/ciudades?aviso=Ciudad eliminada.", status_code=303)
-
-
 # --- Mensajes (plantillas en cadena) ----------------------------------------
+#
+# Aquí había además un catálogo de «Publicidad por ciudad»: cinco columnas de
+# texto por ciudad, en su propia tabla y su propia pestaña. Era el mismo
+# contenido que estos mensajes —las mismas claves, los mismos textos— pero con
+# el adjunto escrito dentro del texto en vez de comprobado. Un mensaje se
+# identifica por su CLAVE, y esa clave es lo que el bot reconoce cuando alguien
+# llega por un anuncio preguntando por su ciudad; no hacía falta un segundo
+# catálogo para lo mismo.
 
 @router.get("/mensajes")
 def listar_plantillas(request: Request, usuario=Depends(security.requiere_negocio)):
-    """La lista, con el mensaje que se acaba de tocar ya desplegado.
+    """La lista, con el mensaje que se acaba de tocar ya abierto.
 
-    `?abierto=<id>` existe para eso: tras guardar una parte, la redirección
-    vuelve aquí y sin esto la lista aparecería toda plegada y habría que buscar
-    de nuevo dónde se estaba.
+    `?abierto=<id>` existe para eso: tras guardar, la redirección vuelve aquí y
+    sin esto habría que buscar otra vez dónde se estaba. `?parte=<orden>` hace lo
+    mismo con la segunda ventana, la del mensaje suelto.
     """
     abierto = request.query_params.get("abierto", "")
+    parte = request.query_params.get("parte", "")
     return render(
         request,
         "plantillas.html",
         usuario,
         plantillas=mensajeria.listar_plantillas(),
         abierto=int(abierto) if abierto.isdigit() else None,
+        parte_abierta=int(parte) if parte.isdigit() else None,
     )
 
 
@@ -108,19 +47,38 @@ def listar_plantillas(request: Request, usuario=Depends(security.requiere_negoci
 def crear_plantilla(
     request: Request,
     clave: str = Form(...),
-    nombre: str = Form(""),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
+    """Un mensaje nace con su clave y un primer mensaje vacío que rellenar."""
     security.verificar_csrf(request, csrf)
-    if mensajeria.buscar_por_clave(clave):
-        return RedirectResponse(url=f"/mensajes?error={quote('Ya existe un mensaje con esa clave')}", status_code=303)
     try:
-        plantilla = mensajeria.crear_plantilla(clave, nombre, usuario["usuario"])
+        plantilla = mensajeria.crear_plantilla(clave, usuario["usuario"])
     except ValueError as e:
         return RedirectResponse(url=f"/mensajes?error={quote(str(e))}", status_code=303)
     mensajeria.agregar_parte(plantilla["id"])
     return RedirectResponse(url=f"/mensajes?abierto={plantilla['id']}", status_code=303)
+
+
+@router.post("/mensajes/revisar")
+def revisar_media_de_todos(
+    request: Request, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
+):
+    """Comprueba los adjuntos de TODO el catálogo de una vez.
+
+    Se declara ANTES que `/mensajes/{plantilla_id}` a propósito: registrada
+    después, «revisar» entraría por la ruta con parámetro y saldría un 422 por
+    no ser un número. FastAPI resuelve por orden de declaración.
+    """
+    security.verificar_csrf(request, csrf)
+    revisados, con_problema = mensajeria.revisar_todos_los_adjuntos()
+    if not revisados:
+        aviso = "Ningún mensaje tiene adjuntos que revisar."
+    elif con_problema:
+        aviso = f"{revisados} adjuntos revisados; {con_problema} con algo que arreglar."
+    else:
+        aviso = f"{revisados} adjuntos revisados: todos se abren bien."
+    return RedirectResponse(url=f"/mensajes?aviso={quote(aviso)}", status_code=303)
 
 
 @router.post("/mensajes/{plantilla_id}")
@@ -128,13 +86,17 @@ def renombrar_plantilla(
     request: Request,
     plantilla_id: int,
     clave: str = Form(...),
-    nombre: str = Form(""),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
     security.verificar_csrf(request, csrf)
-    mensajeria.renombrar_plantilla(plantilla_id, clave, nombre)
-    return RedirectResponse(url=f"/mensajes?abierto={plantilla_id}&aviso=Mensaje+actualizado", status_code=303)
+    try:
+        mensajeria.renombrar_plantilla(plantilla_id, clave)
+    except ValueError as e:
+        return RedirectResponse(
+            url=f"/mensajes?abierto={plantilla_id}&error={quote(str(e))}", status_code=303
+        )
+    return RedirectResponse(url=f"/mensajes?abierto={plantilla_id}&aviso=Clave+guardada", status_code=303)
 
 
 @router.post("/mensajes/{plantilla_id}/eliminar")
@@ -161,32 +123,48 @@ def guardar_parte(
     plantilla_id: int,
     orden: int,
     texto: str = Form(""),
+    con_media: str = Form(""),
     media_tipo: str = Form(""),
     media_ref: str = Form(""),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
-    """Guarda una parte y comprueba su adjunto en el momento.
+    """Guarda un mensaje y comprueba su adjunto EN EL MOMENTO.
 
-    Si el archivo no se puede abrir, se avisa aquí mismo en vez de dejar que el
-    envío falle después.
+    La comprobación se hace aquí y no al enviar: un enlace mal copiado o un
+    archivo de Drive sin permiso público no fallarían hasta el envío, y para
+    entonces el cliente ya recibió media cadena.
+
+    `con_media` es el switch «incluye imagen». Apagado significa que no hay
+    adjunto, aunque el campo del ID conserve lo que había escrito: el switch es
+    lo que manda, y así apagarlo no obliga además a borrar el texto a mano.
     """
     security.verificar_csrf(request, csrf)
+    if con_media != "1":
+        media_tipo, media_ref = "", ""
+
     parte = mensajeria.guardar_parte(plantilla_id, orden, texto, media_tipo, media_ref)
+    destino = f"/mensajes?abierto={plantilla_id}&parte={orden}"
     if parte["media_ok"] is False:
-        return RedirectResponse(
-            url=f"/mensajes?abierto={plantilla_id}&error={quote(parte['media_error'])}", status_code=303
-        )
-    return RedirectResponse(url=f"/mensajes?abierto={plantilla_id}&aviso=Guardado", status_code=303)
+        return RedirectResponse(url=f"{destino}&error={quote(parte['media_error'])}", status_code=303)
+
+    aviso = "Guardado y adjunto comprobado" if parte["media_ref"] else "Guardado"
+    return RedirectResponse(url=f"{destino}&aviso={quote(aviso)}", status_code=303)
 
 
 @router.post("/mensajes/parte/{parte_id}/eliminar")
 def eliminar_parte(
-    request: Request, parte_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
+    request: Request,
+    parte_id: int,
+    plantilla_id: str = Form(""),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
 ):
+    """Borra un mensaje de la cadena y vuelve a la ventana de donde salió."""
     security.verificar_csrf(request, csrf)
     mensajeria.eliminar_parte(parte_id)
-    return RedirectResponse(url="/mensajes?aviso=Parte+eliminada", status_code=303)
+    volver = f"?abierto={plantilla_id}&" if plantilla_id.isdigit() else "?"
+    return RedirectResponse(url=f"/mensajes{volver}aviso=Mensaje+eliminado", status_code=303)
 
 
 @router.post("/mensajes/{plantilla_id}/revisar")
@@ -199,35 +177,206 @@ def revisar_media(
     return RedirectResponse(url=f"/mensajes?abierto={plantilla_id}&aviso=Adjuntos+revisados", status_code=303)
 
 
+# --- Palabras clave ----------------------------------------------------------
+#
+# Sección aparte de «Mensajes» a propósito. Se parecen (los dos son una cadena de
+# textos con adjunto), pero un mensaje lo mandas TÚ a quien elijas y una palabra
+# clave la dispara el CLIENTE escribiéndola, y arrastra el bloqueo de la
+# conversación y unos recordatorios a futuro. Mezcladas, no había forma de saber
+# cuál de las dos cosas estabas tocando.
+
+@router.get("/palabras-clave")
+def listar_palabras(request: Request, usuario=Depends(security.requiere_negocio)):
+    abierta = request.query_params.get("abierta", "")
+    pieza = request.query_params.get("pieza", "")
+    return render(
+        request,
+        "palabras_clave.html",
+        usuario,
+        palabras=palabras_clave.listar(),
+        abierta=int(abierta) if abierta.isdigit() else None,
+        pieza_abierta=int(pieza) if pieza.isdigit() else None,
+        max_minutos=palabras_clave.MAX_MINUTOS,
+    )
+
+
+@router.post("/palabras-clave")
+def crear_palabra(
+    request: Request,
+    palabra: str = Form(...),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    try:
+        creada = palabras_clave.crear(palabra, usuario["usuario"])
+    except ValueError as e:
+        return RedirectResponse(url=f"/palabras-clave?error={quote(str(e))}", status_code=303)
+    return RedirectResponse(url=f"/palabras-clave?abierta={creada['id']}", status_code=303)
+
+
+@router.post("/palabras-clave/{palabra_id}")
+def renombrar_palabra(
+    request: Request,
+    palabra_id: int,
+    palabra: str = Form(...),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    try:
+        palabras_clave.renombrar(palabra_id, palabra)
+    except ValueError as e:
+        return _volver_a_palabra(palabra_id, error=str(e))
+    return _volver_a_palabra(palabra_id, aviso="Palabra guardada")
+
+
+@router.post("/palabras-clave/{palabra_id}/activa")
+def alternar_palabra(
+    request: Request, palabra_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
+):
+    security.verificar_csrf(request, csrf)
+    fila = palabras_clave.alternar_activa(palabra_id)
+    estado = "activada" if (fila or {}).get("activa") else "desactivada; el bot deja de reconocerla"
+    return RedirectResponse(url=f"/palabras-clave?aviso={quote(f'Palabra {estado}')}", status_code=303)
+
+
+@router.post("/palabras-clave/{palabra_id}/eliminar")
+def eliminar_palabra(
+    request: Request, palabra_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
+):
+    security.verificar_csrf(request, csrf)
+    palabras_clave.eliminar(palabra_id)
+    return RedirectResponse(url="/palabras-clave?aviso=Palabra+clave+eliminada", status_code=303)
+
+
+@router.post("/palabras-clave/{palabra_id}/pieza")
+def agregar_pieza(
+    request: Request,
+    palabra_id: int,
+    tipo: str = Form(...),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    if tipo not in ("mensaje", "recordatorio"):
+        return _volver_a_palabra(palabra_id, error="Eso no es ni un mensaje ni un recordatorio.")
+    palabras_clave.agregar_pieza(palabra_id, tipo)
+    return _volver_a_palabra(palabra_id)
+
+
+@router.post("/palabras-clave/{palabra_id}/pieza/{pieza_id}")
+def guardar_pieza(
+    request: Request,
+    palabra_id: int,
+    pieza_id: int,
+    texto: str = Form(""),
+    con_media: str = Form(""),
+    media_tipo: str = Form(""),
+    media_ref: str = Form(""),
+    minutos: str = Form(""),
+    activo: str = Form(""),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    """Guarda una pieza y comprueba su adjunto en el momento.
+
+    `con_media` es el switch del adjunto y `activo` el del recordatorio: los dos
+    mandan sobre los campos que revelan, así que apagarlos no obliga además a
+    vaciar lo que había escrito.
+    """
+    security.verificar_csrf(request, csrf)
+    if con_media != "1":
+        media_tipo, media_ref = "", ""
+
+    try:
+        pieza = palabras_clave.guardar_pieza(
+            pieza_id,
+            texto=texto,
+            media_tipo=media_tipo,
+            media_ref=media_ref,
+            minutos=minutos.strip() or None,
+            activo=activo == "1",
+        )
+    except ValueError as e:
+        return _volver_a_palabra(palabra_id, error=str(e), pieza=pieza_id)
+
+    if pieza["media_ok"] is False:
+        return _volver_a_palabra(palabra_id, error=pieza["media_error"], pieza=pieza_id)
+    aviso = "Guardado y adjunto comprobado" if pieza["media_ref"] else "Guardado"
+    return _volver_a_palabra(palabra_id, aviso=aviso, pieza=pieza_id)
+
+
+@router.post("/palabras-clave/{palabra_id}/pieza/{pieza_id}/eliminar")
+def eliminar_pieza(
+    request: Request,
+    palabra_id: int,
+    pieza_id: int,
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    palabras_clave.eliminar_pieza(pieza_id)
+    return _volver_a_palabra(palabra_id, aviso="Eliminado")
+
+
+@router.post("/palabras-clave/{palabra_id}/revisar")
+def revisar_media_palabra(
+    request: Request, palabra_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
+):
+    security.verificar_csrf(request, csrf)
+    palabras_clave.revisar_media_de(palabra_id)
+    return _volver_a_palabra(palabra_id, aviso="Adjuntos revisados")
+
+
+def _volver_a_palabra(
+    palabra_id: int, aviso: str = "", error: str = "", pieza: int | None = None
+) -> RedirectResponse:
+    """Devuelve a la ventana de la que salió el formulario, no a la lista."""
+    destino = f"/palabras-clave?abierta={palabra_id}"
+    if pieza:
+        destino += f"&pieza={pieza}"
+    if aviso:
+        destino += f"&aviso={quote(aviso)}"
+    elif error:
+        destino += f"&error={quote(error)}"
+    return RedirectResponse(url=destino, status_code=303)
+
+
 # --- Base de conocimiento (la administra el NEGOCIO) -------------------------
 
 @router.post("/conocimiento")
 def crear_chunk(
     request: Request,
-    titulo: str = Form(""),
     contenido: str = Form(""),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
+    """Un chunk es solo texto: ni tema ni título (ver migración 014)."""
     security.verificar_csrf(request, csrf)
-    fila = trazabilidad.crear_chunk(titulo, contenido)
+    try:
+        fila = trazabilidad.crear_chunk(contenido)
+    except ValueError as e:
+        return RedirectResponse(url=f"/conocimiento?error={quote(str(e))}", status_code=303)
     _pedir_reindexado(fila["id"])
-    return RedirectResponse(url="/conocimiento?aviso=Contenido agregado", status_code=303)
+    return RedirectResponse(url="/conocimiento?aviso=Chunk agregado y enviado a vectorizar", status_code=303)
 
 
 @router.post("/conocimiento/{chunk_id}")
 def actualizar_chunk(
     request: Request,
     chunk_id: int,
-    titulo: str = Form(""),
     contenido: str = Form(""),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
     security.verificar_csrf(request, csrf)
-    trazabilidad.actualizar_chunk(chunk_id, titulo, contenido)
+    try:
+        trazabilidad.actualizar_chunk(chunk_id, contenido)
+    except ValueError as e:
+        return RedirectResponse(url=f"/conocimiento?error={quote(str(e))}", status_code=303)
     _pedir_reindexado(chunk_id)
-    return RedirectResponse(url="/conocimiento?aviso=Contenido actualizado", status_code=303)
+    return RedirectResponse(url="/conocimiento?aviso=Chunk actualizado y vuelto a vectorizar", status_code=303)
 
 
 @router.post("/conocimiento/{chunk_id}/activo")
@@ -257,13 +406,4 @@ def _pedir_reindexado(chunk_id: int) -> None:
     actualiza igual en la siguiente sincronización perezosa
     (RAG_SYNC_TTL_SECONDS). Por eso el fallo solo se registra y no se propaga.
     """
-    if not settings.INTERNAL_API_TOKEN or not settings.BOT_WEBHOOK_URL:
-        return
-    try:
-        httpx.post(
-            f"{settings.BOT_WEBHOOK_URL.rstrip('/')}/internal/rag/sync/{chunk_id}",
-            params={"token": settings.INTERNAL_API_TOKEN},
-            timeout=5.0,
-        )
-    except Exception as e:
-        print(f"No se pudo pedir el reindexado inmediato del chunk {chunk_id}: {e}")
+    bot_interno.reindexar_chunk(chunk_id)

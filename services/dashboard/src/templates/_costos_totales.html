@@ -26,6 +26,17 @@
     <div class="valor">{{ totales.mensajes }}</div>
     <div class="nota">{{ totales.eventos }} eventos</div>
   </div>
+  {# El prompt del sistema (>2900 tokens) se repite en cada turno y el proveedor
+     cobra al 10% lo ya visto. Si este número se desploma, el prefijo dejó de
+     ser estable y el gasto se triplica sin que nada más falle. #}
+  <div class="cifra">
+    <div class="etiqueta">Prompt reutilizado (caché)</div>
+    <div class="valor">{{ cache.porcentaje }}%</div>
+    <div class="nota">
+      {{ cache.tokens_cacheados }} de {{ cache.tokens_entrada }} tokens de entrada
+      {%- if cache.tokens_entrada and cache.porcentaje < 40 %} · revisar que el prompt no cambie entre turnos{% endif %}
+    </div>
+  </div>
 </div>
 
 <h2>Por categoría</h2>
@@ -33,16 +44,27 @@
   <table>
     <thead>
       <tr>
-        <th>Categoría</th><th class="num">Eventos</th><th class="num">Mensajes</th>
+        <th>Categoría</th><th class="num">Eventos</th><th>Medida</th>
         <th class="num">Costo real</th><th class="num">Facturado</th><th class="num">Margen</th>
       </tr>
     </thead>
     <tbody>
+      {# Cada categoría se mide en una unidad distinta —tokens, segundos de
+         audio, mensajes entregados—, así que la columna se adapta en vez de
+         forzar todo a "mensajes". #}
       {% for c in categorias %}
       <tr>
-        <td>{{ 'Turnos con LLM' if c.categoria == 'llm' else 'Mensajes por código' }}</td>
+        <td>{{ c.etiqueta }}</td>
         <td class="num">{{ c.eventos }}</td>
-        <td class="num">{{ c.mensajes }}</td>
+        <td>
+          {%- if c.categoria == 'audio' -%}
+            {{ c.segundos_audio }} s ({{ c.minutos_audio }} min)
+          {%- elif c.categoria == 'llm' -%}
+            {{ c.tokens_entrada }} in / {{ c.tokens_cacheados }} cach. / {{ c.tokens_salida }} out
+          {%- else -%}
+            {{ c.mensajes }} mensajes
+          {%- endif -%}
+        </td>
         <td class="num">{{ c.real_microusd | usd }}</td>
         <td class="num">{{ c.cliente_microusd | usd }}</td>
         <td class="num">{{ (c.cliente_microusd - c.real_microusd) | usd }}</td>

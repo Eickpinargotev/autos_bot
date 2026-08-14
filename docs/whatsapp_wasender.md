@@ -35,11 +35,109 @@ está en la red `easypanel` y necesita su propio dominio, igual que el dashboard
 En el perfil del cliente (`/admin/negocios/{id}`) → «Nuevo cliente». Se le genera su token y su URL. Cada uno
 enlaza su propio número en WasenderAPI y sus eventos entran por su propia URL.
 
-> Estado actual: la **salida** de mensajes sigue usando la `WASENDER_API_KEY`
-> global del entorno. La columna `wasender_api_key` de la tabla existe para
-> cuando haya más de un número que responder, pero todavía no está cableada al
-> envío. Con un solo cliente no cambia nada; con el segundo hay que enrutar el
-> envío por cliente antes de conectarlo.
+### Qué hace el bot con cada tipo de mensaje
+
+El canal sigue llamándose **WhatsApp**; WasenderAPI es el proveedor que lo
+implementa (y por eso vive en `infrastructure/channels/`, detrás de
+`ChannelSender`). Cambiar de proveedor no debería tocar nada de lo de abajo,
+que es del dominio y vale igual para Telegram.
+
+| Llega | Qué pasa | ¿LLM? | ¿Historial? | ¿Se cobra? |
+| --- | --- | --- | --- | --- |
+| Texto | Al agente | Sí | Sí | Sí |
+| Texto con enlace | Acuse `MEDIA_ENLACE` | No | Sí | No |
+| Imagen | Acuse `MEDIA_IMAGEN` | No | Sí (`media_avisada`) | No |
+| Documento | Acuse `MEDIA_DOCUMENTO` | No | Sí (`media_avisada`) | No |
+| Video | Acuse `MEDIA_VIDEO` | No | Sí (`media_avisada`) | No |
+| Sticker | **No se responde** | No | Sí (`sticker_ignorado`) | No |
+| Audio | Se transcribe y sigue como texto | Sí | Sí (`audio_transcrito`) | Sí, categoría `audio` |
+
+Los acuses **no se facturan**: no pasan por el modelo ni entregan contenido del
+negocio. Quien insiste con varios adjuntos seguidos recibe `MEDIA_INSISTE`, que
+pide ayuda humana en vez de repetir el mismo aviso.
+
+El **sticker no se responde**: es un gesto, no una consulta, y en WhatsApp cada
+envío consume la cuota de ritmo del plan — contestarle deja sin respuesta al
+mensaje que sí importaba. Sí queda en el historial, para que quien lea el chat
+en el panel vea lo que pasó de verdad.
+
+### Notas de voz
+
+Se transcriben y entran al flujo como si el cliente lo hubiera escrito. **El
+audio no se guarda en ninguna parte**: ni en disco, ni en la base, ni en el
+historial. Solo sobrevive el texto.
+
+El recorrido tiene tres tramos y ninguno es evitable: WhatsApp entrega la media
+cifrada de extremo a extremo, así que primero hay que pedirle a WasenderAPI que
+la descifre (`POST /api/decrypt-media`, devuelve una URL válida una hora), luego
+descargarla a memoria y por último transcribirla con
+`OPENAI_MODEL_TRANSCRIPCION`. Nada de eso corre en el webhook —tarda segundos y
+WasenderAPI reintentaría el evento creyendo que se cayó—: lo hace la tarea
+`transcribir_nota_de_voz` en el worker.
+
+La duración se lee del propio evento (`audioMessage.seconds`) y se factura **por
+segundo**, no por minuto entero: una nota de 8 segundos cuesta 800 micro-USD, no
+6.000. Si no se puede transcribir, se cobra igual lo que el proveedor procesó y
+el cliente recibe el acuse `MEDIA_AUDIO_ILEGIBLE`.
+
+La etiqueta que el panel muestra ("🎤 Audio transcrito") viaja en `event_type`,
+nunca en el texto: **el LLM recibe texto plano**, igual que un mensaje escrito.
+
+Los **enlaces** se reconocen por estructura (`http(s)://`, `www.`, dominio
+suelto), lo cual no contradice la regla de no usar regex para interpretar
+lenguaje natural: reconocer una URL es lo mismo que reconocer `Imagen=` o `/d`.
+Los correos quedan excluidos a propósito. Hoy responde el acuse **aunque el
+mensaje traiga además una pregunta**; es decisión del negocio y la condición a
+cambiar está señalada en `conversation_orchestrator._handle_text`.
+
+### Límite de ritmo del plan
+
+WasenderAPI limita los envíos según el plan (el de prueba: **1 mensaje por
+minuto**) y responde `429` con `retry_after`. El envío espera lo que indica el
+proveedor y reintenta una vez; la espera está acotada para caber dentro del
+candado por conversación (120 s). Si el plan no da para el ritmo de la
+conversación, la solución es subir de plan, no alargar la espera.
+
+### LID: el `remoteJid` no siempre es un teléfono
+
+Según el `addressingMode` de la sesión, WhatsApp manda el **LID**
+(`258540019138808@lid`), un identificador interno. Reconoce al cliente, pero no
+sirve como destino: enviar ahí devuelve `422 The provided JID does not exist on
+WhatsApp`, ni sirve para el enlace `wa.me`, ni le dice nada a quien lee el panel.
+
+Se resuelve en dos capas:
+
+1. **Al entrar**, el teléfono sale de `key.cleanedSenderPn` / `key.senderPn`, que
+   es lo que indica la documentación de WasenderAPI. Solo para mensajes
+   entrantes: en un `fromMe` el "sender" es el negocio, no el cliente.
+2. **Al enviar**, un destino que sea un LID se traduce con la libreta de la
+   sesión (`GET /api/contacts`, cacheada 10 min). Es la red de seguridad para
+   las conversaciones que quedaron guardadas con el LID como identificador.
+
+Si la libreta falla, el destino se manda tal cual: es preferible el error del
+proveedor a arriesgarse a escribirle a otra persona.
+
+### Con qué credencial responde cada negocio
+
+La **salida** usa la `wasender_api_key` del negocio dueño de la conversación. No
+hay ninguna clave global en el entorno: se administra en el perfil del cliente y
+un negocio nuevo queda operativo sin tocar el `.env` ni redesplegar.
+
+Para saber cuál toca hay un dato que resolver. El mensaje entra por la URL de un
+negocio (ahí se sabe de quién es), pero la respuesta sale después, desde el
+worker de Celery, que solo recibe canal y número. El puente es la tabla
+`conversacion_negocio`: al entrar el mensaje se anota la pertenencia, y al
+responder se lee de ahí. El orden de resolución es:
+
+1. El negocio anotado para esa conversación. Es el caso normal.
+2. Si no hay anotación y existe **un solo** negocio activo con clave, ese. Cubre
+   lo que no nace de un mensaje entrante (un envío manual a alguien que nunca
+   escribió) y las conversaciones anteriores a la migración 009.
+3. Con dos o más negocios y sin anotación **no se envía**: se avisa de que falta
+   la credencial. Adivinar sería escribirle a un cliente desde el número de otro
+   negocio, que es peor que no responder.
+
+Rotar la clave desde el panel surte efecto en ≤30 s (lo que dura la caché).
 
 ---
 

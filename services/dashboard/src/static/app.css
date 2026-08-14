@@ -35,6 +35,14 @@
   --radio-sm: 10px;
   --sombra: 0 1px 2px rgba(9, 9, 11, .04);
   --lateral-ancho: 248px;
+
+  /* El ancho por debajo del cual el lateral deja de ocupar sitio y pasa a
+     abrirse sobre el contenido. Está DECLARADO aquí porque el JS también lo
+     necesita (para saber si el botón del menú pliega o abre) y lo lee de esta
+     variable: antes el número estaba escrito en los dos sitios y cambiar uno
+     dejaba el otro atrás. Ojo: las `@media` no pueden usar variables, así que
+     el 900px de más abajo sigue literal — este es el que manda para el JS. */
+  --bp-lateral: 900px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -114,10 +122,26 @@ a:hover { text-decoration-color: currentColor; }
 }
 
 .lateral-cabecera .marca {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   font-weight: 600;
   font-size: 15.5px;
   letter-spacing: -.015em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* El proyecto en el que estás, debajo de la marca de la plataforma. Va en
+   pequeño a propósito: la marca no cambia y el proyecto sí, pero lo que manda
+   en la jerarquía visual sigue siendo dónde estás, no cómo se llama el
+   producto. */
+.lateral-cabecera .marca-proyecto {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--suave);
+  letter-spacing: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -164,6 +188,23 @@ a:hover { text-decoration-color: currentColor; }
 /* La página activa no se marca con un color de marca, sino con una superficie
    algo más clara y el texto en blanco: es lo que hace el diseño de referencia. */
 .lateral-nav a.activo { background: var(--elevado); color: var(--texto); font-weight: 550; }
+
+/* Cuántas cosas esperan en esa bandeja. Se actualiza sola, así que sirve para
+   enterarte de que llegó un reporte estando en otra pantalla — que era lo que
+   obligaba a ir mirando pestaña por pestaña. */
+.lateral-nav .pendientes {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--alerta);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
 .ico { width: 18px; height: 18px; flex: 0 0 auto; opacity: .9; }
 
@@ -233,7 +274,10 @@ a:hover { text-decoration-color: currentColor; }
    el menú de cuenta aparecería abierto al cargar la página. */
 .menu[hidden] { display: none; }
 
-.menu a, .menu-salir {
+/* Las entradas del menú son enlaces o botones según lo que hagan (abrir una
+   página o abrir una ventana), pero tienen que verse iguales: quien lo usa no
+   distingue una cosa de otra ni tiene por qué. */
+.menu a, .menu button {
   display: block;
   width: 100%;
   text-align: left;
@@ -248,7 +292,7 @@ a:hover { text-decoration-color: currentColor; }
   cursor: pointer;
 }
 
-.menu a:hover, .menu-salir:hover { background: var(--elevado); }
+.menu a:hover, .menu button:hover { background: var(--elevado); }
 .menu form { margin: 0; }
 .menu-salir { color: var(--error); }
 
@@ -312,6 +356,20 @@ h2 {
 
 .sub { color: var(--suave); margin: 0 0 24px; font-size: 14.5px; max-width: 80ch; }
 
+/* Título a la izquierda, acciones de la página arriba a la derecha. Las
+   acciones van AQUÍ y no debajo del contenido: son de la página entera, y
+   colgando bajo las cifras parecían pertenecer a la última tarjeta. */
+.titulo-con-acciones {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.acciones-cabecera { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--borde);
@@ -346,9 +404,278 @@ h2 {
 .cifra .nota { font-size: 13px; color: var(--tenue); margin-top: 6px; }
 .cifra.destacada { border-color: color-mix(in srgb, var(--texto) 35%, transparent); }
 
+/* --- Tarjetas (base de conocimiento) --- */
+/* Cada entrada se LEE de un vistazo; editarla es una acción aparte. Antes cada
+   una era un formulario abierto con su «Guardar» aunque no hubieras tocado
+   nada, y la página era un muro de campos. */
+
+/* Los chunks se apilan a lo ANCHO, uno por fila. Estuvieron en rejilla de
+   tarjetas cuadradas y era el formato equivocado: dentro hay un párrafo, y en
+   una columna de 320px un párrafo sale en renglones de cuatro palabras que hay
+   que abrir para saber de qué van. A lo ancho se leen de un vistazo. */
+.chunks { display: flex; flex-direction: column; gap: 10px; }
+
+.chunk {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 14px 16px 14px 14px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+
+/* La banda entera se pulsa para editar, así que tiene que parecer pulsable. */
+.chunk:hover { border-color: var(--suave); background: var(--elevado); }
+.chunk:focus-visible { outline: 2px solid var(--accion); outline-offset: 2px; }
+
+/* Desactivado: sigue ahí, pero se ve que no está en juego. */
+.chunk.apagada { opacity: .55; }
+
+.chunk-estado { margin: 0; flex: 0 0 auto; }
+
+.chunk-texto {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--suave);
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  /* Tres líneas y corta: la banda es un vistazo y el texto entero está al
+     abrirla. Sin esto, un chunk de 1300 caracteres ocupa media pantalla y la
+     lista deja de ser una lista. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.chunk-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Cuántos caracteres lleva. Es el dato que decide si hay que partirlo. */
+.chunk-largo { font-size: 11.5px; color: var(--tenue); font-variant-numeric: tabular-nums; }
+.chunk-largo.alerta { color: var(--alerta); font-weight: 600; }
+
+.visto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--borde);
+  border-radius: 50%;
+  background: none;
+  color: transparent;
+  cursor: pointer;
+}
+.visto svg { width: 14px; height: 14px; }
+.visto.si { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.visto:hover { border-color: var(--suave); color: var(--suave); }
+.visto.si:hover { color: var(--ok); }
+
+/* --- Mensajes: la lista de claves --- */
+/* Mismo formato que los chunks (bandas a lo ancho) y por el mismo motivo: la
+   lista se lee de un vistazo y no se despliega nada dentro. Cada mensaje era un
+   <details> que al abrirse volcaba en mitad de la lista todas sus partes con sus
+   formularios; ahora eso vive en su ventana. */
+.msgs { display: flex; flex-direction: column; gap: 8px; }
+
+.msg {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-left-width: 3px;
+  border-radius: var(--radio);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.msg:hover { background: var(--elevado); }
+.msg:focus-visible { outline: 2px solid var(--accion); outline-offset: 2px; }
+
+/* El borde de la izquierda dice si se puede enviar tal cual. Verde = todo
+   comprobado (o es solo texto, que no hay nada que comprobar). */
+.msg.listo { border-left-color: var(--ok); }
+.msg.roto { border-left-color: var(--error); }
+
+.msg .clave { flex: 0 0 auto; }
+
+.msg-resumen {
+  flex: 1;
+  min-width: 0;
+  color: var(--suave);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Los mensajes de una cadena, como botoncitos --- */
+.piezas { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.pieza {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pieza.listo { border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+.pieza.roto { border-color: var(--error); }
+
+.pieza-abrir,
+.pieza-quitar {
+  border: 0;
+  background: none;
+  color: var(--texto);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 7px 11px;
+}
+.pieza-abrir:hover { background: var(--elevado); }
+
+/* La papelera del botoncito, discreta hasta que la buscas: borrar un mensaje no
+   puede ser más fácil que abrirlo. */
+.pieza-quitar {
+  padding: 7px 9px;
+  color: var(--tenue);
+  border-left: 1px solid var(--borde);
+  line-height: 1;
+}
+.pieza-quitar:hover { background: var(--error); color: #fff; }
+
+.pieza-clip { color: var(--suave); font-size: 10px; margin-left: 4px; }
+
+/* --- Switch --- */
+/* Un sí/no que además ENSEÑA o ESCONDE lo que depende de él: con el switch
+   apagado, los campos del adjunto ni se ven. La mayoría de mensajes son solo
+   texto y no tienen por qué mostrar un campo que no van a usar. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  user-select: none;
+}
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+.switch-pista {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--borde);
+  transition: background .15s;
+}
+.switch-bola {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--suave);
+  transition: transform .15s, background .15s;
+}
+.switch input:checked + .switch-pista { background: var(--accion); }
+.switch input:checked + .switch-pista .switch-bola {
+  transform: translateX(16px);
+  background: var(--accion-texto);
+}
+.switch input:focus-visible + .switch-pista { outline: 2px solid var(--accion); outline-offset: 2px; }
+
+/* --- Sesiones de envío --- */
+.sesiones { display: flex; flex-direction: column; gap: 10px; }
+
+.sesion {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 14px 16px;
+}
+
+/* La que está mandando ahora mismo se distingue del histórico: es lo que se
+   viene a mirar. */
+.sesion.en-curso { border-color: color-mix(in srgb, var(--accion) 45%, transparent); }
+.sesion.cancelada { opacity: .6; }
+
+.sesion-cabecera,
+.sesion-pie { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sesion-pie { margin-top: 10px; }
+.sesion-pie form { margin: 0; }
+
+.barra {
+  height: 6px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: var(--elevado);
+  overflow: hidden;
+}
+
+.barra-relleno {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accion);
+  /* La barra la repinta el servidor cada 5 s; la transición evita que pegue
+     saltos y parezca que se ha reiniciado. */
+  transition: width .4s ease;
+}
+
+.sesion.cancelada .barra-relleno { background: var(--alerta); }
+
+/* Una cita del contenido dentro de una confirmación: hay que reconocer QUÉ se
+   va a borrar, pero sin que el párrafo compita con la pregunta. */
+.cita {
+  border-left: 2px solid var(--borde);
+  padding-left: 10px;
+  font-style: italic;
+}
+
+/* Una fila ya resuelta: sigue a la vista hasta que caduque, pero apagada. */
+.fila-atendida { opacity: .55; }
+
+/* Cuántos caracteres llevas escritos, bajo el campo. Se pinta con JS. */
+.contador { font-size: 11.5px; color: var(--tenue); text-align: right; margin: 4px 0 0; }
+.contador.pasado { color: var(--error); font-weight: 600; }
+
 /* --- Tablas --- */
 
-.tabla-scroll { overflow-x: auto; }
+/* Una tabla ancha se desplaza de lado en vez de apilarse, que en una tabla de
+   diez columnas es más legible que una tarjeta por fila.
+   Lo que faltaba era AVISAR de que sigue: en pantalla estrecha la última
+   columna quedaba cortada al ras del borde y parecía el final de la tabla. La
+   sombra aparece sola en el lado por el que queda contenido y desaparece al
+   llegar al extremo — con dos degradados fijos y dos que se desplazan con el
+   contenido (`background-attachment: local`), sin una línea de JS. */
+.tabla-scroll {
+  overflow-x: auto;
+  background-image:
+    linear-gradient(to right, var(--panel), rgba(0, 0, 0, 0)),
+    linear-gradient(to left,  var(--panel), rgba(0, 0, 0, 0)),
+    linear-gradient(to right, rgba(9, 9, 11, .10), rgba(0, 0, 0, 0)),
+    linear-gradient(to left,  rgba(9, 9, 11, .10), rgba(0, 0, 0, 0));
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 28px 100%, 28px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
 .panel.tabla-scroll { padding: 0; }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -432,10 +759,24 @@ input[type="checkbox"], input[type="radio"] {
   vertical-align: -2px;
 }
 
-form.linea { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+/* Una fila de cosas: campos con su botón, o acciones alineadas a un lado.
+   La regla genérica hacía falta: solo estaba definida para `form.linea`, así que
+   un `<div class="linea">` no era flex y su `justify-content:flex-end` no hacía
+   nada — los botones que debían ir a la derecha se quedaban a la izquierda y el
+   de «Crear cuenta» caía debajo de su campo. */
+.linea { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+form.linea { align-items: flex-end; }
 form.linea > * { flex: 1 1 180px; }
 form.linea button { flex: 0 0 auto; }
 .campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 18px; }
+
+/* Cualquier `display` explícito gana al atributo `hidden`, que solo vale como
+   `display: none` por defecto del navegador. Ya había mordido una vez con el
+   menú de la cuenta (`.menu[hidden]`) y volvió a morder con los campos del
+   adjunto: el switch se apagaba y los campos seguían ahí. Se arregla de una vez
+   para todo el panel en vez de recordarlo clase por clase. */
+[hidden] { display: none !important; }
 
 /* --- Estados y avisos --- */
 
@@ -468,15 +809,7 @@ form.linea button { flex: 0 0 auto; }
 .mensaje.aviso { border-color: color-mix(in srgb, var(--ok) 35%, var(--borde)); }
 .mensaje.error { border-color: color-mix(in srgb, var(--error) 40%, var(--borde)); color: var(--error); }
 
-.avisos { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--alerta); }
-
 .vacio { color: var(--tenue); padding: 46px 0; text-align: center; font-size: 14.5px; }
-
-/* --- Edición en línea --- */
-
-.celda textarea { min-height: 64px; font-size: 13.5px; padding: 8px 10px; }
-.celda .guardado { font-size: 11px; color: var(--ok); visibility: hidden; }
-.celda .guardado.visible { visibility: visible; }
 
 /* --- Gráfica de barras (sin librerías) --- */
 
@@ -515,6 +848,11 @@ form.linea button { flex: 0 0 auto; }
 
 /* Hechos del flujo que no son mensajes de nadie (entró al grupo, etc.). */
 .nota-sistema { align-self: center; font-size: 12px; color: var(--tenue); background: var(--elevado); padding: 5px 12px; border-radius: 999px; }
+
+/* De dónde salió el texto de una burbuja: una nota de voz transcrita no es lo
+   mismo que un mensaje escrito, y quien lee el chat tiene que poder notarlo de
+   un vistazo sin que la etiqueta compita con el contenido. */
+.etiqueta-origen { font-size: 12px; color: var(--tenue); margin-bottom: 4px; font-style: italic; }
 
 .mas-antiguos { align-self: center; }
 
@@ -681,6 +1019,103 @@ dialog.flotante .cabecera .cerrar {
 dialog.flotante .cuerpo { padding: 18px 20px; overflow: auto; max-height: calc(80vh - 62px); }
 dialog.flotante.ancha { width: min(900px, calc(100vw - 32px)); }
 
+/* --- Ventana con categorías a la izquierda --- */
+/* La configuración de un cliente son cuatro asuntos distintos (sus datos, su
+   WhatsApp, su acceso, Telegram). En una sola columna era un formulario
+   interminable donde no se encontraba nada, y repartidos en cuatro botones
+   sueltos obligaba a saltar entre ventanas para configurar un solo servicio. */
+.dialogo-secciones { display: grid; grid-template-columns: 190px 1fr; min-height: 0; }
+
+.dialogo-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  border-right: 1px solid var(--borde);
+  overflow-y: auto;
+  max-height: calc(80vh - 62px);
+}
+
+.dialogo-nav button {
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radio-sm);
+  padding: 9px 11px;
+  color: var(--suave);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dialogo-nav button:hover { background: var(--elevado); color: var(--texto); }
+.dialogo-nav button.activo { background: var(--elevado); color: var(--texto); font-weight: 550; }
+
+.dialogo-cuerpo { padding: 18px 22px; overflow-y: auto; max-height: calc(80vh - 62px); }
+.dialogo-cuerpo h3 { font-size: 14.5px; font-weight: 650; margin: 22px 0 8px; }
+.dialogo-cuerpo h3:first-child { margin-top: 0; }
+
+/* Corte entre dos cosas distintas dentro del mismo panel. */
+.separador { border: 0; border-top: 1px solid var(--borde); margin: 22px 0; }
+
+@media (max-width: 720px) {
+  /* En pantalla estrecha las categorías pasan a una fila arriba: dos columnas
+     dejarían el formulario en una franja de 100 px. */
+  .dialogo-secciones { grid-template-columns: 1fr; }
+  .dialogo-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--borde);
+    max-height: none;
+  }
+  .dialogo-nav button { white-space: nowrap; }
+}
+
+/* --- Visor de conversaciones (dos columnas dentro de la ventana flotante) ---
+   La ventana se ensancha más que las demás porque aquí hay que leer un chat, no
+   rellenar un formulario. Cada columna hace su propio scroll: si lo hiciera el
+   contenedor, la lista de la izquierda se iría de la vista al bajar por el
+   historial de la derecha. */
+dialog.flotante.conversaciones { width: min(1100px, calc(100vw - 32px)); max-height: min(88vh, 900px); }
+.conv-doble { display: grid; grid-template-columns: 300px 1fr; min-height: 0; height: min(78vh, 780px); }
+.conv-lista { border-right: 1px solid var(--borde); overflow-y: auto; padding: 12px; }
+.conv-hilo { overflow-y: auto; padding: 12px 16px; }
+.conv-hilo .panel { border: 0; padding: 0; background: none; }
+
+.buscador-conv { margin-bottom: 10px; }
+.buscador-conv input { width: 100%; }
+
+.lista-conv { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.conv-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radio-sm);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.conv-item:hover { background: var(--elevado); }
+.conv-item.activo { background: var(--elevado); box-shadow: inset 2px 0 0 var(--acento); }
+.conv-id { font-weight: 600; font-size: 14px; }
+.conv-meta { font-size: 12px; color: var(--tenue); display: flex; align-items: center; gap: 6px; }
+.conv-nombre { font-size: 12px; color: var(--suave); }
+
+/* En móvil no caben dos columnas: se apilan y cada una se queda con su alto.
+   Las alturas van en `dvh` y no en `vh`: con `vh` el navegador cuenta la
+   pantalla SIN su barra de direcciones, así que el chat quedaba cortado por
+   abajo hasta que uno se ponía a hacer scroll para esconderla. */
+@media (max-width: 720px) {
+  .conv-doble { grid-template-columns: 1fr; height: auto; }
+  .conv-lista { border-right: 0; border-bottom: 1px solid var(--borde); max-height: 40dvh; }
+  .conv-hilo { max-height: 45dvh; }
+}
+
 /* --- Acciones discretas --- */
 /* Lo que no debería ser la primera opción (eliminar, regenerar) se dibuja como
    un icono al final de la fila: está si se busca, y no compite con lo demás. */
@@ -732,21 +1167,83 @@ dialog.flotante.ancha { width: min(900px, calc(100vw - 32px)); }
 .plegable .clave { font-weight: 600; font-size: 14.5px; }
 .plegable-cuerpo { padding: 4px 18px 18px; border-top: 1px solid var(--borde-suave); }
 
-.parte {
-  position: relative;
-  padding: 14px;
-  margin-top: 12px;
+/* Los mensajes de una cadena: se leen en fila y se editan en su ventana. Antes
+   cada uno era un formulario abierto y había que bajar hasta el fondo para ver
+   cuántos había. */
+.lista-partes { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+.parte-fila {
+  padding: 12px 14px;
   border: 1px solid var(--borde);
   border-radius: var(--radio-sm);
 }
-.parte textarea { width: 100%; }
-/* El botón de quitar la parte se queda arriba a la derecha, fuera del flujo:
-   está donde se espera y no compite con «Guardar parte». */
-.parte .quitar-parte { position: absolute; top: 8px; right: 8px; margin: 0; }
+
+.parte-cabecera { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.parte-numero { font-size: 13px; font-weight: 600; }
+
+.parte-texto {
+  margin: 0;
+  color: var(--suave);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .lista-problemas {
   margin: 0 0 12px;
   padding-left: 18px;
   color: var(--error);
   font-size: 13.5px;
+}
+
+/* --- Pantalla pequeña de verdad (teléfono) ----------------------------------
+   El panel se usa sobre todo en escritorio, así que aquí no se rehace el
+   diseño: se arregla lo que se ROMPE por debajo de los 600px. Las tablas
+   siguen desplazándose de lado (ver `.tabla-scroll`), que para diez columnas
+   se lee mejor que una tarjeta por fila. */
+
+@media (max-width: 600px) {
+  /* Una ventana flotante con márgenes de 16px y tope de alto al 80% dejaba el
+     contenido en una columna de dedo y medio, con el formulario cortado y sin
+     forma de llegar al botón de guardar. En este ancho ocupa la pantalla. */
+  dialog.flotante,
+  dialog.flotante.ancha,
+  dialog.flotante.conversaciones {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 100dvh;
+    height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  dialog.flotante .cuerpo { max-height: calc(100dvh - 62px); }
+
+  /* La cabecera de la ventana se queda a la vista: es donde está la ✕, y en un
+     formulario largo había que subir hasta arriba del todo para cerrarla. */
+  dialog.flotante .cabecera {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--panel);
+  }
+
+  /* Título y acciones dejan de pelearse por el ancho: el botón se iba a una
+     segunda línea pegado al borde derecho, lejos de lo que titula. */
+  .titulo-con-acciones { flex-direction: column; align-items: stretch; gap: 10px; }
+  .acciones-cabecera { justify-content: flex-start; }
+
+  /* Con `minmax(220px)` cabía UNA sola tarjeta por fila y cada cifra ocupaba
+     una pantalla entera: había que hacer scroll para ver cuatro números. */
+  .cifras,
+  .campos { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .fichas { grid-template-columns: 1fr; }
+
+  .superior { flex-wrap: wrap; row-gap: 6px; }
+  main { padding: 18px 12px 56px; }
+  .burbuja { max-width: 94%; }
 }

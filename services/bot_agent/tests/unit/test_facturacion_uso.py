@@ -121,6 +121,52 @@ class IntegracionConSeguimientoTests(unittest.TestCase):
         self.assertEqual(kwargs["origen"], "rag")
         self.assertEqual(kwargs["tokens_cacheados"], 200)
 
+    def test_cada_modelo_se_cobra_a_su_propio_precio(self):
+        """Desde que hay un modelo por tarea, un precio único falsea la factura.
+
+        El supervisor cuesta 10x lo que el auxiliar: cobrar todo al mismo precio
+        infla lo barato y regala lo caro, y el cliente paga la diferencia.
+        """
+        from src.infrastructure.repositories.precios_repository import PrecioModelo
+
+        caro = PrecioModelo(entrada_usd_1m=2.0, cacheado_usd_1m=0.20, salida_usd_1m=12.0)
+        barato = PrecioModelo(entrada_usd_1m=0.20, cacheado_usd_1m=0.02, salida_usd_1m=1.25)
+
+        with patch.object(svc.precios_repository, "precio_de", return_value=caro):
+            costo_supervisor = svc.costo_microusd(1000, 0, 100, "gpt-5.6-terra")
+        with patch.object(svc.precios_repository, "precio_de", return_value=barato):
+            costo_auxiliar = svc.costo_microusd(1000, 0, 100, "gpt-5.4-nano")
+
+        # 1000 * 2.00/1M + 100 * 12.00/1M = 3200 micro-USD
+        self.assertEqual(costo_supervisor, 3200)
+        # 1000 * 0.20/1M + 100 * 1.25/1M = 325 micro-USD
+        self.assertEqual(costo_auxiliar, 325)
+
+    def test_el_modelo_que_atendio_llega_al_libro_mayor(self):
+        """Sin esto, el desglose por modelo del panel sería inventado."""
+        with patch.object(svc.redis_client, "pipeline", return_value=MagicMock()), patch.object(
+            svc.billing_repository, "registrar_evento_llm"
+        ) as evento_mock:
+            svc.registrar_uso_llm(
+                "5061", Channel.WHATSAPP, _usage(10, 0, 5),
+                origen="agente", modelo="gpt-5.6-terra",
+            )
+
+        self.assertEqual(evento_mock.call_args.kwargs["modelo"], "gpt-5.6-terra")
+
+    def test_el_audio_se_cobra_por_segundo_y_no_por_minuto_entero(self):
+        """Una nota de voz de 8 segundos no puede facturarse como un minuto."""
+        from src.infrastructure.repositories.precios_repository import PrecioModelo
+
+        precio = PrecioModelo(audio_usd_minuto=0.006)
+        with patch.object(svc.precios_repository, "precio_de", return_value=precio):
+            ocho_segundos = svc.costo_audio_microusd(8, "gpt-4o-transcribe")
+            un_minuto = svc.costo_audio_microusd(60, "gpt-4o-transcribe")
+
+        self.assertEqual(un_minuto, 6000)          # 0.006 USD = 6000 micro-USD
+        self.assertEqual(ocho_segundos, 800)       # 8/60 de eso, no el minuto entero
+        self.assertLess(ocho_segundos, un_minuto)
+
     def test_sin_usage_no_se_registra_consumo(self):
         with patch.object(svc.billing_repository, "registrar_evento_llm") as evento_mock:
             svc.registrar_uso_llm("5061", Channel.WHATSAPP, None)

@@ -1,12 +1,19 @@
-"""Resolución del negocio dueño de un webhook a partir del token de la URL.
+"""El negocio dueño de un webhook, y la credencial con la que ese negocio responde.
 
 Cada cliente (negocio) tiene su propia URL `/webhooks/wasender/<token>`. El
 token identifica Y autentica: no hay una segunda credencial que comparar.
 
+Aquí vive también el otro extremo del recorrido: con qué **API key** se contesta.
+Es por negocio y sale de la base (`clientes_whatsapp.wasender_api_key`), no del
+entorno, porque cada negocio enlaza su propio número en WasenderAPI y se
+administra desde el panel. La entrada sabe de qué negocio es el mensaje; la
+salida ocurre después, en el worker, que solo conoce canal y número. El puente
+entre los dos es `conversacion_negocio` (ver migración 009).
+
 Se cachea en memoria unos segundos porque esto corre en CADA evento entrante
 (mensajes, recibos, cambios de grupo) y sería una consulta a Postgres por
-evento. El TTL es corto a propósito: revocar un token desde el panel tiene que
-surtir efecto sin reiniciar el webhook.
+evento. El TTL es corto a propósito: revocar un token o cambiar una clave desde
+el panel tiene que surtir efecto sin reiniciar nada.
 
 El contador de eventos se actualiza fuera del camino de la respuesta y nunca
 propaga excepciones: es diagnóstico, no puede tumbar la atención de un cliente.
@@ -16,17 +23,19 @@ import hmac
 import time
 from typing import Any
 
-from src.infrastructure.repositories.postgres_conn import consultar_uno, ejecutar
+from src.infrastructure.repositories.postgres_conn import consultar, consultar_uno, ejecutar
 
 # Cuánto se recuerda la resolución de un token (y también su ausencia: así un
 # token inválido repetido no golpea la base en cada intento).
 CACHE_TTL_SEGUNDOS = 30
 
 _cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_cache_credenciales: dict[tuple[str, str], tuple[float, str]] = {}
 
 
 def limpiar_cache() -> None:
     _cache.clear()
+    _cache_credenciales.clear()
 
 
 def por_token(token: str) -> dict[str, Any] | None:
@@ -60,6 +69,88 @@ def por_token(token: str) -> dict[str, Any] | None:
 
     _cache[token] = (ahora, fila)
     return fila
+
+
+def vincular_conversacion(cliente_id: int, canal: str, client_id: str) -> None:
+    """Anota a qué negocio pertenece una conversación.
+
+    Se llama en la ENTRADA, que es el único momento en que se sabe: el mensaje
+    llegó por la URL de ese negocio. Sin esto, al responder solo habría canal y
+    número, que no dicen de quién es el número.
+
+    El `DO UPDATE` no es decorativo: un mismo cliente puede cambiar de negocio
+    (un número que se traslada, un negocio que se rehace), y el último que
+    recibió el mensaje es el que tiene que contestarlo. Nunca propaga la
+    excepción — perder la anotación degrada el envío a un aviso claro, pero
+    tumbar aquí dejaría al cliente sin respuesta.
+    """
+    try:
+        ejecutar(
+            """
+            INSERT INTO conversacion_negocio (canal, client_id, cliente_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (canal, client_id) DO UPDATE
+                SET cliente_id = EXCLUDED.cliente_id,
+                    actualizado_en = NOW()
+            """,
+            (str(canal), str(client_id)[:80], int(cliente_id)),
+        )
+    except Exception as e:
+        print(f"Error vinculando la conversación con su negocio: {e}")
+    else:
+        _cache_credenciales.pop((str(canal), str(client_id)), None)
+
+
+def api_key_de_envio(canal: str, client_id: str) -> str:
+    """La clave de WasenderAPI con la que se le responde a ese número.
+
+    Orden de resolución:
+
+    1. El negocio al que pertenece la conversación (lo normal: el mensaje entró
+       por su webhook y quedó anotado).
+    2. Si no está anotada y hay UN SOLO negocio activo con clave, ese. Cubre lo
+       que no nace de un mensaje entrante: un envío manual desde el panel a
+       alguien que nunca escribió, o una conversación anterior a la migración.
+       Con dos o más negocios no se adivina: sería mandarle el mensaje a un
+       cliente desde el número de otro negocio.
+    3. Nada. El que llama decide qué hacer; hoy avisa de que falta configurarla.
+    """
+    clave_cache = (str(canal), str(client_id))
+    ahora = time.monotonic()
+    guardado = _cache_credenciales.get(clave_cache)
+    if guardado and (ahora - guardado[0]) < CACHE_TTL_SEGUNDOS:
+        return guardado[1]
+
+    try:
+        fila = consultar_uno(
+            """
+            SELECT c.wasender_api_key
+            FROM conversacion_negocio v
+            JOIN clientes_whatsapp c ON c.id = v.cliente_id
+            WHERE v.canal = %s AND v.client_id = %s AND c.activo
+            """,
+            (str(canal), str(client_id)),
+        )
+        if not fila or not (fila.get("wasender_api_key") or ""):
+            # LIMIT 2 y no LIMIT 1: la pregunta no es «dame uno», es «¿hay
+            # exactamente uno?». Con dos filas la respuesta es que no se puede
+            # decidir, y se prefiere no enviar a enviar por el número ajeno.
+            candidatos = consultar(
+                """
+                SELECT wasender_api_key
+                FROM clientes_whatsapp
+                WHERE activo AND wasender_api_key <> ''
+                LIMIT 2
+                """
+            )
+            fila = candidatos[0] if len(candidatos) == 1 else None
+    except Exception as e:
+        print(f"Error resolviendo la credencial de envío: {e}")
+        return ""
+
+    api_key = str((fila or {}).get("wasender_api_key") or "")
+    _cache_credenciales[clave_cache] = (ahora, api_key)
+    return api_key
 
 
 def registrar_evento(cliente_id: int, evento: str) -> None:

@@ -67,9 +67,13 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 
 Requiere un archivo `.env` en la raíz (no versionado). Variables principales:
 `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `POSTGRES_USER/PASSWORD/DB`,
-`SESSION_SECRET` (dashboard), y opcionalmente `WASENDER_API_KEY` +
-`PUBLIC_WEBHOOK_BASE_URL` para WhatsApp e `INTERNAL_API_TOKEN` para el reindexado
-inmediato del RAG. Ver los compose para la lista completa.
+`SESSION_SECRET` (dashboard), y opcionalmente `PUBLIC_WEBHOOK_BASE_URL` para WhatsApp
+e `INTERNAL_API_TOKEN` para el reindexado inmediato del RAG. Ver los compose para la
+lista completa.
+
+> Las credenciales de WhatsApp **no** van en el `.env`: son de cada negocio y se
+> administran desde el panel, en el perfil del cliente. El `.env` solo lleva lo que
+> es del despliegue entero.
 
 > **WhatsApp:** la URL del webhook de cada cliente y los eventos que hay que activar
 > en WasenderAPI están en el perfil del cliente (`/admin/negocios/{id}`) del panel y explicados en
@@ -112,9 +116,19 @@ Ver `docs/despliegue_docker_easypanel.md`.
 ## Dashboard
 
 Panel propio en `services/dashboard/`: FastAPI + Jinja renderizado en el servidor, sin
-Node, sin build y sin CDNs. Todo el JavaScript propio son ~130 líneas para refrescar el
-panel de consumo, guardar celdas al editarlas y abrir los menús; el resto son formularios
-HTML normales, que siguen funcionando aunque el script no cargue.
+Node, sin build y sin CDNs. Todo el JavaScript propio cabe en un archivo, y sirve para
+mantener el panel al día, guardar celdas al editarlas y abrir los menús; el resto son
+formularios HTML normales, que siguen funcionando aunque el script no cargue.
+
+**El panel se actualiza solo.** Un reporte que entra, una pregunta que el agente no supo
+responder, un bloqueo que se pone, un envío que avanza o un mensaje que llega al chat
+aparecen en pantalla en un par de segundos, sin recargar. Por debajo no hay polling desde
+el navegador: el servidor mantiene UNA tarea que consulta unos contadores baratos cada
+dos segundos y avisa por SSE (`GET /eventos`) de qué cambió; cada pestaña pide entonces
+solo el trozo de página afectado. Dos consecuencias que importan: el coste en base de
+datos es el mismo con una pestaña abierta que con veinte, y con el panel cerrado no se
+consulta nada. El chat es el único que no se repinta — se le añaden los mensajes nuevos
+al final, así que no se pierde el sitio en el que ibas leyendo.
 
 La navegación está organizada en un menú lateral por secciones —Facturación, Clientes,
 Agente IA, Mensajería y Configuración—, con una barra superior que indica dónde estás y
@@ -129,7 +143,7 @@ recuperación por Telegram y envíos— sin mostrar nunca el valor de un secreto
 | | `cliente` | `admin` |
 | --- | --- | --- |
 | Su consumo facturado, en vivo | ✅ | ✅ |
-| Ciudades, mensajes, enviar, historial de envíos | ✅ | ✅ |
+| Mensajes, palabras clave, enviar, historial de envíos | ✅ | ✅ |
 | **Costo real del proveedor y margen** | ❌ | ✅ |
 | Logs de conversación, reportes, incidencias | ❌ | ✅ |
 | Tarifas, cierre de periodos, usuarios, base de conocimiento | ❌ | ✅ |
@@ -189,7 +203,7 @@ Dónde vive cada cosa (importante para no confundir "memoria" con "se pierde al 
 | **Estado activo de la conversación** (en qué paso del flujo va cada usuario + historial reciente) | **Redis** (`conversation_state:*`, `state:*`) | En memoria **con persistencia a disco** (volumen + AOF). |
 | **Registro durable de conversaciones** (el log que se ve en el dashboard) | **Postgres** (`conversation_messages`) | Persistente en disco. |
 | **Facturación** (`uso_eventos`, `tarifas`, `periodos_facturacion`) | **Postgres** | Persistente en disco. |
-| **Catálogos y envíos** (ciudades, plantillas, envíos, incidencias) | **Postgres** | Persistente en disco. |
+| **Catálogos y envíos** (mensajes, palabras clave, envíos, incidencias) | **Postgres** | Persistente en disco. |
 | **Usuarios bloqueados y registro de dictamen** | **Postgres** | Persistente en disco. |
 | **Base de conocimiento del RAG** | **Qdrant** | Persistente en disco. |
 

@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block titulo %}Palabras clave{% endblock %}
+
+{# Misma forma que «Mensajes» —lista que se lee, ventanas que se editan— porque
+   se manejan igual. Lo que cambia es lo que SON: aquí el que dispara es el
+   cliente, no tú, y detrás vienen el silencio del bot y unos recordatorios. #}
+
+{% macro pieza_boton(palabra, pieza, etiqueta) %}
+<span class="pieza {{ 'listo' if not pieza.problema else 'roto' }} {{ 'apagada' if not pieza.activo }}">
+  <button type="button" class="pieza-abrir" data-abre="pieza-{{ pieza.id }}">
+    {{ etiqueta }}
+    {% if pieza.tipo == 'recordatorio' %}<span class="pieza-min">{{ pieza.minutos }}′</span>{% endif %}
+    {% if pieza.media_ref %}<span class="pieza-clip" title="Lleva adjunto">◉</span>{% endif %}
+  </button>
+  <button type="button" class="pieza-quitar" data-abre="quitar-pieza-{{ pieza.id }}"
+          title="Eliminar" aria-label="Eliminar">×</button>
+</span>
+{% endmacro %}
+
+{% block contenido %}
+<div class="titulo-con-acciones">
+  <div>
+    <h1>Palabras clave</h1>
+    <p class="sub" style="margin-bottom:0">
+      Si el cliente escribe <strong>exactamente</strong> una de estas palabras, y solo
+      la palabra, salen sus mensajes y la conversación pasa a manos tuyas: el agente
+      deja de responder hasta que tú intervengas. Después salen los recordatorios que
+      hayas programado, contados desde ese momento.
+    </p>
+  </div>
+  <div class="acciones-cabecera">
+    <button class="boton primario mini" data-abre="nueva-palabra">Nueva palabra</button>
+  </div>
+</div>
+
+<div class="msgs">
+  {% for p in palabras %}
+  <article class="msg {{ 'listo' if not p.problemas else 'roto' }} {{ '' if p.activa else 'apagada' }}"
+           data-abre="palabra-{{ p.id }}" role="button" tabindex="0" aria-label="Abrir {{ p.palabra }}">
+    <span class="clave">{{ p.palabra }}</span>
+    <span class="msg-resumen">{{ p.mensajes[0].texto | truncate(70) if p.mensajes else 'Sin mensajes' }}</span>
+    {% if not p.activa %}
+    <span class="estado no">desactivada</span>
+    {% elif p.problemas %}
+    <span class="estado no">{{ p.problemas | length }} por revisar</span>
+    {% else %}
+    <span class="estado si">
+      {{ p.mensajes | length }} mensaje{{ '' if p.mensajes | length == 1 else 's' }}
+      {%- if p.recordatorios %} · {{ p.recordatorios | length }} recordatorio{{ '' if p.recordatorios | length == 1 else 's' }}{% endif %}
+    </span>
+    {% endif %}
+  </article>
+  {% else %}
+  <div class="panel vacio">Todavía no hay palabras clave.</div>
+  {% endfor %}
+</div>
+
+{% for p in palabras %}
+{# --- La ventana de una palabra clave ------------------------------------- #}
+<dialog class="flotante" id="palabra-{{ p.id }}" {{ 'data-abrir-al-cargar' if abierta == p.id }}>
+  <div class="cabecera">
+    <h2>{{ p.palabra }}</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    {% if p.problemas %}
+    <ul class="lista-problemas">
+      {% for problema in p.problemas %}<li>{{ problema }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <form method="post" action="/palabras-clave/{{ p.id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="palabra-txt-{{ p.id }}">La palabra que dispara el flujo</label>
+      <div class="linea">
+        <input id="palabra-txt-{{ p.id }}" name="palabra" value="{{ p.palabra }}" required style="flex:1">
+        <button class="mini">Guardar</button>
+      </div>
+      <p class="sub" style="margin:6px 0 0">
+        Tiene que llegar sola y exacta: «{{ p.palabra }}» dispara el flujo,
+        «tengo dudas del {{ p.palabra }}» no. Da igual con mayúsculas o sin ellas.
+      </p>
+    </form>
+
+    <hr class="separador">
+
+    <h3 style="margin-top:0">Sale al instante</h3>
+    <div class="piezas">
+      {% for pieza in p.mensajes %}{{ pieza_boton(p, pieza, 'Mensaje ' ~ pieza.orden) }}{% else %}
+      <p class="sub" style="margin:0">Todavía no tiene mensajes.</p>
+      {% endfor %}
+    </div>
+    <form method="post" action="/palabras-clave/{{ p.id }}/pieza" style="margin-top:10px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="tipo" value="mensaje">
+      <button class="boton mini">Añadir mensaje</button>
+    </form>
+
+    <hr class="separador">
+
+    <h3 style="margin-top:0">Recordatorios</h3>
+    <p class="sub" style="margin-top:0">
+      Los minutos se cuentan <strong>desde que se disparó la palabra</strong>, no desde
+      el recordatorio anterior. Cada uno tiene que salir después del que va antes.
+    </p>
+    <div class="piezas">
+      {% for pieza in p.recordatorios %}{{ pieza_boton(p, pieza, 'Recordatorio ' ~ pieza.orden) }}{% else %}
+      <p class="sub" style="margin:0">Sin recordatorios: solo salen los mensajes de arriba.</p>
+      {% endfor %}
+    </div>
+    <form method="post" action="/palabras-clave/{{ p.id }}/pieza" style="margin-top:10px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="tipo" value="recordatorio">
+      <button class="boton mini">Añadir recordatorio</button>
+    </form>
+
+    <hr class="separador">
+
+    <div class="linea">
+      <form method="post" action="/palabras-clave/{{ p.id }}/activa">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini">{{ 'Desactivar' if p.activa else 'Activar' }}</button>
+      </form>
+      <form method="post" action="/palabras-clave/{{ p.id }}/revisar">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini">Volver a comprobar los adjuntos</button>
+      </form>
+      <span style="flex:1"></span>
+      <button class="icono-accion peligro" data-abre="borrar-palabra-{{ p.id }}"
+              title="Eliminar la palabra clave" aria-label="Eliminar la palabra clave">{{ iconos.icono('basura') }}</button>
+    </div>
+  </div>
+</dialog>
+
+{# --- La ventana de una pieza suelta -------------------------------------- #}
+{% for pieza in p.mensajes + p.recordatorios %}
+<dialog class="flotante" id="pieza-{{ pieza.id }}"
+        {{ 'data-abrir-al-cargar' if abierta == p.id and pieza_abierta == pieza.id }}>
+  <div class="cabecera">
+    <h2>
+      {{ p.palabra }} ·
+      {{ 'recordatorio' if pieza.tipo == 'recordatorio' else 'mensaje' }} {{ pieza.orden }}
+    </h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    {% if pieza.problema %}
+    <div class="mensaje aviso" style="margin-top:0">{{ pieza.problema }}</div>
+    {% endif %}
+
+    <form method="post" action="/palabras-clave/{{ p.id }}/pieza/{{ pieza.id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+
+      {% if pieza.tipo == 'recordatorio' %}
+      <label class="switch" style="margin-bottom:14px">
+        <input type="checkbox" name="activo" value="1" {{ 'checked' if pieza.activo }}>
+        <span class="switch-pista"><span class="switch-bola"></span></span>
+        <span>Enviar este recordatorio</span>
+      </label>
+
+      <label for="min-{{ pieza.id }}">Cuándo sale, en minutos desde la palabra clave</label>
+      <div class="linea">
+        <input id="min-{{ pieza.id }}" name="minutos" type="number" min="1" max="{{ max_minutos }}"
+               value="{{ pieza.minutos }}" required style="width:140px">
+        <span class="sub" style="margin:0">= {{ pieza.minutos | tiempo }}</span>
+      </div>
+      <p class="sub" style="margin:6px 0 14px">
+        Máximo {{ max_minutos }} minutos ({{ max_minutos // 1440 }} días). Más allá no se
+        puede garantizar el envío.
+      </p>
+      {% endif %}
+
+      <label for="texto-{{ pieza.id }}">Texto</label>
+      <textarea id="texto-{{ pieza.id }}" name="texto" rows="7" style="width:100%">{{ pieza.texto }}</textarea>
+
+      <label class="switch" style="margin-top:14px">
+        <input type="checkbox" name="con_media" value="1" data-revela="media-{{ pieza.id }}"
+               {{ 'checked' if pieza.media_ref }}>
+        <span class="switch-pista"><span class="switch-bola"></span></span>
+        <span>Incluye imagen o video</span>
+      </label>
+
+      <div id="media-{{ pieza.id }}" class="campos" style="margin-top:12px" {{ '' if pieza.media_ref else 'hidden' }}>
+        <div>
+          <label for="tipo-{{ pieza.id }}">Qué es</label>
+          <select id="tipo-{{ pieza.id }}" name="media_tipo" style="width:100%">
+            <option value="imagen" {{ 'selected' if pieza.media_tipo != 'video' }}>Imagen</option>
+            <option value="video" {{ 'selected' if pieza.media_tipo == 'video' }}>Video</option>
+          </select>
+        </div>
+        <div>
+          <label for="ref-{{ pieza.id }}">ID de Google Drive</label>
+          <input id="ref-{{ pieza.id }}" name="media_ref" value="{{ pieza.media_ref }}" style="width:100%"
+                 placeholder="Pega el enlace de Drive o el ID; se extrae solo">
+        </div>
+      </div>
+
+      <p class="sub" style="margin:10px 0 0">
+        Al guardar se intenta descargar para comprobar que existe y es público. No se
+        guarda ninguna copia: solo se comprueba.
+      </p>
+
+      <div class="linea" style="justify-content:space-between;margin-top:16px">
+        <button class="icono-accion peligro" type="button" data-abre="quitar-pieza-{{ pieza.id }}"
+                title="Eliminar" aria-label="Eliminar">{{ iconos.icono('basura') }}</button>
+        <span class="linea">
+          <button class="mini" type="button" data-cierra>Cancelar</button>
+          <button class="primario">Guardar</button>
+        </span>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog class="flotante" id="quitar-pieza-{{ pieza.id }}">
+  <div class="cabecera">
+    <h2>¿Eliminar {{ 'el recordatorio' if pieza.tipo == 'recordatorio' else 'el mensaje' }} {{ pieza.orden }}?</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <p style="margin-top:0">
+      Se quita de «{{ p.palabra }}» y no se puede deshacer.
+      {% if pieza.tipo == 'recordatorio' %}
+      A quien ya lo tenga agendado le llegará igual: se canceló la programación futura,
+      no la que ya está en marcha.
+      {% endif %}
+    </p>
+    <form method="post" action="/palabras-clave/{{ p.id }}/pieza/{{ pieza.id }}/eliminar"
+          class="linea" style="justify-content:flex-end">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini" type="button" data-cierra>Cancelar</button>
+      <button class="primario">Sí, eliminar</button>
+    </form>
+  </div>
+</dialog>
+{% endfor %}
+
+<dialog class="flotante" id="borrar-palabra-{{ p.id }}">
+  <div class="cabecera">
+    <h2>¿Eliminar «{{ p.palabra }}»?</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <p style="margin-top:0">
+      Se borra con sus mensajes y sus recordatorios, y el bot dejará de reconocer esa
+      palabra. No se puede deshacer. Si solo quieres pararla un tiempo, desactívala.
+    </p>
+    <form method="post" action="/palabras-clave/{{ p.id }}/eliminar" class="linea" style="justify-content:flex-end">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini" type="button" data-cierra>Cancelar</button>
+      <button class="primario">Sí, eliminar</button>
+    </form>
+  </div>
+</dialog>
+{% endfor %}
+
+<dialog class="flotante" id="nueva-palabra">
+  <div class="cabecera">
+    <h2>Nueva palabra clave</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/palabras-clave">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="palabra">Palabra</label>
+      <input id="palabra" name="palabra" required placeholder="examen" style="width:100%">
+      <p class="sub" style="margin:6px 0 16px">
+        Una sola palabra, la que le vas a decir a tus clientes que escriban. No puede
+        repetirse.
+      </p>
+      <div class="linea" style="justify-content:flex-end">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Crear</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{% endblock %}

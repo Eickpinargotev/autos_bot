@@ -548,9 +548,24 @@
     }
   },
   "AUTOMATICO": {
-    "MEDIA": {
+    "MEDIA_IMAGEN": {
       "mensajes": [
-        "No podemos ver imágenes ni documentos por este medio 🙏\n\nSi necesitas que alguien lo revise, avísame y te contacto con un asesor."
+        "Recibí tu imagen, pero no puedo revisarla por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarla directamente."
+      ]
+    },
+    "MEDIA_DOCUMENTO": {
+      "mensajes": [
+        "Recibí tu documento, pero no puedo revisarlo por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarlo directamente."
+      ]
+    },
+    "MEDIA_VIDEO": {
+      "mensajes": [
+        "Recibí tu video, pero no puedo revisarlo por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarlo directamente."
+      ]
+    },
+    "MEDIA_ENLACE": {
+      "mensajes": [
+        "Recibí tu enlace, pero no puedo revisarlo por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarlo directamente."
       ]
     },
     "MEDIA_INSISTE": {
@@ -558,9 +573,9 @@
         "Ayuda solicitada: el usuario insiste enviando varias imagenes/documentos"
       ]
     },
-    "STICKER": {
+    "MEDIA_AUDIO_ILEGIBLE": {
       "mensajes": [
-        "😊 Gracias! Por aquí solo puedo leer mensajes de texto.\n\nCuéntame en qué te ayudo y con gusto te atiendo."
+        "Recibí tu nota de voz, pero no logré escucharla bien. ¿Me la puedes escribir en texto? Así te ayudo de una vez."
       ]
     }
   }

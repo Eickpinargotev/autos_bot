@@ -1,0 +1,20 @@
+{# El menú lateral, aparte de `base.html`, porque las pastillas de pendientes se
+   actualizan solas: un reporte que llega mientras estás en otra pantalla tiene
+   que notarse desde donde estés. Se vuelve a pedir a `/pendientes?en=<ruta>`,
+   que necesita la ruta para seguir marcando la página en la que estás.
+
+   Los iconos se importan aquí y no se heredan de `base.html`: este trozo
+   también se sirve suelto, y ahí no hay armazón del que heredar nada. #}
+{% import "_iconos.html" as iconos %}
+{% for seccion in secciones %}
+  <div class="grupo">
+    <span class="grupo-titulo">{{ seccion.titulo }}</span>
+    {% for pagina in seccion.paginas if not pagina.oculta %}
+      <a href="{{ pagina.url }}" class="{{ 'activo' if pagina.activa }}">
+        {{ iconos.icono(pagina.icono) }}<span>{{ pagina.etiqueta }}</span>
+        {% set cuantos = pendientes.get(pagina.url) %}
+        {% if cuantos %}<span class="pendientes" title="{{ cuantos }} sin atender">{{ cuantos }}</span>{% endif %}
+      </a>
+    {% endfor %}
+  </div>
+{% endfor %}

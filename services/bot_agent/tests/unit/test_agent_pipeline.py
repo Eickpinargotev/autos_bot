@@ -584,15 +584,42 @@ class DecisionValidationTests(unittest.TestCase):
             self.assertFalse(schema["additionalProperties"])
             self.assertEqual(set(schema["required"]), set(schema["properties"]))
 
-    def test_reasoning_effort_only_goes_to_gpt5_models(self):
-        # Un despliegue con OPENAI_MODEL viejo no debe recibir reasoning_effort:
-        # haría fallar TODAS las llamadas y el bot solo respondería el fallback.
-        from src.application.unified_agent import _decision_llm_kwargs
+    def test_cada_modelo_recibe_solo_los_parametros_que_acepta(self):
+        """Mandar el parámetro que no toca no degrada nada: lo TUMBA todo.
 
-        with patch("src.application.unified_agent.settings.OPENAI_MODEL", "gpt-5.4-mini"):
-            self.assertEqual(_decision_llm_kwargs(), {"reasoning_effort": "none"})
-        with patch("src.application.unified_agent.settings.OPENAI_MODEL", "gpt-4o-mini"):
-            self.assertEqual(_decision_llm_kwargs(), {})
+        `reasoning_effort` a un gpt-4o y `temperature` a un gpt-5.6 devuelven
+        400, así que fallarían TODAS las llamadas y el bot contestaría siempre
+        con el fallback genérico. Verificado contra la API real: gpt-5.6-terra
+        responde `'temperature' does not support 0 with this model`.
+        """
+        from src.core.modelos import kwargs_de_decision
+
+        # gpt-5.4: acepta las dos cosas. temperature=0 mantiene el determinismo.
+        self.assertEqual(
+            kwargs_de_decision("gpt-5.4-mini"),
+            {"temperature": 0, "reasoning_effort": "none"},
+        )
+        self.assertEqual(
+            kwargs_de_decision("gpt-5.4-nano"),
+            {"temperature": 0, "reasoning_effort": "none"},
+        )
+        # gpt-5.6: razona, pero rechaza temperature.
+        self.assertEqual(kwargs_de_decision("gpt-5.6-terra"), {"reasoning_effort": "none"})
+        # gpt-4o: ni siquiera conoce reasoning_effort.
+        self.assertEqual(kwargs_de_decision("gpt-4o-mini"), {"temperature": 0})
+
+    def test_cada_agente_usa_el_modelo_de_su_nivel(self):
+        """El precio entre niveles difiere hasta 10x: no pueden compartir modelo."""
+        from src.application.unified_agent import SpecialistAgent, SupervisorAgent
+        from src.core.config import settings
+
+        self.assertEqual(SupervisorAgent().modelo, settings.OPENAI_MODEL_SUPERVISOR)
+        self.assertEqual(
+            SpecialistAgent("GENERAL").modelo, settings.OPENAI_MODEL_ESPECIALISTA
+        )
+        self.assertNotEqual(
+            settings.OPENAI_MODEL_SUPERVISOR, settings.OPENAI_MODEL_ESPECIALISTA
+        )
 
     def test_no_api_key_falls_back_to_safe_clarify(self):
         agent = SupervisorAgent()

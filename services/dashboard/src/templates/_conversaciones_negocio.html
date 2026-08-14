@@ -1,0 +1,34 @@
+{# Columna izquierda de la ventana flotante: las conversaciones de ESTE negocio.
+
+   Es un fragmento, sin armazón: se inyecta dentro del <dialog> del perfil. La
+   búsqueda vuelve a pedir este mismo fragmento, así que filtrar no recarga la
+   página ni cierra la ventana. #}
+<form class="linea buscador-conv" data-conv-buscar="/admin/negocios/{{ negocio_id }}/conversaciones">
+  <input name="q" value="{{ busqueda }}" placeholder="Filtrar por ID del cliente…"
+         inputmode="tel" autocomplete="off">
+  <button class="mini">Filtrar</button>
+</form>
+
+<ul class="lista-conv">
+  {% for c in conversaciones %}
+  <li>
+    <button type="button" class="conv-item"
+            data-conv="/admin/logs/{{ c.canal }}/{{ c.client_id }}?fragmento=1&negocio={{ negocio_id }}">
+      <span class="conv-id">{{ c.client_id }}</span>
+      <span class="conv-meta">
+        <span class="pastilla">{{ c.canal }}</span>
+        {{ c.mensajes }} mensajes · {{ c.ultima_actividad | fecha }}
+      </span>
+      {% if c.nombre %}<span class="conv-nombre">{{ c.nombre }}</span>{% endif %}
+    </button>
+  </li>
+  {% else %}
+  <li class="vacio">
+    {% if busqueda %}
+      Ningún ID de este cliente coincide con «{{ busqueda }}».
+    {% else %}
+      Todavía no hay conversaciones de este cliente.
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>

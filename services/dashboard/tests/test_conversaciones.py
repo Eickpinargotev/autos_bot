@@ -109,6 +109,36 @@ def test_la_busqueda_ignora_el_formato_del_numero(escrito):
     assert [c["client_id"] for c in encontradas] == ["50688888888"]
 
 
+def test_las_conversaciones_se_filtran_por_negocio():
+    """Cada negocio ve SOLO a sus clientes.
+
+    Es lo que hace usable el visor: una lista con los clientes de todos los
+    negocios mezclados no se puede leer, y peor aún, le mostraría a un negocio
+    los chats de otro.
+    """
+    uno = clientes_whatsapp.crear("Escuela A")
+    otro = clientes_whatsapp.crear("Escuela B")
+    _mensaje("50611110001", "hola desde A")
+    _mensaje("50622220002", "hola desde B")
+    _mensaje("50633330003", "sin negocio anotado")
+    for client_id, negocio in (("50611110001", uno), ("50622220002", otro)):
+        pool.ejecutar(
+            "INSERT INTO conversacion_negocio (canal, client_id, cliente_id) VALUES ('whatsapp', %s, %s)",
+            (client_id, negocio["id"]),
+        )
+
+    de_a = {c["client_id"] for c in trazabilidad.listar_conversaciones(negocio_id=uno["id"])}
+    de_b = {c["client_id"] for c in trazabilidad.listar_conversaciones(negocio_id=otro["id"])}
+
+    assert de_a == {"50611110001"}
+    assert de_b == {"50622220002"}
+    # La conversación sin pertenencia no se le atribuye a nadie: afirmarlo sin
+    # saberlo sería peor que no mostrarla.
+    assert "50633330003" not in de_a | de_b
+    # Sin filtro siguen saliendo todas (el listado general del administrador).
+    assert "50633330003" in {c["client_id"] for c in trazabilidad.listar_conversaciones()}
+
+
 def test_no_se_busca_por_el_contenido_del_mensaje():
     """A propósito: buscar texto obliga a recorrer todo el historial."""
     _mensaje("50688888888", "pregunta por el curso teórico")
@@ -116,6 +146,52 @@ def test_no_se_busca_por_el_contenido_del_mensaje():
 
 
 # --- Presentación ------------------------------------------------------------
+
+def test_el_panel_marca_de_donde_salio_cada_mensaje(sesion_admin):
+    """Audio, sticker y adjunto se distinguen a simple vista de un texto escrito.
+
+    Quien lee el chat necesita saber que un párrafo salió de una nota de voz y
+    no de los dedos del cliente, y que el sticker no se quedó sin respuesta por
+    un fallo sino a propósito.
+    """
+    _mensaje("50644440004", "quiero informacion del curso", event_type="audio_transcrito")
+    _mensaje("50644440004", "", event_type="sticker_ignorado")
+    _mensaje("50644440004", "", event_type="media_avisada")
+
+    html = sesion_admin.get("/admin/logs/whatsapp/50644440004").text
+
+    assert "Audio transcrito" in html
+    assert "quiero informacion del curso" in html
+    assert "no responde a stickers" in html
+    assert "se envió el aviso" in html
+
+
+def test_el_visor_del_negocio_devuelve_solo_el_fragmento(sesion_admin):
+    """Se inyecta dentro del <dialog>: con el armazón entero saldría una página
+    completa metida dentro de otra."""
+    negocio = clientes_whatsapp.crear("Escuela con chats")
+    _mensaje("50655550005", "hola")
+    pool.ejecutar(
+        "INSERT INTO conversacion_negocio (canal, client_id, cliente_id) VALUES ('whatsapp', %s, %s)",
+        ("50655550005", negocio["id"]),
+    )
+
+    html = sesion_admin.get(f"/admin/negocios/{negocio['id']}/conversaciones").text
+
+    assert "50655550005" in html
+    assert "<html" not in html.lower(), "debe ser un fragmento, no una página"
+
+
+def test_el_hilo_tambien_se_sirve_suelto_para_la_ventana(sesion_admin):
+    _mensaje("50666660006", "buenas tardes")
+
+    completo = sesion_admin.get("/admin/logs/whatsapp/50666660006").text
+    fragmento = sesion_admin.get("/admin/logs/whatsapp/50666660006?fragmento=1").text
+
+    assert "buenas tardes" in fragmento
+    assert "<html" not in fragmento.lower()
+    assert "<html" in completo.lower()
+
 
 def test_la_pagina_distingue_al_bot_del_dueno_del_negocio(sesion_admin):
     """Los dos son mensajes salientes: sin distinguirlos el chat no dice quién atendió."""
@@ -152,6 +228,103 @@ def test_el_enlace_de_mas_antiguos_solo_aparece_si_queda_historial(sesion_admin)
         _mensaje("50688888888", f"m{i}")
     cuerpo = sesion_admin.get("/admin/logs/whatsapp/50688888888").text
     assert "Cargar mensajes anteriores" in cuerpo
+
+
+# --- Borrado -----------------------------------------------------------------
+
+def test_borrar_una_conversacion_no_toca_las_demas():
+    _mensaje("50677770007", "esta se borra")
+    _mensaje("50688880008", "esta se queda")
+    pool.ejecutar(
+        "INSERT INTO conversation_shots (id_user, canal, shot) VALUES (%s, 'whatsapp', '{}'::jsonb)",
+        ("50677770007",),
+    )
+
+    borrado = trazabilidad.eliminar_conversacion("50677770007", "whatsapp")
+
+    assert borrado["mensajes"] == 1
+    assert borrado["shots"] == 1
+    assert trazabilidad.mensajes_de("50677770007", "whatsapp")["mensajes"] == []
+    assert len(trazabilidad.mensajes_de("50688880008", "whatsapp")["mensajes"]) == 1
+
+
+def test_borrar_la_conversacion_no_borra_lo_facturado():
+    """`uso_eventos` es el libro mayor: el pasado no se recalcula nunca."""
+    _mensaje("50699990009", "hola")
+    pool.ejecutar(
+        """
+        INSERT INTO uso_eventos (periodo_id, client_id, canal, categoria, origen,
+                                 mensajes, costo_real_microusd, costo_cliente_microusd)
+        SELECT id, '50699990009', 'whatsapp', 'llm', 'agente', 1, 100, 300
+        FROM periodos_facturacion WHERE cerrado_en IS NULL
+        """
+    )
+
+    trazabilidad.eliminar_conversacion("50699990009", "whatsapp")
+
+    fila = pool.consultar_uno(
+        "SELECT COUNT(*) AS total FROM uso_eventos WHERE client_id = '50699990009'"
+    )
+    assert fila["total"] == 1
+
+
+def test_la_ruta_de_borrado_avisa_al_bot_y_vuelve_al_perfil(sesion_admin, monkeypatch):
+    from src.routes import admin as rutas_admin
+    from tests.conftest import token_csrf
+
+    negocio = clientes_whatsapp.crear("Escuela con chat que se borra")
+    _mensaje("50612340001", "hola")
+    llamadas = []
+    monkeypatch.setattr(
+        rutas_admin.bot_interno,
+        "olvidar_conversacion",
+        lambda canal, client_id: llamadas.append((canal, client_id)) or "",
+    )
+
+    respuesta = sesion_admin.post(
+        "/admin/logs/whatsapp/50612340001/eliminar",
+        data={"csrf": token_csrf(sesion_admin), "volver": f"/admin/negocios/{negocio['id']}"},
+        follow_redirects=False,
+    )
+
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"].startswith(f"/admin/negocios/{negocio['id']}?aviso=")
+    # Sin este aviso el bot seguiría con el hilo en memoria y contestaría el
+    # siguiente mensaje como si nada se hubiera borrado.
+    assert llamadas == [("whatsapp", "50612340001")]
+
+
+def test_si_el_bot_no_puede_olvidar_se_dice_en_vez_de_callarlo(sesion_admin, monkeypatch):
+    """Media verdad es peor que un error: en la base ya no hay historial, pero el
+    bot sigue recordando el hilo."""
+    from src.routes import admin as rutas_admin
+    from tests.conftest import token_csrf
+
+    _mensaje("50612340002", "hola")
+    monkeypatch.setattr(
+        rutas_admin.bot_interno, "olvidar_conversacion", lambda canal, client_id: "no responde"
+    )
+
+    respuesta = sesion_admin.post(
+        "/admin/logs/whatsapp/50612340002/eliminar",
+        data={"csrf": token_csrf(sesion_admin)},
+        follow_redirects=False,
+    )
+
+    assert "error=" in respuesta.headers["location"]
+    assert trazabilidad.mensajes_de("50612340002", "whatsapp")["mensajes"] == []
+
+
+def test_el_negocio_no_puede_borrar_conversaciones(sesion_cliente):
+    from tests.conftest import token_csrf
+
+    _mensaje("50612340003", "hola")
+    respuesta = sesion_cliente.post(
+        "/admin/logs/whatsapp/50612340003/eliminar", data={"csrf": token_csrf(sesion_cliente)}
+    )
+
+    assert respuesta.status_code == 403
+    assert len(trazabilidad.mensajes_de("50612340003", "whatsapp")["mensajes"]) == 1
 
 
 # --- Webhooks por cliente ----------------------------------------------------

@@ -4,17 +4,40 @@
 {% block contenido %}
 <h1>Enviar</h1>
 <p class="sub">
-  Elige la plataforma, el mensaje y a quién va. Los envíos salen en segundo plano;
-  en <a href="/envios">Envíos</a> ves cómo van. Un mensaje con varias partes las
-  manda una tras otra, con una pausa de entre 1 y 6 segundos.
-  Los mensajes con algún problema aparecen deshabilitados: arréglalos en
-  <a href="/mensajes">Mensajes</a>.
+  Elige qué mandar y a quién. Los envíos salen en segundo plano, uno cada unos
+  quince segundos con un margen aleatorio —a intervalos exactos, cien mensajes
+  puntuales son la firma más obvia de un bot—, y en
+  <a href="/envios">Envíos</a> ves cómo van y qué números fallaron.
 </p>
 
 <div class="panel">
   <form method="post" action="/enviar">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+
     <div class="campos">
+      <div>
+        <label for="categoria">Qué tipo de mensaje</label>
+        {# Al cambiar de categoría se rellena el desplegable de al lado, sin
+           recargar: recargar perdería la lista de números ya escrita. #}
+        <select id="categoria" name="categoria" data-filtra="referencia_id" required>
+          {% for clave, nombre in categorias.items() %}
+          <option value="{{ clave }}">{{ nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="referencia_id">Cuál</label>
+        <select id="referencia_id" name="referencia_id" required>
+          {% for clave in categorias %}
+            {% for o in opciones[clave] %}
+            <option value="{{ o.id }}" data-grupo="{{ clave }}" {{ 'disabled' if o.problemas }}>
+              {{ o.etiqueta }} — {{ o.piezas }} mensaje{{ '' if o.piezas == 1 else 's' }}
+              {%- if o.problemas %} · revisar: {{ o.problemas[0] | truncate(60) }}{% endif %}
+            </option>
+            {% endfor %}
+          {% endfor %}
+        </select>
+      </div>
       <div>
         <label for="canal">Plataforma</label>
         <select id="canal" name="canal" required>
@@ -24,28 +47,24 @@
         </select>
       </div>
       <div>
-        <label for="plantilla_id">Mensaje</label>
-        <select id="plantilla_id" name="plantilla_id" required>
-          {% for p in plantillas %}
-          <option value="{{ p.id }}" {{ 'disabled' if p.problemas }}>
-            {{ p.clave }} — {{ p.partes | length }} parte(s){% if p.problemas %} · revisar: {{ p.problemas[0] }}{% endif %}
-          </option>
-          {% else %}
-          <option value="" disabled>No hay mensajes creados</option>
-          {% endfor %}
-        </select>
+        <label for="empieza_en">Empezar a enviar</label>
+        <input id="empieza_en" name="empieza_en" type="datetime-local">
+        <p class="sub" style="margin:4px 0 0">Déjalo vacío para empezar ya.</p>
       </div>
     </div>
 
-    <label for="destinos">ID de destino</label>
-    <textarea id="destinos" name="destinos" required
-              placeholder="Uno por línea.&#10;En WhatsApp es el número con código de país (50688888888).&#10;En Telegram es el ID de chat."></textarea>
+    <label for="destinos" style="margin-top:14px">Números</label>
+    <textarea id="destinos" name="destinos" rows="8" required
+              placeholder="Uno por línea, con código de país:&#10;50688888888&#10;593987654321"></textarea>
+    <p class="sub" style="margin:6px 0 0">
+      Uno por línea. <strong>Con código de país</strong> (Costa Rica 506, Ecuador 593):
+      sin él, el mensaje no sale o le llega a otra persona en otro país. Los que no lo
+      lleven se quedan fuera y te digo cuáles. Los repetidos se envían una sola vez.
+    </p>
 
-    <p></p>
-    <button class="primario" {{ 'disabled' if not plantillas }}>Poner en cola</button>
-    {% if not plantillas %}
-    <p class="sub">Primero <a href="/mensajes">crea un mensaje</a>.</p>
-    {% endif %}
+    <div class="linea" style="margin-top:16px">
+      <button class="primario">Poner en cola</button>
+    </div>
   </form>
 </div>
 {% endblock %}

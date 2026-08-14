@@ -6,13 +6,21 @@ Todas las rutas de este módulo dependen de `requiere_admin`. Un `cliente` recib
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from src.core import security
 from src.core.config import settings
 from src.core.plantillas import render
-from src.services import clientes_whatsapp, facturacion, mensajeria, trazabilidad, usuarios
+from src.services import (
+    bloqueos,
+    bot_interno,
+    clientes_whatsapp,
+    facturacion,
+    mensajeria,
+    trazabilidad,
+    usuarios,
+)
 
 router = APIRouter(prefix="/admin")
 
@@ -46,16 +54,36 @@ def configuracion(request: Request, usuario=Depends(security.requiere_admin)):
 
 # --- Conversaciones ----------------------------------------------------------
 
+def _proyecto_del_chat(request: Request) -> dict | None:
+    """El proyecto desde cuyo perfil se abrió el chat, si se abrió desde uno.
+
+    Las horas del chat se muestran en la zona del PROYECTO, no en la del
+    servidor ni en la nuestra: «me escribió a las 9» tiene que decir 9 en la
+    pantalla de quien atiende ese número. Solo se sabe cuál es cuando el chat se
+    abrió desde su perfil (`?negocio=`); si no, queda la del despliegue.
+    """
+    negocio_id = request.query_params.get("negocio", "")
+    return clientes_whatsapp.obtener(int(negocio_id)) if negocio_id.isdigit() else None
+
+
+def _datos_logs(request: Request) -> dict:
+    busqueda = request.query_params.get("q", "")
+    return {
+        "conversaciones": trazabilidad.listar_conversaciones(busqueda),
+        "busqueda": busqueda,
+    }
+
+
 @router.get("/logs")
 def logs(request: Request, usuario=Depends(security.requiere_admin)):
-    busqueda = request.query_params.get("q", "")
-    return render(
-        request,
-        "logs.html",
-        usuario,
-        conversaciones=trazabilidad.listar_conversaciones(busqueda),
-        busqueda=busqueda,
-    )
+    return render(request, "logs.html", usuario, **_datos_logs(request))
+
+
+@router.get("/logs/lista")
+def logs_lista(request: Request, usuario=Depends(security.requiere_admin)):
+    """El listado solo. Va antes de `/logs/{canal}/{client_id}` por claridad;
+    no chocan porque aquel lleva dos tramos y este uno."""
+    return render(request, "_logs_lista.html", usuario, **_datos_logs(request))
 
 
 @router.get("/logs/{canal}/{client_id}")
@@ -66,27 +94,159 @@ def conversacion(
 
     Se carga la tanda más reciente y se va hacia atrás con `?antes=<id>`: una
     conversación con meses de historial no puede llegar entera en una página.
+
+    Con `?desde=<id>` hace lo contrario y devuelve SOLO las burbujas posteriores
+    a ese mensaje. Es el chat en vivo: llega un mensaje mientras lo lees y se
+    añade al final, sin repintar el hilo ni perder el sitio.
     """
     antes = request.query_params.get("antes", "")
+    desde = request.query_params.get("desde", "")
     internos = request.query_params.get("internos") == "1"
     pagina = trazabilidad.mensajes_de(
         client_id,
         canal,
         antes_de=int(antes) if antes.isdigit() else None,
+        desde_id=int(desde) if desde.isdigit() else None,
         incluir_internos=internos,
     )
+
+    if desde.isdigit():
+        # La cola en vivo: solo burbujas, nada de cabecera ni de marco. Se le
+        # pasa el día de lo último ya pintado para que no repita el separador de
+        # fecha en cada tanda.
+        return render(
+            request,
+            "_conversacion_burbujas.html",
+            usuario,
+            proyecto=_proyecto_del_chat(request),
+            mensajes=pagina["mensajes"],
+            dia_previo=request.query_params.get("dia", ""),
+            parcial=True,
+        )
+
+    # `?fragmento=1`: solo el hilo, para inyectarlo en la ventana flotante del
+    # perfil del negocio. La misma plantilla en los dos sitios, así que no hay
+    # forma de que la vista de la ventana se quede atrás de la página completa.
+    plantilla = (
+        "_conversacion_hilo.html"
+        if request.query_params.get("fragmento") == "1"
+        else "conversacion.html"
+    )
+    # A dónde volver tras actuar sobre el chat. La ventana flotante dice de qué
+    # negocio se abrió (`?negocio=`), y así se vuelve a su perfil en vez de a un
+    # listado suelto que ya no está ni en el menú.
+    #
+    # Son dos destinos distintos a propósito: tras BORRAR no se puede volver al
+    # chat (ya no existe), pero tras DESBLOQUEAR sí, y sacar de la conversación a
+    # quien solo quería levantar un bloqueo sería perder el sitio por nada.
+    negocio_id = request.query_params.get("negocio", "")
+    perfil = f"/admin/negocios/{negocio_id}" if negocio_id.isdigit() else ""
     return render(
         request,
-        "conversacion.html",
+        plantilla,
         usuario,
+        proyecto=_proyecto_del_chat(request),
+        # Con `?antes=` estás leyendo una tanda vieja: ahí la cola en vivo se
+        # apaga, o pedir «lo posterior a lo que veo» traería media conversación.
+        en_el_final=not antes.isdigit(),
         client_id=client_id,
         canal=canal,
+        volver_a=perfil or "/admin/logs",
+        volver_tras_desbloquear=perfil or f"/admin/logs/{canal}/{client_id}",
+        bloqueo=bloqueos.estado_de(canal, client_id),
         mensajes=pagina["mensajes"],
         hay_mas=pagina["hay_mas"],
         cursor=pagina["cursor"],
         internos=internos,
         resumen=trazabilidad.resumen_conversacion(client_id, canal),
     )
+
+
+# --- Bloqueos ----------------------------------------------------------------
+#
+# Los bloqueos se ponen SOLOS: el dueño contesta desde su teléfono y el chat
+# queda 12 días en silencio, alguien entra al grupo, un `/block`. Hasta que
+# existió esta pantalla, levantarlos requería entrar a la base a mano.
+
+def _datos_bloqueos(request: Request) -> dict:
+    busqueda = request.query_params.get("q", "")
+    return {"bloqueos": bloqueos.listar(busqueda), "busqueda": busqueda}
+
+
+@router.get("/bloqueos")
+def listar_bloqueos(request: Request, usuario=Depends(security.requiere_admin)):
+    return render(request, "bloqueos.html", usuario, **_datos_bloqueos(request))
+
+
+@router.get("/bloqueos/lista")
+def bloqueos_lista(request: Request, usuario=Depends(security.requiere_admin)):
+    """La tabla sola, para cuando el bot bloquea o suelta a alguien.
+
+    Los bloqueos se ponen solos mientras nadie mira, así que la pantalla tenía
+    que recargarse a mano para enterarse de que un chat se quedó mudo.
+    """
+    return render(request, "_bloqueos_lista.html", usuario, **_datos_bloqueos(request))
+
+
+@router.post("/bloqueos/{canal}/{client_id}/desbloquear")
+def quitar_bloqueo(
+    request: Request,
+    canal: str,
+    client_id: str,
+    csrf: str = Form(""),
+    volver: str = Form(""),
+    usuario=Depends(security.requiere_admin),
+):
+    security.verificar_csrf(request, csrf)
+    bloqueos.desbloquear(canal, client_id)
+    destino = volver if volver.startswith("/admin/") else "/admin/bloqueos"
+    separador = "&" if "?" in destino else "?"
+    return RedirectResponse(
+        f"{destino}{separador}aviso={quote(f'{client_id} ya puede volver a escribir')}",
+        status_code=303,
+    )
+
+
+@router.post("/logs/{canal}/{client_id}/eliminar")
+def eliminar_conversacion(
+    request: Request,
+    canal: str,
+    client_id: str,
+    csrf: str = Form(""),
+    volver: str = Form(""),
+    usuario=Depends(security.requiere_admin),
+):
+    """Borra una conversación entera: el historial y lo que el bot recuerda de ella.
+
+    Son dos mitades y solo una es nuestra. En Postgres borramos el log, los
+    shots y la pertenencia al negocio; el hilo en Redis y los recordatorios
+    agendados los suelta el bot, porque el esquema de claves y los ids de tarea
+    son suyos. Si esa segunda llamada falla se dice explícitamente: en la base
+    ya no queda nada, pero el bot seguiría contestando el próximo mensaje con la
+    conversación entera en memoria, y callarlo haría creer que se borró todo.
+
+    La factura NO se toca: `uso_eventos` es el libro mayor y el pasado no se
+    recalcula.
+    """
+    security.verificar_csrf(request, csrf)
+    borrado = trazabilidad.eliminar_conversacion(client_id, canal)
+    fallo_del_bot = bot_interno.olvidar_conversacion(canal, client_id)
+
+    if fallo_del_bot:
+        clave, texto = "error", (
+            f"Se borró el historial ({borrado['mensajes']} mensajes), pero el bot no pudo "
+            f"soltar la conversación de su memoria: {fallo_del_bot}. Hasta que venza el "
+            "plazo de retención podría seguir recordando el hilo."
+        )
+    else:
+        clave, texto = "aviso", f"Conversación eliminada ({borrado['mensajes']} mensajes)"
+
+    # `volver` solo puede llevar a una página del propio panel de administración:
+    # sin esta comprobación, un enlace preparado convertiría el botón de borrar
+    # en un salto a un sitio externo.
+    destino = volver if volver.startswith("/admin/") else "/admin/logs"
+    separador = "&" if "?" in destino else "?"
+    return RedirectResponse(f"{destino}{separador}{clave}={quote(texto)}", status_code=303)
 
 
 # --- Clientes (los negocios a los que les damos el servicio) -------------------
@@ -112,11 +272,62 @@ def negocio_detalle(request: Request, negocio_id: int, usuario=Depends(security.
         "negocio.html",
         usuario,
         negocio=negocio,
+        # Las fechas de esta página son de este proyecto: se muestran en SU hora.
+        proyecto=negocio,
         resumen=clientes_whatsapp.resumen_actividad(),
         cuentas=usuarios.listar_negocios_sin_vincular(negocio.get("usuario_id")),
         eventos=clientes_whatsapp.EVENTOS_REQUERIDOS,
         eventos_no=clientes_whatsapp.EVENTOS_DESACONSEJADOS,
         zonas=clientes_whatsapp.ZONAS_HORARIAS,
+        ajustes=settings,
+        # Se muestra una sola vez, justo después de crear la cuenta del cliente.
+        nueva_cuenta=request.query_params.get("nueva_cuenta", ""),
+        nueva_password=request.query_params.get("nueva_password", ""),
+        # Último tramo de la miga: «Clientes › Escuela de manejo», con «Clientes»
+        # llevando de vuelta al listado.
+        miga_final=negocio["nombre"],
+    )
+
+
+@router.get("/negocios/{negocio_id}/resumen")
+def negocio_resumen(request: Request, negocio_id: int, usuario=Depends(security.requiere_admin)):
+    """Las cuatro cifras del perfil, solas.
+
+    Es la pantalla a la que se entra cuando el cliente llama a reclamar: sus
+    números tienen que ser los de ahora, no los de cuando se abrió la pestaña.
+    """
+    negocio = clientes_whatsapp.obtener(negocio_id)
+    if not negocio:
+        raise HTTPException(status_code=404, detail="Ese cliente ya no existe")
+    return render(
+        request,
+        "_negocio_resumen.html",
+        usuario,
+        negocio=negocio,
+        proyecto=negocio,  # las horas, en la zona del proyecto
+        resumen=clientes_whatsapp.resumen_actividad(),
+    )
+
+
+@router.get("/negocios/{negocio_id}/conversaciones")
+def negocio_conversaciones(
+    request: Request, negocio_id: int, usuario=Depends(security.requiere_admin)
+):
+    """Lista de conversaciones DE ESE negocio, para la ventana flotante.
+
+    Devuelve solo el fragmento (sin el armazón de la página) porque se inyecta
+    dentro del `<dialog>` del perfil: así el administrador no pierde el sitio en
+    el que estaba, que es la razón de ser de las ventanas flotantes aquí.
+    """
+    busqueda = request.query_params.get("q", "")
+    return render(
+        request,
+        "_conversaciones_negocio.html",
+        usuario,
+        proyecto=clientes_whatsapp.obtener(negocio_id),
+        negocio_id=negocio_id,
+        busqueda=busqueda,
+        conversaciones=trazabilidad.listar_conversaciones(busqueda, negocio_id=negocio_id),
     )
 
 
@@ -200,6 +411,80 @@ def negocio_cuenta(
     )
 
 
+@router.post("/negocios/{negocio_id}/cuenta/crear")
+def negocio_cuenta_crear(
+    request: Request,
+    negocio_id: int,
+    csrf: str = Form(""),
+    nombre: str = Form(...),
+    usuario=Depends(security.requiere_admin),
+):
+    """Crea la cuenta con la que ESTE cliente entra a su panel, y se la vincula.
+
+    Antes había que ir a «Cuentas de acceso», crear un usuario suelto, volver al
+    perfil y vincularlo desde un desplegable. Eran tres pantallas para una sola
+    idea —«este cliente necesita entrar»—, y el desplegable no explicaba de qué
+    cuenta hablaba. La contraseña se muestra una vez, como en el alta normal.
+    """
+    security.verificar_csrf(request, csrf)
+    nombre = nombre.strip()
+    if usuarios.buscar_por_usuario(nombre):
+        return RedirectResponse(
+            f"/admin/negocios/{negocio_id}?error={quote('Ya existe una cuenta con ese usuario')}",
+            status_code=303,
+        )
+
+    password = usuarios.generar_password()
+    try:
+        cuenta = usuarios.crear(nombre, password, security.ROL_NEGOCIO)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/negocios/{negocio_id}?error={quote(str(e))}", status_code=303)
+
+    clientes_whatsapp.vincular_cuenta(negocio_id, cuenta["id"])
+    return RedirectResponse(
+        f"/admin/negocios/{negocio_id}?nueva_cuenta={quote(nombre)}&nueva_password={quote(password)}"
+        f"&aviso={quote('Cuenta creada. Cópiale la contraseña ahora: no se vuelve a mostrar.')}",
+        status_code=303,
+    )
+
+
+@router.post("/negocios/{negocio_id}/cuenta/renombrar")
+def negocio_cuenta_renombrar(
+    request: Request,
+    negocio_id: int,
+    csrf: str = Form(""),
+    usuario_id: int = Form(...),
+    nombre: str = Form(...),
+    usuario=Depends(security.requiere_admin),
+):
+    """Cambia el nombre de la cuenta con la que este proyecto ingresa.
+
+    Va aquí, en el perfil del proyecto, y no en «Cuentas de acceso»: el nombre de
+    usuario es de este proyecto, y es donde se está mirando cuando uno se da
+    cuenta de que dice «Cliente Germán» en vez del nombre de la persona.
+
+    Se comprueba que la cuenta sea la de ESTE proyecto: sin eso, el id del
+    formulario permitiría renombrar la cuenta de cualquier otro desde aquí.
+    """
+    security.verificar_csrf(request, csrf)
+    negocio = clientes_whatsapp.obtener(negocio_id)
+    if not negocio or negocio.get("usuario_id") != usuario_id:
+        return RedirectResponse(
+            f"/admin/negocios/{negocio_id}?error={quote('Esa cuenta no es de este proyecto')}",
+            status_code=303,
+        )
+
+    try:
+        cuenta = usuarios.renombrar(usuario_id, nombre)
+    except ValueError as e:
+        return RedirectResponse(f"/admin/negocios/{negocio_id}?error={quote(str(e))}", status_code=303)
+
+    aviso = "La cuenta ahora ingresa como «%s»" % cuenta["usuario"]
+    return RedirectResponse(
+        f"/admin/negocios/{negocio_id}?aviso={quote(aviso)}", status_code=303
+    )
+
+
 @router.post("/negocios/{negocio_id}/regenerar")
 def negocio_regenerar(
     request: Request, negocio_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_admin)
@@ -243,16 +528,23 @@ def negocio_eliminar(
 
 # --- Incidencias de envíos ---------------------------------------------------
 
+def _datos_incidencias(request: Request) -> dict:
+    abiertas = request.query_params.get("abiertas") == "1"
+    return {
+        "incidencias": mensajeria.listar_incidencias(solo_abiertas=abiertas),
+        "solo_abiertas": abiertas,
+    }
+
+
 @router.get("/incidencias")
 def incidencias(request: Request, usuario=Depends(security.requiere_admin)):
-    abiertas = request.query_params.get("abiertas") == "1"
-    return render(
-        request,
-        "incidencias.html",
-        usuario,
-        incidencias=mensajeria.listar_incidencias(solo_abiertas=abiertas),
-        solo_abiertas=abiertas,
-    )
+    return render(request, "incidencias.html", usuario, **_datos_incidencias(request))
+
+
+@router.get("/incidencias/lista")
+def incidencias_lista(request: Request, usuario=Depends(security.requiere_admin)):
+    """Las tarjetas solas, para que una incidencia recién escalada salga sola."""
+    return render(request, "_incidencias_lista.html", usuario, **_datos_incidencias(request))
 
 
 @router.post("/incidencias/{incidencia_id}/revisada")

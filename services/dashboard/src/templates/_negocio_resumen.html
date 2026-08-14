@@ -1,0 +1,28 @@
+{# Las cuatro cifras del perfil del proyecto. Se vuelven a pedir cuando el bot
+   atiende a alguien o deriva una conversación (temas «uso», «conversaciones» y
+   «reportes»): son justo los números que se miran cuando el cliente llama para
+   reclamar, y verlos congelados de hace media hora es peor que no verlos. #}
+<div class="cifras">
+  <div class="cifra">
+    <div class="etiqueta">Conversaciones</div>
+    <div class="valor">{{ resumen.conversaciones or 0 }}</div>
+    <div class="nota">{{ resumen.clientes or 0 }} clientes distintos</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Facturado</div>
+    <div class="valor">{{ resumen.facturado_microusd | usd }}</div>
+    <div class="nota">Costo real {{ resumen.real_microusd | usd }}</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Reportes pendientes</div>
+    <div class="valor">{{ resumen.reportes_pendientes or 0 }}</div>
+    <div class="nota">Sin revisar por el negocio</div>
+  </div>
+  <div class="cifra">
+    <div class="etiqueta">Última actividad</div>
+    <div class="valor" style="font-size:19px">
+      {% if resumen.ultima_actividad %}{{ resumen.ultima_actividad | fecha }}{% else %}—{% endif %}
+    </div>
+    <div class="nota">{{ negocio.eventos_recibidos }} eventos recibidos</div>
+  </div>
+</div>

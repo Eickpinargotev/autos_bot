@@ -1,0 +1,85 @@
+{# Las sesiones de envío. Fragmento aparte porque se repinta solo cada 5 s. #}
+
+<div class="sesiones">
+  {% for l in lotes %}
+  <article class="sesion {{ l.estado | replace(' ', '-') }}" id="lote-{{ l.id }}">
+    <div class="sesion-cabecera">
+      <span class="clave">{{ l.etiqueta or '(sin nombre)' }}</span>
+      <span class="sub" style="margin:0">
+        {{ l.canal }} · {{ l.total }} número{{ '' if l.total == 1 else 's' }} ·
+        {{ l.creado_en | fecha }}
+        {% if l.programada %}· empieza {{ l.empieza_en | fecha }}{% endif %}
+      </span>
+      <span style="flex:1"></span>
+      {% if l.estado == 'en curso' %}<span class="pastilla">en curso</span>
+      {% elif l.estado == 'cancelada' %}<span class="pastilla alerta">cancelada</span>
+      {% elif l.errores %}<span class="pastilla error">terminada con fallos</span>
+      {% else %}<span class="pastilla ok">terminada</span>{% endif %}
+    </div>
+
+    {# La barra dice cuánto va HECHO (enviado o fallado), no cuánto salió bien:
+       lo que se está esperando es que la tanda termine. #}
+    <div class="barra" role="progressbar" aria-valuenow="{{ l.porcentaje }}"
+         aria-valuemin="0" aria-valuemax="100">
+      <span class="barra-relleno" style="width:{{ l.porcentaje }}%"></span>
+    </div>
+
+    <div class="sesion-pie">
+      <span class="sub" style="margin:0">
+        <strong>{{ l.enviados }}</strong> enviados
+        {% if l.errores %} · <span style="color:var(--error)"><strong>{{ l.errores }}</strong> fallaron</span>{% endif %}
+        {% if l.quedan and not l.cancelado %} · {{ l.quedan }} en cola{% endif %}
+      </span>
+      <span style="flex:1"></span>
+
+      <button class="mini" data-abre="destinos-{{ l.id }}"
+              data-carga="/envios/{{ l.id }}/destinos" data-carga-en="cuerpo-{{ l.id }}">Ver</button>
+
+      {% if l.estado == 'en curso' %}
+      <form method="post" action="/envios/{{ l.id }}/cancelar">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini peligro">Cancelar</button>
+      </form>
+      {% else %}
+      <button class="icono-accion peligro" data-abre="borrar-lote-{{ l.id }}"
+              title="Quitar del historial" aria-label="Quitar del historial">✕</button>
+      {% endif %}
+    </div>
+  </article>
+
+  {# El detalle se pide al abrir la ventana, no al pintar la lista: con veinte
+     sesiones serían veinte consultas por cada refresco de la barra. #}
+  <dialog class="flotante ancha" id="destinos-{{ l.id }}">
+    <div class="cabecera">
+      <h2>{{ l.etiqueta }} · {{ l.total }} número{{ '' if l.total == 1 else 's' }}</h2>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo" id="cuerpo-{{ l.id }}">
+      <p class="sub">Cargando…</p>
+    </div>
+  </dialog>
+
+  {% if l.estado != 'en curso' %}
+  <dialog class="flotante" id="borrar-lote-{{ l.id }}">
+    <div class="cabecera">
+      <h2>¿Quitar esta sesión del historial?</h2>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo">
+      <p style="margin-top:0">
+        Se borra el registro de «{{ l.etiqueta }}» y de sus {{ l.total }} destinatarios.
+        Los mensajes que ya salieron no se deshacen, y lo que consumieron sigue en tu
+        consumo: el pasado no se recalcula.
+      </p>
+      <form method="post" action="/envios/{{ l.id }}/eliminar" class="linea" style="justify-content:flex-end">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Sí, quitar</button>
+      </form>
+    </div>
+  </dialog>
+  {% endif %}
+  {% else %}
+  <div class="panel vacio">Todavía no has hecho envíos.</div>
+  {% endfor %}
+</div>

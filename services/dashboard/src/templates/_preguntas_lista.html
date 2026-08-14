@@ -1,0 +1,30 @@
+{# Se vuelve a pedir sola cuando el agente se queda sin respuesta (tema
+   «preguntas»). La página la incluye y `/preguntas/lista` devuelve esto mismo. #}
+<div class="panel tabla-scroll">
+  <table>
+    <thead><tr><th>Fecha</th><th>Pregunta</th><th></th></tr></thead>
+    <tbody>
+      {% for p in preguntas %}
+      <tr class="{{ 'fila-atendida' if p.atendida }}">
+        <td style="white-space:nowrap">{{ p.creado_en | fecha }}</td>
+        <td>{{ p.pregunta }}</td>
+        <td style="white-space:nowrap">
+          {% if p.atendida %}
+          <span class="pastilla ok">entendido</span>
+          {% if p.caduca_en %}
+          <div style="font-size:11px;color:var(--tenue)">se borra el {{ p.caduca_en | fecha }}</div>
+          {% endif %}
+          {% else %}
+          <form method="post" action="/preguntas/{{ p.id }}/atendida">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini">Entendido</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="vacio">No hay preguntas pendientes.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -37,38 +37,110 @@ class NoSeCobraTests(unittest.TestCase):
     """Los acuses automáticos responden, pero no generan un cargo."""
 
     def _procesar(self, mensaje: InboundMessage):
+        # `PostgresUserRepo` se sustituye porque, sin él, `is_blocked` consulta
+        # la base de desarrollo de verdad: un número que quedó bloqueado por
+        # otra prueba corta el flujo antes de tiempo y estos casos pasarían (o
+        # fallarían) por un motivo que no tiene nada que ver con lo que miden.
         with patch(
             "src.application.conversation_orchestrator.seguimiento_service.registrar_uso_codigo"
         ) as cobro, patch(
             "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
-        ), patch(
+        ) as log, patch(
             "src.application.conversation_orchestrator.BufferService.add_image_info_count",
             return_value=True,
+        ), patch(
+            "src.application.conversation_orchestrator.PostgresUserRepo"
+        ) as repo, patch(
+            "src.application.conversation_orchestrator.BufferService.add_message", return_value=1
+        ), patch(
+            "src.application.conversation_orchestrator.process_buffered_messages"
         ):
+            repo.return_value.is_blocked.return_value = False
             acciones = ConversationOrchestrator().handle(mensaje)
-        return acciones, cobro
+        return acciones, cobro, log
 
     def test_una_imagen_recibe_respuesta_pero_no_se_cobra(self):
-        acciones, cobro = self._procesar(_entrante(MessageType.IMAGE))
+        acciones, cobro, log = self._procesar(_entrante(MessageType.IMAGE))
 
         self.assertTrue(acciones, "el cliente debe recibir el aviso")
-        self.assertIn("imágenes", acciones[0].text.lower())
+        self.assertIn("imagen", acciones[0].text.lower())
+        log.assert_called_once()
         cobro.assert_not_called()
 
     def test_un_documento_tampoco_se_cobra(self):
-        acciones, cobro = self._procesar(_entrante(MessageType.DOCUMENT))
+        acciones, cobro, _ = self._procesar(_entrante(MessageType.DOCUMENT))
 
         self.assertTrue(acciones)
+        self.assertIn("documento", acciones[0].text.lower())
         cobro.assert_not_called()
 
-    def test_un_sticker_recibe_su_propia_respuesta_y_no_se_cobra(self):
-        """Un sticker no es una consulta ilegible: es un gesto. Contestarle
-        «no podemos ver imágenes» suena a error donde no lo hubo."""
-        acciones, cobro = self._procesar(_entrante(MessageType.STICKER))
+    def test_un_video_recibe_su_propio_aviso(self):
+        acciones, cobro, _ = self._procesar(_entrante(MessageType.VIDEO))
+
+        self.assertTrue(acciones, "un video tampoco se puede revisar por este medio")
+        self.assertIn("video", acciones[0].text.lower())
+        cobro.assert_not_called()
+
+    def test_un_enlace_recibe_el_aviso_sin_gastar_un_turno_del_modelo(self):
+        acciones, cobro, _ = self._procesar(_entrante(MessageType.TEXT, "mira esto https://ejemplo.com/x"))
 
         self.assertTrue(acciones)
-        self.assertNotIn("no podemos ver", acciones[0].text.lower())
+        self.assertIn("enlace", acciones[0].text.lower())
         cobro.assert_not_called()
+
+    def test_un_texto_normal_no_se_confunde_con_un_enlace(self):
+        """El acuse de enlace no puede comerse una consulta corriente."""
+        acciones, _, _ = self._procesar(
+            _entrante(MessageType.TEXT, "buenas, cuanto cuesta el curso? gracias")
+        )
+
+        self.assertEqual(acciones, [])
+
+    def test_un_sticker_no_se_responde_pero_si_queda_en_el_historial(self):
+        """El bot lo deja pasar; el panel lo muestra.
+
+        No se responde porque es un gesto, no una consulta —y en WhatsApp cada
+        envío consume la cuota del plan, así que contestarle deja sin respuesta
+        al mensaje que sí importaba—. Pero sí se registra: quien lee el chat en
+        el panel necesita ver lo que pasó de verdad, sin huecos.
+        """
+        acciones, cobro, log = self._procesar(_entrante(MessageType.STICKER))
+
+        self.assertEqual(acciones, [], "no se responde")
+        cobro.assert_not_called()
+        log.assert_called_once()
+        self.assertEqual(log.call_args.kwargs["event_type"], "sticker_ignorado")
+
+    def test_la_media_deja_anotado_que_se_envio_el_aviso(self):
+        """Esa etiqueta es la que el panel muestra entre corchetes."""
+        for tipo in (MessageType.IMAGE, MessageType.DOCUMENT, MessageType.VIDEO):
+            with self.subTest(tipo=tipo):
+                _, _, log = self._procesar(_entrante(tipo))
+                self.assertEqual(log.call_args.kwargs["event_type"], "media_avisada")
+
+    def test_un_correo_no_es_un_enlace(self):
+        """Dar un correo es de lo más normal aquí; no puede disparar el acuse."""
+        from src.application.conversation_orchestrator import _ENLACE
+
+        for texto in (
+            "mi correo es ana@gmail.com",
+            "escribeme a juan.perez@hotmail.com por favor",
+            "son 50.000 colones",
+        ):
+            with self.subTest(texto=texto):
+                self.assertIsNone(_ENLACE.search(texto))
+
+    def test_reconoce_las_formas_en_que_se_pega_un_enlace(self):
+        from src.application.conversation_orchestrator import _ENLACE
+
+        for texto in (
+            "mira https://fb.com/x",
+            "www.ejemplo.cr",
+            "vean ejemplo.com/promo",
+            "pagina: WWW.Ejemplo.COM",
+        ):
+            with self.subTest(texto=texto):
+                self.assertIsNotNone(_ENLACE.search(texto))
 
     def test_el_texto_de_los_avisos_no_esta_en_el_codigo(self):
         """Regla del repo: el texto de negocio vive en `mensajes.json`."""
@@ -91,7 +163,10 @@ class SiSeCobraTests(unittest.TestCase):
         ) as cobro, patch(
             "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
         ), patch(
-            "src.application.conversation_orchestrator.mensajes_del_negocio",
+            "src.application.conversation_orchestrator.palabras_clave_repository.buscar",
+            return_value={"id": 1, "palabra": "tareas"},
+        ), patch(
+            "src.application.conversation_orchestrator.palabras_clave_repository.textos_de",
             return_value=["curso teórico: enlace"],
         ), patch(
             "src.application.conversation_orchestrator.cancel_scheduled_tasks"
@@ -122,7 +197,7 @@ class MensajesEditablesTests(unittest.TestCase):
             return_value=["texto del panel"],
         ):
             self.assertEqual(
-                message_catalog.mensajes_del_negocio("KEYWORD", "T1"), ["texto del panel"]
+                message_catalog.mensajes_del_negocio("WELCOME", "W"), ["texto del panel"]
             )
 
     def test_sin_nada_en_la_base_cae_al_archivo(self):
@@ -132,18 +207,21 @@ class MensajesEditablesTests(unittest.TestCase):
         with patch(
             "src.infrastructure.repositories.plantillas_repository.textos_de", return_value=[]
         ):
-            desde_archivo = message_catalog.mensajes_del_negocio("KEYWORD", "T1")
+            desde_archivo = message_catalog.mensajes_del_negocio("WELCOME", "W")
 
-        self.assertEqual(desde_archivo, message_catalog.get_messages_for_node("KEYWORD", "T1"))
+        self.assertEqual(desde_archivo, message_catalog.get_messages_for_node("WELCOME", "W"))
         self.assertTrue(desde_archivo)
 
     def test_los_fragmentos_del_agente_no_son_editables(self):
         """Los textos que el prompt referencia por id no salen del panel:
-        cambiarlos desde ahí rompería el contrato con el modelo."""
+        cambiarlos desde ahí rompería el contrato con el modelo.
+
+        Y las palabras clave tampoco están ya aquí: se mudaron a su propia tabla
+        (`palabras_clave`), con sus recordatorios y sus minutos."""
         from src.application.message_catalog import CLAVES_EDITABLES
 
         categorias = {categoria for categoria, _ in CLAVES_EDITABLES}
-        self.assertEqual(categorias, {"KEYWORD", "WELCOME"})
+        self.assertEqual(categorias, {"WELCOME"})
 
     def test_el_adjunto_viaja_como_marcador_en_el_texto(self):
         from src.infrastructure.repositories import plantillas_repository
@@ -154,7 +232,7 @@ class MensajesEditablesTests(unittest.TestCase):
             return_value=[{"orden": 1, "texto": "Mira esto", "media_tipo": "imagen", "media_ref": "1AbC"}],
         ):
             self.assertEqual(
-                plantillas_repository.textos_de("TAREAS"), ["Mira esto\nImagen=1AbC"]
+                plantillas_repository.textos_de("BIENVENIDA_GRUPO"), ["Mira esto\nImagen=1AbC"]
             )
 
 

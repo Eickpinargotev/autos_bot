@@ -54,6 +54,10 @@ from src.db.migrate import aplicar_migraciones  # noqa: E402
 _TABLAS = (
     "incidencias",
     "envios",
+    # Las sesiones de envío. El CASCADE de `envios` no se las lleva (la clave
+    # foránea va al revés), así que sin nombrarla los lotes de un caso salían en
+    # la lista del siguiente.
+    "envios_lote",
     "plantillas_mensaje",
     "sistema_config",
     "uso_eventos",
@@ -62,12 +66,25 @@ _TABLAS = (
     "plantilla_partes",
     "dashboard_sesiones",
     "dashboard_usuarios",
-    "invitaciones_ciudades",
     "conversation_messages",
+    # No tiene clave foránea a nada, así que el CASCADE de las otras no se la
+    # lleva: sin nombrarla aquí, los shots se acumularían entre casos.
+    "conversation_shots",
+    # Es del bot, pero el panel la lee y la limpia (pantalla de bloqueos): sin
+    # vaciarla, un bloqueo de un caso callaría al usuario del siguiente.
+    "users_blocked",
     "clientes_whatsapp",
     "reportes",
     "rag_chunks",
     "preguntas_sin_respuesta",
+    # La ficha de cada persona que le escribe al bot. Tampoco tiene clave foránea
+    # a nada, así que sobrevivía a los CASCADE: un cliente de un caso aparecía en
+    # la tabla de actividad del siguiente y desordenaba lo que se estaba
+    # comprobando (quién fue el último en escribir).
+    "seguimiento_clientes",
+    # El CASCADE se lleva sus piezas, pero la tabla de cabecera hay que
+    # nombrarla: una palabra clave de un caso dispararía el flujo en el siguiente.
+    "palabras_clave",
 )
 
 
@@ -95,11 +112,22 @@ def _base_limpia():
 
 
 def _sembrar_mensajes_del_negocio() -> None:
+    """Re-aplica la semilla de palabras clave y mensajes del negocio.
+
+    Se replica la migración 016 y NO la 007, que fue la primera semilla: aquella
+    escribía en la columna `nombre` de `plantillas_mensaje`, que la 016 elimina,
+    así que volver a aplicarla contra el esquema actual falla. La 016 es
+    idempotente entera (CREATE IF NOT EXISTS, INSERT condicionado, DROP IF
+    EXISTS), justo para poder usarse así.
+
+    Hace falta porque el bot depende de que estas filas existan: probar contra
+    tablas vacías no reflejaría el sistema real.
+    """
     from pathlib import Path
 
     from src.db.migrate import DIRECTORIO_MIGRACIONES
 
-    sql = (Path(DIRECTORIO_MIGRACIONES) / "007_mensajes_del_negocio.sql").read_text(encoding="utf-8")
+    sql = (Path(DIRECTORIO_MIGRACIONES) / "016_palabras_clave.sql").read_text(encoding="utf-8")
     pool.ejecutar(sql)
 
 

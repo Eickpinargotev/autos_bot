@@ -16,6 +16,10 @@ def _datos_periodo(periodo: dict) -> dict:
         "totales": facturacion.totales_de_periodo(periodo["id"]),
         "categorias": facturacion.desglose_por_categoria(periodo["id"]),
         "serie": facturacion.serie_diaria(periodo["id"]),
+        # Solo se muestra en la vista del administrador: al negocio no le dice
+        # nada un porcentaje de tokens reutilizados, y ya ve el efecto en su
+        # total. A nosotros nos avisa si el prompt dejó de ser cacheable.
+        "cache": facturacion.ahorro_por_cache(periodo["id"]),
     }
 
 

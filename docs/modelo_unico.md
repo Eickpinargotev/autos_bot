@@ -77,8 +77,8 @@ Los flujos NO se perdieron; cambiaron de forma:
    - `handoff` → mensaje humano + reporte en NocoDB + bloqueo 12 días +
      limpieza de contexto (idéntico al comportamiento anterior).
    - `close` → despedida y limpieza de estado.
-   - `city_invitation` → delega en `PublicidadService` (invitación por ciudad);
-     si la ciudad no existe, reporte + bloqueo como antes.
+   - `city_invitation` → delega en `PublicidadService`, que manda el mensaje del
+     panel cuya clave es esa ciudad; si no existe, reporte + bloqueo como antes.
 3. El historial guarda los fragmentos como etiquetas (`[[frag:ID]]`), no el
    texto completo: el prompt y Redis se mantienen livianos y el modelo sabe
    exactamente qué recibió el cliente.

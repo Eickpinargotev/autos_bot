@@ -1,0 +1,78 @@
+{# Solo las burbujas, sin la cabecera ni el marco del chat.
+
+   Existe aparte porque se pinta de DOS formas y tiene que verse igual en las
+   dos: el hilo completo (`_conversacion_hilo.html`) y la cola en vivo, que pide
+   únicamente lo que llegó después del último mensaje ya pintado y lo añade al
+   final. Si esto estuviera escrito dos veces, un día dejarían de coincidir.
+
+   Dos variables gobiernan el modo:
+
+   * `dia_previo` — el día del último mensaje YA pintado. El separador de día se
+     dibuja al cambiar de día, así que añadiendo por el final hay que decirle en
+     qué día se quedó lo anterior; sin esto, cada tanda nueva repetiría el
+     separador de hoy.
+   * `parcial` — con lo que se añade no se dice «Sin mensajes» cuando no hay
+     nada: no es que el chat esté vacío, es que no ha llegado nada nuevo. #}
+
+{# Quién habla. En el log hay tres voces (`author`): el cliente, la IA y el
+   dueño del negocio cuando escribe desde su teléfono. `direction` no basta
+   para distinguirlas: la IA y el dueño son las dos 'outbound'. #}
+{% macro quien(m) -%}
+  {%- if m.author == 'cliente' -%}{{ m.sender_name or 'Cliente' }}
+  {%- elif m.author == 'dueño' -%}Dueño del negocio
+  {%- elif m.author == 'ia' -%}Bot
+  {%- else -%}{{ m.sender_name or m.author }}{%- endif -%}
+{%- endmacro %}
+
+{% set ns = namespace(dia=dia_previo | default('', true)) %}
+{% for m in mensajes %}
+  {% if (m.created_at | dia_clave) != ns.dia %}
+    {% set ns.dia = m.created_at | dia_clave %}
+    <div class="separador-dia"><span>{{ m.created_at | dia_largo }}</span></div>
+  {% endif %}
+
+  {% if m.event_type == 'group_join' %}
+  <div class="nota-sistema" data-id="{{ m.id }}" data-dia="{{ m.created_at | dia_clave }}">Se unió al grupo · {{ m.created_at | hora }}</div>
+
+  {# Un sticker no se responde, pero sí se ve: quien lee el chat necesita
+     saber que llegó algo y que el bot lo dejó pasar a propósito. #}
+  {% elif m.event_type == 'sticker_ignorado' %}
+  <div class="nota-sistema" data-id="{{ m.id }}" data-dia="{{ m.created_at | dia_clave }}">[Sticker] · el bot no responde a stickers · {{ m.created_at | hora }}</div>
+
+  {% elif m.direction == 'internal' %}
+  <div class="burbuja internal" data-id="{{ m.id }}" data-dia="{{ m.created_at | dia_clave }}">
+    <div class="meta">{{ m.created_at | hora }} · {{ m.tool_name }} · {{ m.status }}
+      {%- if m.duration_ms %} · {{ m.duration_ms }} ms{% endif %}</div>
+    <div class="texto">{{- m.text -}}</div>
+    {% if m.error %}<div class="error-linea">{{ m.error }}</div>{% endif %}
+    {% if m.entrada or m.salida %}
+    <details>
+      <summary>datos</summary>
+      <pre>entrada: {{ m.entrada }}
+salida: {{ m.salida }}</pre>
+    </details>
+    {% endif %}
+  </div>
+
+  {% else %}
+  <div class="burbuja {{ m.direction }} de-{{ m.author }}" data-id="{{ m.id }}" data-dia="{{ m.created_at | dia_clave }}">
+    <div class="meta">
+      <span class="autor">{{ quien(m) }}</span> · {{ m.created_at | hora }}
+      {%- if m.message_type not in ('text', 'tool_event') %} · {{ m.message_type }}{% endif %}
+    </div>
+    {# El cliente mandó una nota de voz: lo que se guarda es la
+       transcripción, nunca el audio. La etiqueta avisa de dónde salió ese
+       texto, para que nadie lo lea como si lo hubiera escrito. #}
+    {% if m.event_type == 'audio_transcrito' %}
+    <div class="etiqueta-origen">🎤 Audio transcrito</div>
+    {% elif m.event_type == 'audio_no_transcrito' %}
+    <div class="etiqueta-origen">🎤 Audio · no se pudo transcribir</div>
+    {% elif m.event_type == 'media_avisada' %}
+    <div class="etiqueta-origen">📎 {{ m.message_type | capitalize }} · el bot no puede abrirlo, se envió el aviso</div>
+    {% endif %}
+    {% if m.text %}<div class="texto">{{- m.text -}}</div>{% endif %}
+  </div>
+  {% endif %}
+{% else %}
+  {% if not parcial %}<div class="vacio">Sin mensajes.</div>{% endif %}
+{% endfor %}

@@ -1,58 +1,141 @@
 {% extends "base.html" %}
 {% block titulo %}Conocimiento{% endblock %}
 
+{# Cada chunk es una BANDA que ocupa el ancho, no una tarjeta cuadrada: lo que
+   hay dentro es un párrafo, y un párrafo se lee a lo ancho. En rejilla cuadrada
+   el texto salía en columnas estrechas de cuatro palabras y hacía falta abrir
+   cada uno para saber de qué iba.
+
+   La banda entera se pulsa para editar. El botón «Editar» sobraba: si al pulsar
+   la tarjeta no pasa nada, lo que hay que explicar es por qué no. #}
+
 {% block contenido %}
-<h1>Base de conocimiento</h1>
-<p class="sub">
-  Lo que el bot consulta para responder dudas sueltas. Al guardar se reindexa
-  enseguida; si el bot está reiniciándose, se pone al día solo en unos minutos.
-</p>
-
-<div class="panel">
-  <form class="linea" method="get" action="/admin/rag">
-    <input name="q" value="{{ busqueda }}" placeholder="Buscar…">
-    <button>Buscar</button>
-  </form>
-</div>
-
-<div class="panel">
-  <h2 style="margin-top:0">Agregar</h2>
-  <form method="post" action="/admin/rag">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label for="titulo">Pregunta o tema</label>
-    <input id="titulo" name="titulo" required>
-    <label for="contenido">Respuesta</label>
-    <textarea id="contenido" name="contenido" required></textarea>
-    <p></p>
-    <button class="primario">Agregar</button>
-  </form>
-</div>
-
-{% for c in chunks %}
-<div class="panel">
-  <form method="post" action="/admin/rag/{{ c.id }}">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Pregunta o tema</label>
-    <input name="titulo" value="{{ c.titulo }}">
-    <label>Respuesta</label>
-    <textarea name="contenido">{{ c.contenido }}</textarea>
-    <p></p>
-    <button class="primario">Guardar</button>
-  </form>
-  <div class="linea" style="margin-top:8px">
-    <span class="pastilla {{ 'ok' if c.activo else 'alerta' }}">{{ 'activo' if c.activo else 'inactivo' }}</span>
-    <form method="post" action="/admin/rag/{{ c.id }}/activo">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="mini">{{ 'Desactivar' if c.activo else 'Activar' }}</button>
+<div class="titulo-con-acciones">
+  <div>
+    <h1>Base de conocimiento</h1>
+    <p class="sub" style="margin-bottom:0">
+      Cada trozo de texto se vectoriza por separado y el agente recupera el que
+      más se parece a lo que preguntó el cliente. Al guardar se vuelve a
+      vectorizar enseguida; si el bot está reiniciándose, se pone al día solo en
+      unos minutos.
+    </p>
+  </div>
+  <div class="acciones-cabecera">
+    <form class="linea" method="get" action="/conocimiento">
+      <input name="q" value="{{ busqueda }}" placeholder="Buscar…" autocomplete="off">
+      <button class="mini">Buscar</button>
     </form>
-    <form method="post" action="/admin/rag/{{ c.id }}/eliminar"
-          onsubmit="return confirm('¿Eliminar este contenido de la base de conocimiento?')">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="mini peligro">Eliminar</button>
-    </form>
+    <button class="boton primario mini" data-abre="nuevo-chunk">Agregar</button>
   </div>
 </div>
-{% else %}
-<div class="panel vacio">La base de conocimiento está vacía.</div>
-{% endfor %}
+
+{% set largos = chunks | selectattr('demasiado_largo') | list | length %}
+{% if largos %}
+<div class="mensaje aviso">
+  <strong>{{ largos }}</strong> de {{ chunks | length }} chunks pasan de {{ limite }} caracteres.
+  No se han recortado —cortar tu conocimiento sin preguntarte podría dejar fuera justo
+  el dato que importaba—, pero conviene partirlos: un trozo largo mezcla varios asuntos,
+  su vector queda en el promedio de todos y deja de parecerse a ninguna pregunta concreta.
+</div>
+{% endif %}
+
+<div class="chunks">
+  {% for c in chunks %}
+  {# `data-abre` en la banda entera: un clic en cualquier parte abre la edición.
+     El visto y la papelera de dentro siguen siendo suyos (ver app.js). #}
+  <article class="chunk {{ '' if c.activo else 'apagada' }}" data-abre="editar-{{ c.id }}"
+           role="button" tabindex="0" aria-label="Editar este chunk">
+    <form method="post" action="/conocimiento/{{ c.id }}/activo" class="chunk-estado">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="visto {{ 'si' if c.activo }}" type="submit"
+              title="{{ 'Se está usando: clic para desactivarlo' if c.activo else 'Desactivado: clic para volver a usarlo' }}"
+              aria-label="{{ 'Desactivar' if c.activo else 'Activar' }}">
+        {{ iconos.icono('visto') }}
+      </button>
+    </form>
+
+    <p class="chunk-texto">{{ c.contenido }}</p>
+
+    <div class="chunk-meta">
+      <span class="chunk-largo {{ 'alerta' if c.demasiado_largo }}">{{ c.largo }}/{{ limite }}</span>
+      <button class="icono-accion peligro" data-abre="borrar-chunk-{{ c.id }}"
+              title="Eliminar" aria-label="Eliminar">{{ iconos.icono('basura') }}</button>
+    </div>
+  </article>
+
+  <dialog class="flotante ancha" id="editar-{{ c.id }}">
+    <div class="cabecera">
+      <h2>Editar chunk</h2>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo">
+      <form method="post" action="/conocimiento/{{ c.id }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="contenido-{{ c.id }}">Contenido</label>
+        <textarea id="contenido-{{ c.id }}" name="contenido" rows="12" required
+                  data-contador="{{ limite }}" style="width:100%">{{ c.contenido }}</textarea>
+        <p class="sub" style="margin:6px 0 0">
+          Un solo asunto por chunk. Si estás juntando dos cosas distintas, sepáralas
+          en dos: cada una se busca por su cuenta y las dos se encuentran mejor.
+        </p>
+        <div class="linea" style="justify-content:flex-end;margin-top:14px">
+          <button class="mini" type="button" data-cierra>Cancelar</button>
+          <button class="primario">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog class="flotante" id="borrar-chunk-{{ c.id }}">
+    <div class="cabecera">
+      <h2>¿Eliminar este chunk?</h2>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo">
+      <p style="margin-top:0">
+        ¿Estás seguro de que quieres eliminar este chunk de información?
+        El agente dejará de usarlo para responder y no se puede deshacer.
+      </p>
+      <p class="sub cita">«{{ c.contenido | truncate(160) }}»</p>
+      <p class="sub">
+        Si solo quieres apagarlo un rato, el visto de la esquina lo saca del
+        agente sin borrarlo.
+      </p>
+      <form method="post" action="/conocimiento/{{ c.id }}/eliminar" class="linea" style="justify-content:flex-end">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Sí, eliminar</button>
+      </form>
+    </div>
+  </dialog>
+  {% else %}
+  <div class="panel vacio">
+    {% if busqueda %}Nada coincide con «{{ busqueda }}».
+    {% else %}La base de conocimiento está vacía.{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<dialog class="flotante ancha" id="nuevo-chunk">
+  <div class="cabecera">
+    <h2>Agregar chunk</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/conocimiento">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="contenido">Contenido</label>
+      <textarea id="contenido" name="contenido" rows="12" required
+                data-contador="{{ limite }}" style="width:100%"
+                placeholder="El texto tal como quieres que el agente lo tenga en cuenta."></textarea>
+      <p class="sub" style="margin:6px 0 0">
+        Un solo asunto por chunk, máximo {{ limite }} caracteres.
+      </p>
+      <div class="linea" style="justify-content:flex-end;margin-top:14px">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Agregar</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 {% endblock %}

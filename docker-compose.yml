@@ -14,7 +14,6 @@ x-bot-environment: &bot-environment
   # WhatsApp (WasenderAPI). Sin credenciales el canal queda inactivo: el sender
   # falla con un mensaje claro y el webhook responde 503, nunca abierto.
   WASENDER_API_URL: ${WASENDER_API_URL:-https://wasenderapi.com}
-  WASENDER_API_KEY: ${WASENDER_API_KEY:-}
   WASENDER_WEBHOOK_SECRET: ${WASENDER_WEBHOOK_SECRET:-}
   # Token compartido con el dashboard para los endpoints internos del bot.
   INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}

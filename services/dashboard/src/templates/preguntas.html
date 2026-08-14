@@ -1,35 +1,21 @@
 {% extends "base.html" %}
 {% block titulo %}Preguntas sin respuesta{% endblock %}
 
+{# Una bandeja de trabajo, no un archivo. Por eso la única acción es
+   «Entendido»: no hay nada que editar aquí, lo que se arregla se arregla en el
+   conocimiento. Al marcarla se pone en verde y se borra sola. #}
+
 {% block contenido %}
 <h1>Preguntas sin respuesta</h1>
 <p class="sub">
-  Lo que los clientes preguntaron y el bot no supo contestar. Cada una es una
-  candidata a entrar en <a href="/admin/rag">la base de conocimiento</a>.
+  Lo que los clientes preguntaron y el agente no supo contestar: cada una es un
+  agujero en tu <a href="/conocimiento">base de conocimiento</a>. Crea un chunk
+  que lo tape y la próxima vez el agente sí sabrá qué responder.
+  Al marcar una como entendida se pone en verde y <strong>se borra sola en
+  {{ retencion_horas }} horas</strong>; lo pendiente no caduca.
 </p>
 
-<div class="panel tabla-scroll">
-  <table>
-    <thead><tr><th>Fecha</th><th>Pregunta</th><th></th></tr></thead>
-    <tbody>
-      {% for p in preguntas %}
-      <tr>
-        <td style="white-space:nowrap">{{ p.creado_en | fecha }}</td>
-        <td>{{ p.pregunta }}</td>
-        <td>
-          {% if p.atendida %}<span class="pastilla ok">atendida</span>
-          {% else %}
-          <form method="post" action="/admin/preguntas/{{ p.id }}/atendida">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="mini">Marcar atendida</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="3" class="vacio">No hay preguntas pendientes.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div data-vivo="preguntas" data-refrescar="/preguntas/lista">
+  {% include "_preguntas_lista.html" %}
 </div>
 {% endblock %}

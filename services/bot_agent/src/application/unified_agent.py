@@ -19,6 +19,7 @@ from openai import OpenAI
 from src.application import seguimiento_service
 from src.application.fragment_catalog import AREA_FRAGMENTS, SPECIALIST_AREAS, catalog_for_prompt
 from src.core.config import settings
+from src.core.modelos import kwargs_de_decision
 from src.core.prompts import (
     AGENT_COMMON_CONTRACT,
     AREA_PROMPT_BODIES,
@@ -103,18 +104,9 @@ FOLLOWUP_RESPONSE_FORMAT = {
 }
 
 
-def _decision_llm_kwargs() -> dict:
-    """Parámetros extra de las llamadas de DECISIÓN.
-
-    Los agentes deciden sin razonamiento (reasoning_effort="none"): respuestas
-    directas y sin tokens de reasoning facturados. El parámetro solo se envía
-    a modelos que lo aceptan (familia gpt-5): si el despliegue quedara con un
-    OPENAI_MODEL viejo (p. ej. gpt-4o-mini), enviarlo haría fallar TODAS las
-    llamadas y el bot respondería siempre con el fallback genérico.
-    """
-    if settings.OPENAI_REASONING_EFFORT and settings.OPENAI_MODEL.startswith("gpt-5"):
-        return {"reasoning_effort": settings.OPENAI_REASONING_EFFORT}
-    return {}
+# Los parámetros por modelo (temperature / reasoning_effort) los resuelve
+# `core.modelos`: dependen de la FAMILIA del modelo, no del agente, y mandar el
+# que no toca hace fallar todas las llamadas — no las degrada, las tumba.
 
 
 @dataclass
@@ -160,6 +152,10 @@ class _DecisionAgent:
     """Base: llamada LLM + validación + fallback + logging."""
 
     role = "SUPERVISOR"
+    # Cada agente declara con qué modelo trabaja. El supervisor decide sobre el
+    # prompt grande y enruta, así que se le da el modelo más capaz; el
+    # especialista ya sabe de qué área habla y le basta con uno más barato.
+    modelo = settings.OPENAI_MODEL_ESPECIALISTA
 
     def _valid_actions(self) -> set[str]:
         raise NotImplementedError
@@ -186,8 +182,9 @@ class _DecisionAgent:
             "text": text,
             "role": self.role,
             # El modelo queda en la traza: permite diagnosticar despliegues
-            # con un OPENAI_MODEL distinto al esperado sin adivinar.
-            "model": settings.OPENAI_MODEL,
+            # con un modelo distinto al esperado sin adivinar. Es el del AGENTE,
+            # no el global: supervisor y especialistas ya no usan el mismo.
+            "model": self.modelo,
             "history_turns": len(state.conversation_history),
             "pending": state.last_question,
             "pending_report": bool(state.pending_report),
@@ -201,17 +198,20 @@ class _DecisionAgent:
 
         try:
             completion = client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                temperature=0,
+                model=self.modelo,
                 response_format=_decision_response_format(self._valid_actions()),
                 messages=[
                     {"role": "system", "content": _system_prompt_for(self.role)},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
                 ],
-                **_decision_llm_kwargs(),
+                **kwargs_de_decision(self.modelo),
             )
             seguimiento_service.registrar_uso_llm(
-                client_id, canal, getattr(completion, "usage", None), origen="agente"
+                client_id,
+                canal,
+                getattr(completion, "usage", None),
+                origen="agente",
+                modelo=self.modelo,
             )
             data = json.loads(completion.choices[0].message.content or "{}")
             decision = self._validated_decision(data, text)
@@ -336,6 +336,7 @@ class _DecisionAgent:
 
 class SupervisorAgent(_DecisionAgent):
     role = "SUPERVISOR"
+    modelo = settings.OPENAI_MODEL_SUPERVISOR
 
     def _valid_actions(self) -> set[str]:
         return {"reply", "route", "handoff", "close", "city_invitation"}
@@ -371,25 +372,31 @@ class FollowupAgent:
             "recordatorios_enviados": state.reminder_level,
         }
         started = time.monotonic()
+        # Decisión chica y muy acotada (¿retomo o no, y con qué frase?): va al
+        # modelo auxiliar, que cuesta una fracción del que enruta.
+        modelo = settings.OPENAI_MODEL_AUXILIAR
         input_data = {
             "pending": state.last_question,
-            "model": settings.OPENAI_MODEL,
+            "model": modelo,
             "history_turns": len(state.conversation_history),
             "reminder_level": state.reminder_level,
         }
         try:
             completion = client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                temperature=0,
+                model=modelo,
                 response_format=FOLLOWUP_RESPONSE_FORMAT,
                 messages=[
                     {"role": "system", "content": FOLLOWUP_AGENT_PROMPT},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
                 ],
-                **_decision_llm_kwargs(),
+                **kwargs_de_decision(modelo),
             )
             seguimiento_service.registrar_uso_llm(
-                client_id, canal, getattr(completion, "usage", None), origen="recordatorio"
+                client_id,
+                canal,
+                getattr(completion, "usage", None),
+                origen="recordatorio",
+                modelo=modelo,
             )
             data = json.loads(completion.choices[0].message.content or "{}")
             message = str(data.get("message") or "").strip()

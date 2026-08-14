@@ -21,7 +21,13 @@ from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 from src.infrastructure.repositories.report_repository import ReportRepository
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories.keyword_registry_repository import KeywordRegistryRepository
-from src.infrastructure.tasks.celery_app import cancel_scheduled_tasks, process_buffered_messages, schedule_keyword_programmed_messages
+from src.infrastructure.repositories import palabras_clave_repository
+from src.infrastructure.tasks.celery_app import (
+    cancel_scheduled_tasks,
+    process_buffered_messages,
+    schedule_keyword_programmed_messages,
+    transcribir_nota_de_voz,
+)
 from src.core.config import settings
 
 
@@ -31,21 +37,79 @@ from src.core.config import settings
 # no contestar.
 _DIAS_BLOQUEO_POR_INTERVENCION = 12
 
+# Lo que el bot no puede leer se acusa con un texto fijo, distinto por tipo:
+# "recibí tu imagen" y "recibí tu documento" no son lo mismo para quien escribe.
+# Los textos viven en `mensajes.json` (nodo AUTOMATICO) y el negocio los edita
+# desde el panel; aquí solo está la correspondencia tipo -> nodo.
+_NODO_POR_MEDIA = {
+    MessageType.IMAGE: "MEDIA_IMAGEN",
+    MessageType.DOCUMENT: "MEDIA_DOCUMENTO",
+    MessageType.VIDEO: "MEDIA_VIDEO",
+}
+
+# Detección de enlaces. No es interpretación de lenguaje natural —eso es del
+# LLM y por regla del repo no se hace con regex—: es reconocer una URL, que es
+# una estructura, igual que los marcadores `Imagen=` o los comandos `/d`.
+# Cubre `http(s)://`, `www.` y el dominio suelto (`ejemplo.com/algo`), que es
+# como la gente pega los enlaces en WhatsApp.
+# El `(?<![@\w.])` del dominio suelto excluye los CORREOS: sin él,
+# "mi correo es ana@gmail.com" se leería como un enlace y el cliente recibiría
+# el acuse en vez de que lo atienda el agente. Dar un correo es lo más normal
+# del mundo en esta conversación.
+# Qué hizo el bot con cada tipo de mensaje. Se guarda en `event_type` para que
+# el PANEL pueda mostrarlo entre corchetes ("[Sticker · ignorado]"). El LLM no
+# ve nunca esta etiqueta: a él le llega solo el texto, así que un audio le
+# aparece exactamente igual que si el cliente lo hubiera escrito.
+_EVENTO_POR_TIPO = {
+    MessageType.STICKER: "sticker_ignorado",
+    MessageType.IMAGE: "media_avisada",
+    MessageType.DOCUMENT: "media_avisada",
+    MessageType.VIDEO: "media_avisada",
+}
+
+
+def _evento_de(message: InboundMessage) -> str:
+    """El `event_type` con el que se registra, sin pisar los que ya venían."""
+    if message.event_type and message.event_type != "message":
+        return message.event_type
+    return _EVENTO_POR_TIPO.get(message.message_type, message.event_type or "message")
+
+
+_ENLACE = re.compile(
+    r"(https?://"
+    r"|(?<![@\w.])www\."
+    r"|(?<![@\w.])[a-z0-9][a-z0-9\-]*\.(?:com|net|org|io|co|cr|es|app|me|gl|ly|be|info|biz|tv)\b)",
+    re.IGNORECASE,
+)
+
 
 class ConversationOrchestrator:
     def handle(self, message: InboundMessage) -> list[OrchestratorAction]:
         if message.from_me:
             return self._handle_intervencion_humana(message)
 
-        if not (message.message_type == MessageType.TEXT and (message.text or "") == "/d"):
+        # El audio se registra MÁS TARDE, desde la tarea de transcripción y ya
+        # con su texto: anotarlo aquí dejaría una fila vacía y otra con el
+        # contenido, el mismo mensaje dos veces en el chat del panel.
+        # `/d` no se registra porque su efecto es borrar el historial.
+        es_borrado = message.message_type == MessageType.TEXT and (message.text or "") == "/d"
+        if not es_borrado and message.message_type != MessageType.AUDIO:
             ConversationLogRepository.log_inbound(
                 client_id=message.user_id,
                 canal=message.channel,
                 sender_name=message.user_name,
                 message_type=message.message_type,
                 text=message.text or "",
-                event_type=message.event_type,
+                event_type=_evento_de(message),
             )
+
+        # Un sticker es un gesto, no una consulta: NO se responde. Queda en el
+        # historial (arriba) para que quien lea el chat en el panel vea lo que
+        # pasó de verdad, pero sin respuesta, sin LLM y sin cobro — y sin gastar
+        # la cuota de envío del minuto, que dejaría sin contestar al mensaje que
+        # sí importaba.
+        if message.message_type == MessageType.STICKER:
+            return []
 
         if message.event_type == "group_join":
             return self._handle_group_join(message)
@@ -53,18 +117,35 @@ class ConversationOrchestrator:
         if message.message_type == MessageType.TEXT:
             return self._handle_text(message)
 
-        if message.message_type in (MessageType.IMAGE, MessageType.DOCUMENT):
-            nodo = "MEDIA" if BufferService.add_image_info_count(message.user_id, message.channel) else "MEDIA_INSISTE"
-            return self._responder_automatico(message, nodo)
-
-        if message.message_type == MessageType.STICKER:
-            return self._responder_automatico(message, "STICKER")
+        if message.message_type in _NODO_POR_MEDIA:
+            return self._responder_por_media(message, _NODO_POR_MEDIA[message.message_type])
 
         if message.message_type == MessageType.AUDIO:
-            seq = BufferService.add_message(message.user_id, "texto transcrito", message.channel)
-            process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name, seq), countdown=settings.MESSAGE_BUFFER_SECONDS)
-            return []
+            return self._handle_audio(message)
 
+        return []
+
+    def _handle_audio(self, message: InboundMessage) -> list[OrchestratorAction]:
+        """Una nota de voz se transcribe y sigue el camino de un mensaje de texto.
+
+        La transcripción NO ocurre aquí: descifrar la media, bajarla y pasarla
+        por el modelo tarda segundos, y esto corre dentro del webhook. Se delega
+        a `transcribir_nota_de_voz`, que además registra el mensaje en el
+        historial ya con el texto — el audio no se guarda en ninguna parte.
+
+        Telegram no pasa por aquí con payload: ahí el audio aún no está
+        cableado, así que se ignora en vez de encolar una tarea sin media.
+        """
+        if not message.raw_payload:
+            return []
+        transcribir_nota_de_voz.apply_async(
+            (
+                message.channel.value,
+                message.user_id,
+                message.user_name,
+                message.raw_payload,
+            )
+        )
         return []
 
     def _handle_text(self, message: InboundMessage) -> list[OrchestratorAction]:
@@ -89,9 +170,12 @@ class ConversationOrchestrator:
                 return []
             return self._handle_group_join(message)
 
-        keyword = text.strip().lower()
-        if keyword in {"tareas", "transporte"}:
-            return self._handle_keyword_flow(message, keyword, repo)
+        # Las palabras clave las administra el negocio desde el panel; ya no
+        # están escritas aquí. El match sigue siendo exacto y sobre el mensaje
+        # entero, que es lo que hace que sea un disparador y no interpretación.
+        palabra = palabras_clave_repository.buscar(text)
+        if palabra:
+            return self._handle_keyword_flow(message, palabra, repo)
 
         if repo.is_blocked(message.user_id, channel=message.channel):
             self._handle_blocked_text(message)
@@ -109,9 +193,31 @@ class ConversationOrchestrator:
         if is_in_ad_flow:
             return []
 
+        # Un enlace es contenido que el bot tampoco puede abrir, así que se
+        # acusa igual que un adjunto y no se gasta un turno del modelo.
+        #
+        # Va al final de la cadena: los comandos, la palabra clave y los flujos
+        # de publicidad mandan sobre esto. Y responde a CUALQUIER mensaje que
+        # contenga un enlace, aunque venga con una pregunta al lado (decisión
+        # del negocio); si algún día se prefiere que la pregunta la conteste el
+        # agente, la condición a cambiar es esta y solo esta.
+        if _ENLACE.search(text):
+            return self._responder_por_media(message, "MEDIA_ENLACE")
+
         seq = BufferService.add_message(message.user_id, text, message.channel)
         process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name, seq), countdown=settings.MESSAGE_BUFFER_SECONDS)
         return []
+
+    def _responder_por_media(self, message: InboundMessage, nodo: str) -> list[OrchestratorAction]:
+        """Acuse a un adjunto, con tope para el que insiste.
+
+        El tope (`add_image_info_count`) es anti-bucle: quien manda ocho fotos
+        seguidas no necesita ocho veces el mismo aviso. Pasado el límite se
+        cambia al nodo de insistencia, que pide ayuda humana.
+        """
+        if not BufferService.add_image_info_count(message.user_id, message.channel):
+            nodo = "MEDIA_INSISTE"
+        return self._responder_automatico(message, nodo)
 
     def _responder_automatico(self, message: InboundMessage, nodo: str) -> list[OrchestratorAction]:
         """Acuse fijo a lo que el bot no puede leer (imágenes, documentos, stickers).
@@ -243,11 +349,18 @@ class ConversationOrchestrator:
     def _handle_keyword_flow(
         self,
         message: InboundMessage,
-        keyword: str,
+        palabra: dict,
         repo: PostgresUserRepo,
     ) -> list[OrchestratorAction]:
-        node = "T1" if keyword == "tareas" else "H1"
-        first_messages = mensajes_del_negocio("KEYWORD", node)
+        """Dispara el flujo de una palabra clave: mensajes, silencio y recordatorios.
+
+        Si la palabra no tiene ningún mensaje que enviar no se hace NADA: ni se
+        bloquea la conversación ni se agenda nada. Bloquear a alguien y quedarse
+        callado sería lo peor de los dos mundos — el cliente escribió y no
+        recibió nada, y encima el agente ya no le va a contestar.
+        """
+        keyword = palabra["palabra"]
+        first_messages = palabras_clave_repository.textos_de(palabra["id"])
         if not first_messages:
             return []
 
@@ -255,7 +368,9 @@ class ConversationOrchestrator:
         repo.block_user(message.user_id, reason=f"Flujo keyword {keyword}", channel=message.channel)
         KeywordRegistryRepository.register_if_missing(message.user_id, message.user_name, message.channel, keyword)
         register_keyword_context(message.channel, message.user_id)
-        schedule_keyword_programmed_messages.apply_async((message.channel.value, message.user_id))
+        schedule_keyword_programmed_messages.apply_async(
+            (message.channel.value, message.user_id, palabra["id"])
+        )
         # La palabra clave la detecta el código, no el modelo: se factura con la
         # tarifa por mensaje, no sobre tokens.
         seguimiento_service.registrar_uso_codigo(

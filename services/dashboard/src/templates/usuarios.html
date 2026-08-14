@@ -1,12 +1,28 @@
 {% extends "base.html" %}
-{% block titulo %}Usuarios{% endblock %}
+{% block titulo %}Cuentas de acceso{% endblock %}
+
+{# «Rol: cliente» no le decía nada a nadie. Aquí el rol se llama por lo que es
+   —Administrador de la plataforma, o usuario de un proyecto— y cada cuenta dice
+   de qué proyecto es, con enlace a su perfil.
+
+   Un proyecto tiene UN usuario: esta pantalla es la lista de todos ellos, no un
+   sitio donde repartir permisos. La cuenta de un proyecto se crea desde el
+   perfil del proyecto, que es donde se sabe de quién es. #}
 
 {% block contenido %}
-<h1>Usuarios</h1>
-<p class="sub">
-  <strong>Administrador</strong>: ve todo, incluidos los costos reales y los logs.
-  <strong>Cliente</strong>: ve su consumo facturado, las ciudades, los mensajes y los envíos.
-</p>
+<div class="titulo-con-acciones">
+  <div>
+    <h1>Cuentas de acceso</h1>
+    <p class="sub" style="margin-bottom:0">
+      <strong>Administrador</strong>: ve todo, incluidos los costos reales y las
+      conversaciones. <strong>Proyecto</strong>: solo su propio panel, y nunca el costo real.
+      El usuario de un proyecto se crea desde su perfil, que es donde se sabe de quién es.
+    </p>
+  </div>
+  <div class="acciones-cabecera">
+    <button class="boton mini" data-abre="nueva-cuenta">Nueva cuenta</button>
+  </div>
+</div>
 
 {% if nueva_password %}
 <div class="panel" style="border-color: var(--acento)">
@@ -15,7 +31,7 @@
     Se muestra una sola vez. Cópiala ahora; después solo queda guardada cifrada y
     la única salida es generar otra.
   </p>
-  <span class="credencial">{{ nueva_password }}</span>
+  <span class="credencial" data-copiar>{{ nueva_password }}</span>
 </div>
 {% endif %}
 
@@ -27,36 +43,21 @@
 </div>
 {% endif %}
 
-<div class="panel">
-  <h2 style="margin-top:0">Nuevo usuario</h2>
-  <p class="sub">La contraseña se genera sola y se muestra una vez al crearlo.</p>
-  <form class="linea" method="post" action="/admin/usuarios">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div>
-      <label for="nombre">Usuario</label>
-      <input id="nombre" name="nombre" required>
-    </div>
-    <div>
-      <label for="rol">Rol</label>
-      <select id="rol" name="rol">
-        <option value="cliente">Cliente</option>
-        <option value="admin">Administrador</option>
-      </select>
-    </div>
-    <button class="primario">Crear</button>
-  </form>
-</div>
-
 <div class="panel tabla-scroll">
   <table>
     <thead>
-      <tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th>Acciones</th></tr>
+      <tr><th>Usuario</th><th>Rol</th><th>Proyecto</th><th>Estado</th><th>Último acceso</th><th>Acciones</th></tr>
     </thead>
     <tbody>
       {% for c in cuentas %}
       <tr>
         <td>{{ c.usuario }}</td>
-        <td>{{ c.rol }}</td>
+        <td>{{ 'Administrador' if c.rol == 'admin' else 'Proyecto' }}</td>
+        <td>
+          {% if c.negocio %}<a href="/admin/negocios/{{ c.negocio_id }}">{{ c.negocio }}</a>
+          {% elif c.rol == 'admin' %}<span style="color:var(--tenue)">—</span>
+          {% else %}<span style="color:var(--tenue)">sin proyecto</span>{% endif %}
+        </td>
         <td>
           <span class="pastilla {{ 'ok' if c.activo else 'alerta' }}">{{ 'activo' if c.activo else 'inactivo' }}</span>
           {% if c.debe_cambiar_password %}<span class="pastilla alerta">clave provisional</span>{% endif %}
@@ -64,18 +65,10 @@
         <td>{{ c.ultimo_acceso | fecha or 'nunca' }}</td>
         <td style="white-space:nowrap">
           {% if c.rol == 'cliente' and c.activo %}
-          <form method="post" action="/admin/usuarios/{{ c.id }}/entrar" style="display:inline"
-                onsubmit="return confirm('Vas a ver el panel de {{ c.usuario }} tal como lo ve esa cuenta. El acceso queda registrado. ¿Continuar?')">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="mini">Entrar a su cuenta</button>
-          </form>
+          <button class="mini" data-abre="entrar-{{ c.id }}">Entrar a su cuenta</button>
           {% endif %}
 
-          <form method="post" action="/admin/usuarios/{{ c.id }}/password" style="display:inline"
-                onsubmit="return confirm('Se generará una contraseña nueva para {{ c.usuario }} y se cerrarán sus sesiones. ¿Continuar?')">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="mini">Nueva contraseña</button>
-          </form>
+          <button class="mini" data-abre="clave-{{ c.id }}">Nueva contraseña</button>
 
           {% if c.id != usuario.id %}
           <form method="post" action="/admin/usuarios/{{ c.id }}/activo" style="display:inline">
@@ -90,8 +83,86 @@
   </table>
 </div>
 
+{# Las confirmaciones son ventanas, no `confirm()` del navegador: entrar a la
+   cuenta de otro y cerrarle las sesiones son cosas que conviene leer antes. #}
+{% for c in cuentas %}
+  {% if c.rol == 'cliente' and c.activo %}
+  <dialog class="flotante" id="entrar-{{ c.id }}">
+    <div class="cabecera">
+      <h2>Entrar a la cuenta de {{ c.usuario }}</h2>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo">
+      <p style="margin-top:0">
+        Vas a ver su panel tal como lo ve esa cuenta, y <strong>cualquier cambio
+        quedará a su nombre</strong>. El acceso se registra.
+      </p>
+      <form method="post" action="/admin/usuarios/{{ c.id }}/entrar" class="linea" style="justify-content:flex-end">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Entrar</button>
+      </form>
+    </div>
+  </dialog>
+  {% endif %}
+
+  <dialog class="flotante" id="clave-{{ c.id }}">
+    <div class="cabecera">
+      <h2>¿Nueva contraseña para {{ c.usuario }}?</h2>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo">
+      <p style="margin-top:0">
+        Se genera una provisional y <strong>se cierran todas sus sesiones</strong>:
+        tendrá que entrar con la nueva y elegir una suya. Se muestra una sola vez.
+      </p>
+      <form method="post" action="/admin/usuarios/{{ c.id }}/password" class="linea" style="justify-content:flex-end">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Generar</button>
+      </form>
+    </div>
+  </dialog>
+{% endfor %}
+
+<dialog class="flotante" id="nueva-cuenta">
+  <div class="cabecera">
+    <h2>Nueva cuenta</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <p class="sub" style="margin-top:0">
+      La contraseña se genera sola y se muestra una vez al crearla. Si es el usuario
+      de un proyecto, es más directo crearlo desde
+      <a href="/admin/negocios">su perfil</a>: ahí queda vinculado solo.
+    </p>
+    <form method="post" action="/admin/usuarios">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div style="margin-bottom:12px">
+        <label for="nombre">Usuario</label>
+        <input id="nombre" name="nombre" required style="width:100%">
+      </div>
+      <div style="margin-bottom:16px">
+        <label for="rol">Rol</label>
+        <select id="rol" name="rol" style="width:100%">
+          <option value="cliente">Usuario de proyecto</option>
+          <option value="admin">Administrador</option>
+        </select>
+      </div>
+      <div class="linea" style="justify-content:flex-end">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Crear</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
 <h2>Accesos a cuentas de clientes</h2>
-<p class="sub">Queda registrado cada vez que se entra al panel de un cliente.</p>
+<p class="sub">
+  Queda registrado cada vez que se entra al panel de un cliente. Sirve para lo de
+  siempre con los accesos ajenos: saber quién entró y cuándo si algo cambió sin
+  que el cliente lo hiciera.
+</p>
 <div class="panel tabla-scroll">
   <table>
     <thead><tr><th>Cuándo</th><th>Administrador</th><th>Cuenta</th><th>Hasta</th><th>IP</th></tr></thead>

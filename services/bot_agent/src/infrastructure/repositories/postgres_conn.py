@@ -53,6 +53,12 @@ def _crear_tablas_del_bot(conn):
 
     Se mantienen aquí (y no en las migraciones) para que el bot pueda arrancar
     contra una base limpia aunque el dashboard todavía no haya corrido.
+
+    OJO con `users_blocked`: el panel la lee y la limpia (pantalla de bloqueos),
+    así que está declarada TAMBIÉN en la migración 011 del dashboard, con la
+    misma forma y con `IF NOT EXISTS` en los dos lados — arranque primero quien
+    arranque, la tabla existe. Si cambia una columna, hay que cambiarla aquí y
+    en esa migración.
     """
     with conn.cursor() as cur:
         cur.execute("""

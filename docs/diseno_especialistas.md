@@ -99,8 +99,9 @@ intencional — no tocar):
 
 - `KEYWORD` (`T1`–`T4`, `H1`): disparados por "tareas"/"transporte" y su
   secuencia programada de seguimientos.
-- `PUBLICIDAD` (`P0`–`P2`) y la invitación por ciudad (secuencia desde NocoDB
-  vía `city_invitation` → `PublicidadService`).
+- `PUBLICIDAD` (`P0`–`P2`) y la invitación por ciudad (la secuencia sale de
+  «Mensajes» del panel, buscada por su clave: `city_invitation` →
+  `PublicidadService`).
 - `WELCOME.W`: bienvenida a grupos.
 
 Los "recordatorio" fijos de `mensajes.json` **no** se envían tal cual: el
@@ -127,8 +128,8 @@ consultarlo en el momento correcto.**
 
 ### CURSO_TEORICO
 - **La ciudad es el dato bloqueante** de la matrícula: sin ciudad no hay
-  invitación. Si la ciudad no existe en la BD, el código reporta y bloquea (ya
-  implementado en `city_invitation`).
+  invitación. Si no hay ningún mensaje del panel con esa clave, el código
+  reporta y bloquea (ya implementado en `city_invitation`).
 - **Enteros PTM vs PTV**: el pago del entero tiene códigos distintos para moto y
   carro y un error **no se puede corregir**. Ante cualquier duda de pago del
   entero → [[rag]] asegurándose de que la advertencia quede explícita.

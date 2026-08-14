@@ -1,8 +1,18 @@
 from src.domain.entities import Channel, InboundMessage, MessageType
 from src.application.conversation_orchestrator import ConversationOrchestrator
-from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
+from src.infrastructure.channels.senders import ChannelSenderRegistry
 
 class MessageHandler:
+    """Entrada de un mensaje para los canales que NO tienen bucle propio.
+
+    Telegram atiende desde `telegram_channel`, que responde con `reply_text` del
+    propio update. WhatsApp entra por el webhook, donde no hay a quién
+    "responder": la contestación es una llamada nueva a WasenderAPI. Por eso las
+    respuestas inmediatas se envían aquí — antes solo se registraban y se
+    devolvían, y como el webhook descarta ese retorno, en WhatsApp quedaban
+    anotadas en el panel como enviadas sin que el cliente recibiera nada.
+    """
+
     @staticmethod
     def handle_incoming_message(
         user_id: str,
@@ -14,6 +24,7 @@ class MessageHandler:
         from_me: bool = False,
         event_type: str = "message",
         message_id: str = "",
+        raw_payload: dict | None = None,
     ):
         channel_value = channel if isinstance(channel, Channel) else Channel(channel)
         inbound = InboundMessage(
@@ -25,17 +36,28 @@ class MessageHandler:
             from_me=from_me,
             event_type=event_type,
             message_id=message_id,
+            # Lo necesita la nota de voz: la media viaja cifrada dentro del
+            # evento y hay que reenviarlo entero para que el proveedor la
+            # descifre. Ninguna otra rama lo mira.
+            raw_payload=raw_payload,
         )
         actions = ConversationOrchestrator().handle(inbound)
+        enviado = None
         for action in actions:
             if action.action == "send_now" and action.text:
-                if not action.skip_conversation_log:
-                    ConversationLogRepository.log_outbound(
-                        client_id=action.user_id,
-                        canal=action.channel,
-                        text=action.text,
-                    )
-                return action.text
+                # Se recorren TODAS: un flujo de palabra clave devuelve varios
+                # mensajes seguidos y antes solo salía el primero.
+                # `ChannelSenderRegistry.send` ya registra el saliente.
+                ChannelSenderRegistry.send(
+                    action.channel,
+                    action.user_id,
+                    action.text,
+                    log_conversation=not action.skip_conversation_log,
+                )
+                if enviado is None:
+                    enviado = action.text
+        if enviado is not None:
+            return enviado
         if is_command:
             return "Command processed"
         if msg_type == MessageType.TEXT:

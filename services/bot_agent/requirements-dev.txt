@@ -2,3 +2,9 @@
 # Se instalan en la etapa `dev` del Dockerfile (ver docker-compose.local.yml).
 -r requirements.txt
 pytest
+# Redis en memoria para los tests. No es un mock: implementa la semántica de
+# verdad (SET NX, TTL, INCR, los scripts Lua del buffer), que es justo lo que
+# varios flujos usan como garantía —el reporte que se crea UNA sola vez, el
+# candado por conversación, el debounce—. Con un MagicMock todo devuelve algo
+# truthy y esas garantías se prueban solas, sin probar nada.
+fakeredis

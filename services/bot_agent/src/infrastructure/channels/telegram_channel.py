@@ -22,8 +22,16 @@ class TelegramChannel(BaseChannel):
         self.app.add_handler(CommandHandler("d", self._cmd_d))
         self.app.add_handler(CommandHandler("block", self._cmd_block))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text))
-        self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, self._handle_image_doc))
+        # Cada tipo por separado: el acuse automático nombra lo que llegó
+        # ("recibí tu imagen" / "tu documento" / "tu video"), así que mandarlos
+        # todos como IMAGE le respondería "imagen" a un PDF.
+        self.app.add_handler(MessageHandler(filters.PHOTO, self._handle_image))
+        self.app.add_handler(MessageHandler(filters.Document.ALL, self._handle_document))
+        self.app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, self._handle_video))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_audio))
+        # Los stickers NO se registran a propósito: sin handler, Telegram los
+        # deja pasar sin respuesta ni rastro, que es la misma regla que aplica
+        # el orquestador para WhatsApp.
 
     async def _start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "Bot iniciado."
@@ -52,8 +60,14 @@ class TelegramChannel(BaseChannel):
     async def _handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._dispatch(update, MessageType.TEXT, text=update.message.text or "")
 
-    async def _handle_image_doc(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _handle_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._dispatch(update, MessageType.IMAGE)
+
+    async def _handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._dispatch(update, MessageType.DOCUMENT)
+
+    async def _handle_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._dispatch(update, MessageType.VIDEO)
 
     async def _handle_audio(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._dispatch(update, MessageType.AUDIO)

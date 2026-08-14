@@ -136,6 +136,18 @@ def obtener(negocio_id: int) -> dict[str, Any] | None:
     )
 
 
+def por_usuario(usuario_id: int) -> dict[str, Any] | None:
+    """El negocio al que pertenece una cuenta de acceso, si es la de alguno.
+
+    Lo usa «Mi cuenta»: una cuenta de negocio sin decir de qué negocio es no
+    dice nada. Para el administrador devuelve None, que es lo correcto: él no es
+    de ningún cliente.
+    """
+    return _con_url(
+        pool.consultar_uno("SELECT * FROM clientes_whatsapp WHERE usuario_id = %s", (int(usuario_id),))
+    )
+
+
 def resumen_actividad() -> dict[str, Any]:
     """Las cifras de cabecera del perfil: conversaciones, clientes y gasto.
 

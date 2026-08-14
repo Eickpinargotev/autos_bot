@@ -16,11 +16,13 @@ from src.application.runtime_context import (
     set_ad_reminder_stage,
     set_keyword_active_report,
 )
-from src.domain.entities import Channel
-from src.application import seguimiento_service
+from src.domain.entities import Channel, MessageType
+from src.application import seguimiento_service, transcripcion_service
+from src.infrastructure.repositories import clientes_whatsapp_repo
 from src.infrastructure.channels.senders import ChannelSenderRegistry
 from src.infrastructure.channels.wasender import WasenderNoConfigurado
 from src.infrastructure.repositories import envios_repository
+from src.infrastructure.repositories import palabras_clave_repository
 from src.infrastructure.repositories.conversation_state_repo import ConversationStateRepo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
@@ -39,12 +41,22 @@ celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL)
 # re-entrega la tarea y el cliente recibe el mensaje DUPLICADO una vez por hora.
 # El timeout debe superar con margen el countdown más largo que agendamos
 # (recordatorios de publicidad, hasta PUB_DELAY_3_SEC).
+#
+# Y también el de las PALABRAS CLAVE, que desde que se administran en el panel ya
+# no son un número del código: el dueño del negocio escribe los minutos. El tope
+# que él puede poner es `MAX_RECORDATORIO_MINUTOS`, y el panel lo valida con ese
+# mismo número (`palabras_clave.MAX_MINUTOS`). Si allí sube y aquí no, un
+# recordatorio a 15 días se re-entregaría cada pocos días y el cliente lo
+# recibiría una y otra vez.
+MAX_RECORDATORIO_MINUTOS = 20160  # 14 días
+
 _max_countdown_seconds = max(
     settings.PUB_DELAY_1_SEC,
     settings.PUB_DELAY_2_SEC,
     settings.PUB_DELAY_3_SEC,
     settings.FOLLOWUP_FIRST_DELAY_SECONDS,
     settings.FOLLOWUP_NEXT_DELAY_SECONDS,
+    MAX_RECORDATORIO_MINUTOS * 60,
     86400,
 )
 celery_app.conf.broker_transport_options = {
@@ -62,6 +74,13 @@ celery_app.conf.beat_schedule = {
     "purgar-conversaciones-vencidas": {
         "task": "src.infrastructure.tasks.celery_app.purge_expired_conversations",
         "schedule": crontab(hour=8, minute=0),
+    },
+    # Las bandejas del panel (reportes revisados, preguntas entendidas) caducan
+    # cada hora y no una vez al día: el panel promete «se borra en 24 horas» y
+    # con una pasada diaria podían ser 48.
+    "purgar-bandejas-atendidas": {
+        "task": "src.infrastructure.tasks.celery_app.purge_bandejas",
+        "schedule": crontab(minute=0),
     },
     # Red de seguridad del seguimiento: vuelca a Postgres los buffers que no se
     # volcaron inline (costos de followups sin mensaje, caídas de la base).
@@ -175,6 +194,63 @@ import time
 import random
 
 @celery_app.task
+def transcribir_nota_de_voz(channel: str, user_id: str, user_name: str, payload: dict):
+    """Convierte una nota de voz en texto y la mete al flujo como si fuera texto.
+
+    Corre en el worker y no en el webhook porque descifrar + descargar +
+    transcribir tarda segundos: bloquear la respuesta del webhook haría que
+    WasenderAPI reintentara el evento creyendo que se cayó, y el cliente
+    recibiría la respuesta por duplicado.
+
+    El audio NO se guarda en ningún sitio. Lo único que queda es la
+    transcripción, que entra al historial como texto del cliente.
+    """
+    canal = Channel(channel)
+    api_key = clientes_whatsapp_repo.api_key_de_envio(canal.value, user_id)
+    resultado = transcripcion_service.transcribir(payload, api_key)
+
+    # Se cobra lo que se transcribió aunque el texto salga vacío: el proveedor
+    # cobra por el audio procesado, no por el resultado.
+    if resultado.segundos:
+        seguimiento_service.registrar_uso_audio(
+            user_id, canal, resultado.segundos, resultado.modelo
+        )
+
+    if not resultado.hay_texto:
+        # No se pudo entender. Se acusa con el texto fijo del negocio en vez de
+        # dejar al cliente esperando una respuesta que no va a llegar.
+        ConversationLogRepository.log_inbound(
+            client_id=user_id,
+            canal=canal,
+            sender_name=user_name,
+            message_type=MessageType.AUDIO,
+            text="",
+            event_type="audio_no_transcrito",
+        )
+        for texto in get_node_data("AUTOMATICO", "MEDIA_AUDIO_ILEGIBLE").get("mensajes", []):
+            ChannelSenderRegistry.send(canal, user_id, texto)
+        return {"transcrito": False, "segundos": resultado.segundos}
+
+    # En el historial queda el TEXTO, marcado como que vino de un audio. El
+    # `event_type` es lo que permite al panel mostrar "[Audio transcrito]" sin
+    # que el LLM vea nunca esa etiqueta: él solo recibe el texto.
+    ConversationLogRepository.log_inbound(
+        client_id=user_id,
+        canal=canal,
+        sender_name=user_name,
+        message_type=MessageType.AUDIO,
+        text=resultado.texto,
+        event_type="audio_transcrito",
+    )
+
+    seq = BufferService.add_message(user_id, resultado.texto, canal)
+    process_buffered_messages.apply_async(
+        (canal.value, user_id, user_name, seq), countdown=settings.MESSAGE_BUFFER_SECONDS
+    )
+    return {"transcrito": True, "segundos": resultado.segundos}
+
+
+@celery_app.task
 def send_delayed_message_sequence(channel: str, user_id: str, messages: list[str]):
     for msg in messages:
         ChannelSenderRegistry.send(channel, user_id, msg)
@@ -193,14 +269,27 @@ def send_ad_reminder(channel: str, user_id: str, message: str, stage: int):
     ChannelSenderRegistry.send(channel, user_id, message)
 
 @celery_app.task
-def send_keyword_reminder(channel: str, user_id: str, node: str, stage: int):
+def send_keyword_reminder(channel: str, user_id: str, pieza_id: int, stage: int):
+    """Manda un recordatorio de palabra clave, releyéndolo en el momento.
+
+    El texto NO viaja dentro de la tarea: entre que se agenda y que sale pueden
+    pasar días, y lo que tiene que llegar es lo que el negocio tenga escrito
+    ahora. Releerlo también hace que apagar o borrar un recordatorio en el panel
+    sirva de algo para los que ya estaban agendados.
+    """
     if not has_keyword_context(channel, user_id):
         return
 
-    node_data = get_node_data("KEYWORD", node)
-    set_keyword_active_report(channel, user_id, stage, node_data.get("reporte", ""))
-    for message in node_data.get("mensajes", []):
-        ChannelSenderRegistry.send(channel, user_id, message)
+    pieza = palabras_clave_repository.pieza(pieza_id)
+    if not pieza or not pieza.get("activo"):
+        return
+
+    texto = palabras_clave_repository.texto_para_enviar(pieza)
+    if not texto:
+        return
+
+    set_keyword_active_report(channel, user_id, stage, pieza.get("reporte") or "")
+    ChannelSenderRegistry.send(channel, user_id, texto)
 
 def cancel_scheduled_tasks(channel: str, user_id: str):
     """
@@ -343,11 +432,43 @@ def purge_expired_conversations():
     days = settings.CONVERSATION_RETENTION_DAYS
     conversations = ConversationLogRepository.purge_older_than(days)
     shots = ConversationShotRepository.purge_older_than(days)
+
+    # Las sesiones de envío tienen su propio plazo (12 días) y no el de las
+    # conversaciones: son un histórico de trabajo, no el hilo con un cliente.
+    lotes = envios_repository.purgar_lotes_vencidos()
+    if lotes:
+        print(f"[retención] {lotes} sesiones de envío caducadas")
+
     print(
         f"[retención] Purga >{days}d: {conversations} conversaciones y "
         f"{shots} shots eliminados de Postgres"
     )
     return {"conversations": conversations, "shots": shots}
+
+
+@celery_app.task
+def purge_bandejas():
+    """Caduca lo ya atendido de las dos bandejas del panel del proyecto.
+
+    Los reportes revisados (7 días) y las preguntas entendidas (24 horas) no son
+    historial: son cosas por hacer, y una lista de cosas por hacer llena de
+    cosas hechas deja de servir. Lo PENDIENTE no se toca en ninguna de las dos,
+    tenga la edad que tenga.
+
+    Va aparte de la retención de conversaciones y **cada hora**, no una vez al
+    día: con una pasada diaria, «se borra en 24 horas» podía tardar 48, y lo que
+    se le promete al dueño del negocio en pantalla tiene que cumplirse.
+    """
+    from src.infrastructure.repositories.report_repository import ReportRepository
+    from src.infrastructure.repositories.unanswered_question_repository import (
+        UnansweredQuestionRepository,
+    )
+
+    reportes = ReportRepository.purge_reviewed()
+    preguntas = UnansweredQuestionRepository.purge_answered()
+    if reportes or preguntas:
+        print(f"[retención] Bandejas: {reportes} reportes y {preguntas} preguntas caducados")
+    return {"reportes": reportes, "preguntas": preguntas}
 
 
 @celery_app.task
@@ -360,12 +481,26 @@ def flush_seguimiento_pendiente():
 
 
 @celery_app.task
-def schedule_keyword_programmed_messages(channel: str, user_id: str):
+def schedule_keyword_programmed_messages(channel: str, user_id: str, palabra_id: int):
+    """Agenda los recordatorios de una palabra clave, cada uno a su minuto.
+
+    Los minutos se cuentan desde AHORA (desde que se disparó la palabra), no en
+    cascada desde el recordatorio anterior: es como se ven en el panel y como se
+    validan ahí, y contar de las dos formas distintas sería garantizar que en
+    algún momento no coinciden.
+
+    Los ids de tarea se guardan para poder revocarlos: si el cliente entra al
+    grupo, escribe otra palabra o el dueño interviene, los recordatorios
+    pendientes se cancelan (`cancel_scheduled_tasks`).
+    """
     tasks = []
-    for stage, node in enumerate(("T2", "T3", "T4"), start=1):
-        node_data = get_node_data("KEYWORD", node)
-        delay = node_data.get("segundos", 7200)
-        task = send_keyword_reminder.apply_async((channel, user_id, node, stage), countdown=delay)
+    for pieza in palabras_clave_repository.piezas_de(palabra_id, "recordatorio"):
+        minutos = int(pieza.get("minutos") or 0)
+        if minutos < 1:
+            continue
+        task = send_keyword_reminder.apply_async(
+            (channel, user_id, pieza["id"], pieza["orden"]), countdown=minutos * 60
+        )
         tasks.append(task.id)
 
     key = scoped_key("scheduled_tasks", channel, user_id)

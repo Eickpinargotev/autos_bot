@@ -1,0 +1,37 @@
+{# La tabla, aparte de la página, porque se vuelve a pedir sola cuando el bot
+   deriva una conversación (tema «reportes»). La página la incluye para el
+   primer pintado y `/reportes/lista` devuelve esto mismo: un solo sitio donde
+   está escrito el marcado. #}
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr><th>Fecha</th><th>Nombre</th><th>Número</th><th>Motivo</th><th></th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in reportes %}
+      <tr>
+        <td style="white-space:nowrap">{{ r.creado_en | fecha }}</td>
+        <td>{{ r.nombre }}</td>
+        <td>{{ r.numero }}</td>
+        <td>{{ r.problema }}</td>
+        <td>{% if r.link_whatsapp %}<a class="boton mini" href="{{ r.link_whatsapp }}" target="_blank" rel="noopener noreferrer">Escribir</a>{% endif %}</td>
+        <td>
+          {% if r.revisado %}
+          <span class="pastilla ok">revisado</span>
+          {% if r.revisado_en %}
+          <div style="font-size:11px;color:var(--tenue)">se borra el {{ r.caduca_en | fecha }}</div>
+          {% endif %}
+          {% else %}
+          <form method="post" action="/reportes/{{ r.id }}/revisado">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini">Marcar revisado</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="vacio">No hay reportes.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

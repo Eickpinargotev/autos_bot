@@ -11,6 +11,7 @@ from src.infrastructure.channels.outbound_attachments import (
     parse_outbound_message,
     url_publica,
 )
+from src.infrastructure.repositories import clientes_whatsapp_repo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
 
@@ -47,25 +48,35 @@ class TelegramSender(ChannelSender):
 class WhatsAppSender(ChannelSender):
     """WhatsApp a través de WasenderAPI.
 
-    A diferencia de Telegram, la media NO se sube: WasenderAPI la descarga desde
-    una URL pública. Por eso aquí no se usa `download_drive_image` — solo se
-    resuelve la referencia a URL.
+    Dos diferencias con Telegram:
+
+    - La media NO se sube: WasenderAPI la descarga desde una URL pública. Por
+      eso aquí no se usa `download_drive_image` — solo se resuelve a URL.
+    - La credencial no es del despliegue sino del NEGOCIO dueño del número, y se
+      resuelve por destinatario. Telegram tiene un token global porque hay un
+      solo bot; en WhatsApp cada negocio enlaza su propia sesión, así que la
+      clave se busca en la base (y se administra desde el panel) en cada envío.
     """
 
     channel = Channel.WHATSAPP
 
+    def _api_key(self, user_id: str) -> str:
+        return clientes_whatsapp_repo.api_key_de_envio(Channel.WHATSAPP.value, user_id)
+
     def send_message_sync(self, user_id: str, text: str):
-        wasender.enviar_texto(user_id, text)
+        wasender.enviar_texto(user_id, text, self._api_key(user_id))
 
     def send_image_sync(self, user_id: str, attachment: OutboundAttachment, caption: str = ""):
         # `attachment.image_id` conserva la referencia original (ID de Drive o URL).
-        wasender.enviar_imagen(user_id, url_publica(attachment.image_id), caption)
+        wasender.enviar_imagen(
+            user_id, url_publica(attachment.image_id), caption, self._api_key(user_id)
+        )
 
     def send_image_url_sync(self, user_id: str, referencia: str, caption: str = ""):
-        wasender.enviar_imagen(user_id, url_publica(referencia), caption)
+        wasender.enviar_imagen(user_id, url_publica(referencia), caption, self._api_key(user_id))
 
     def send_video_sync(self, user_id: str, referencia: str, caption: str = ""):
-        wasender.enviar_video(user_id, url_publica(referencia), caption)
+        wasender.enviar_video(user_id, url_publica(referencia), caption, self._api_key(user_id))
 
 
 class ChannelSenderRegistry:

@@ -7,6 +7,7 @@ los dos se reinicia a medias, nada se pierde ni se envía dos veces.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from src.db import pool
@@ -38,6 +39,32 @@ def obtener_plantilla(plantilla_id: int) -> dict[str, Any] | None:
     return plantilla
 
 
+def problema_de_parte(parte: dict[str, Any]) -> str:
+    """Qué le impide a ESTE mensaje salir bien. "" si está listo.
+
+    Es lo que decide que el botoncito del mensaje se vea en verde: verde =
+    «esto se puede enviar tal cual». Un mensaje de solo texto está listo sin más;
+    uno con adjunto lo está cuando el archivo se pudo abrir de verdad.
+    """
+    texto = (parte.get("texto") or "").strip()
+    referencia = (parte.get("media_ref") or "").strip()
+
+    if not texto and not referencia:
+        return "Está vacío: escribe el texto o pon un adjunto."
+    if referencia and parte.get("media_ok") is False:
+        return parte.get("media_error") or "El adjunto no se pudo abrir."
+    if referencia and parte.get("media_ok") is None:
+        # No debería pasar por el panel (se comprueba en cada guardado), pero una
+        # fila cargada a mano sí puede quedar así. Sin adjunto comprobado no se
+        # promete que el envío vaya a salir bien.
+        return "El adjunto no se ha comprobado todavía."
+    return ""
+
+
+def parte_lista(parte: dict[str, Any]) -> bool:
+    return not problema_de_parte(parte)
+
+
 def buscar_por_clave(clave: str) -> dict[str, Any] | None:
     plantilla = pool.consultar_uno(
         "SELECT * FROM plantillas_mensaje WHERE clave = %s", ((clave or "").strip().upper(),)
@@ -46,28 +73,57 @@ def buscar_por_clave(clave: str) -> dict[str, Any] | None:
 
 
 def partes_de(plantilla_id: int) -> list[dict[str, Any]]:
-    return pool.consultar(
+    """Los mensajes de la cadena, en orden y cada uno con su estado.
+
+    `problema` viene resuelto desde aquí y no se calcula en la plantilla: es lo
+    que decide el color del botoncito, y una regla de negocio no se escribe en
+    Jinja.
+    """
+    partes = pool.consultar(
         "SELECT * FROM plantilla_partes WHERE plantilla_id = %s ORDER BY orden", (plantilla_id,)
     )
+    for parte in partes:
+        parte["problema"] = problema_de_parte(parte)
+    return partes
 
 
-def crear_plantilla(clave: str, nombre: str, usuario: str) -> dict[str, Any]:
+def _clave_valida(clave: str, excepto_id: int | None = None) -> str:
+    """Normaliza la clave y comprueba que no la tenga ya otro mensaje.
+
+    La clave es lo ÚNICO que identifica un mensaje: es lo que se elige al
+    enviarlo y lo que el bot busca. Dos iguales harían que «enviar ALAJUELA»
+    dependa de cuál encuentre primero, así que se rechaza aquí además de estar
+    el índice único en la base — así el usuario lee un motivo en vez de un 500.
+
+    Se guarda en mayúsculas para que «alajuela» y «ALAJUELA» sean la misma y no
+    dos que chocan al enviar.
+    """
     clave = (clave or "").strip().upper()
     if not clave:
         raise ValueError("El mensaje necesita una clave.")
+
+    otra = pool.consultar_uno("SELECT id FROM plantillas_mensaje WHERE clave = %s", (clave,))
+    if otra and otra["id"] != excepto_id:
+        raise ValueError(f"Ya existe un mensaje con la clave «{clave}».")
+    return clave
+
+
+def crear_plantilla(clave: str, usuario: str) -> dict[str, Any]:
     return pool.consultar_uno(
-        "INSERT INTO plantillas_mensaje (clave, nombre, creado_por) VALUES (%s, %s, %s) RETURNING *",
-        (clave, (nombre or clave).strip(), usuario),
+        "INSERT INTO plantillas_mensaje (clave, creado_por) VALUES (%s, %s) RETURNING *",
+        (_clave_valida(clave), usuario),
     )
 
 
-def renombrar_plantilla(plantilla_id: int, clave: str, nombre: str) -> dict[str, Any] | None:
+def renombrar_plantilla(plantilla_id: int, clave: str) -> dict[str, Any] | None:
+    """Cambia la clave. La unicidad se comprueba TAMBIÉN aquí.
+
+    Solo se comprobaba al crear: renombrar un mensaje a una clave que ya existía
+    llegaba al índice único de la base y salía un 500 sin explicación.
+    """
     return pool.consultar_uno(
-        """
-        UPDATE plantillas_mensaje SET clave = %s, nombre = %s, actualizado_en = NOW()
-        WHERE id = %s RETURNING *
-        """,
-        ((clave or "").strip().upper(), (nombre or "").strip(), plantilla_id),
+        "UPDATE plantillas_mensaje SET clave = %s, actualizado_en = NOW() WHERE id = %s RETURNING *",
+        (_clave_valida(clave, excepto_id=plantilla_id), plantilla_id),
     )
 
 
@@ -124,17 +180,15 @@ def eliminar_parte(parte_id: int) -> int:
 
 
 def problemas_de(plantilla: dict[str, Any]) -> list[str]:
-    """Lo que impediría que este mensaje salga bien."""
-    problemas = []
+    """Lo que impediría que esta cadena salga bien, mensaje por mensaje."""
     partes = plantilla.get("partes") or []
     if not partes:
-        problemas.append("No tiene ninguna parte que enviar.")
-    for parte in partes:
-        if not (parte["texto"] or "").strip() and not parte["media_ref"]:
-            problemas.append(f"La parte {parte['orden']} está vacía.")
-        if parte["media_ref"] and parte["media_ok"] is False:
-            problemas.append(f"Parte {parte['orden']}: {parte['media_error']}")
-    return problemas
+        return ["No tiene ningún mensaje que enviar."]
+    return [
+        f"Mensaje {parte['orden']}: {problema}"
+        for parte in partes
+        if (problema := problema_de_parte(parte))
+    ]
 
 
 def revisar_media_de(plantilla_id: int) -> list[dict[str, Any]]:
@@ -146,77 +200,61 @@ def revisar_media_de(plantilla_id: int) -> list[dict[str, Any]]:
     return partes_de(plantilla_id)
 
 
+# Cuántos adjuntos se comprueban a la vez en la revisión general. Cada uno es una
+# petición a un servidor ajeno (Drive casi siempre): en fila india, setenta
+# adjuntos son setenta esperas seguidas y quien pulsó el botón se queda mirando
+# la pantalla. En paralelo son unos segundos. El número es bajo a propósito: no
+# se trata de exprimir a Drive, sino de no ir de uno en uno.
+REVISION_EN_PARALELO = 8
+
+
+def revisar_todos_los_adjuntos() -> tuple[int, int]:
+    """Comprueba de una pasada los adjuntos de TODO el catálogo.
+
+    Existe porque el estado del adjunto no depende solo de nosotros: un archivo
+    de Drive al que le quitan el permiso público sigue guardado igual y solo se
+    descubre volviendo a mirarlo. Mensaje por mensaje eso son decenas de clics.
+
+    Solo se tocan las columnas del adjunto —nunca el texto—, así que revisar no
+    puede estropear lo que alguien esté escribiendo. Devuelve
+    `(revisados, con_problema)`.
+    """
+    partes = pool.consultar(
+        "SELECT id, media_tipo, media_ref FROM plantilla_partes WHERE COALESCE(media_ref, '') <> ''"
+    )
+    if not partes:
+        return 0, 0
+
+    def comprobar(parte: dict[str, Any]) -> tuple[int, bool, str]:
+        ok, error = media.verificar(parte["media_ref"], parte["media_tipo"])
+        return parte["id"], ok, error
+
+    con_problema = 0
+    with ThreadPoolExecutor(max_workers=REVISION_EN_PARALELO) as ejecutor:
+        # El resultado se escribe desde este hilo, no desde los del pool: lo que
+        # se reparte es la espera de la red, no el acceso a la base.
+        for parte_id, ok, error in ejecutor.map(comprobar, partes):
+            pool.ejecutar(
+                """
+                UPDATE plantilla_partes
+                SET media_ok = %s, media_error = %s, media_revisada_en = NOW()
+                WHERE id = %s
+                """,
+                (ok, error, parte_id),
+            )
+            if not ok:
+                con_problema += 1
+
+    return len(partes), con_problema
+
+
 # --- Envíos ------------------------------------------------------------------
 
-def encolar_envios(
-    plantilla_id: int, canal: str, destinos: list[str], usuario: str
-) -> list[dict[str, Any]]:
-    """Crea un envío pendiente por destino, con la cadena completa de partes.
-
-    Las partes se COPIAN al envío: editar el mensaje después no cambia lo que ya
-    se encoló, así el histórico refleja lo que de verdad se mandó.
-    """
-    plantilla = obtener_plantilla(plantilla_id)
-    if not plantilla:
-        raise ValueError("El mensaje no existe.")
-    if canal not in CANALES:
-        raise ValueError(f"Canal desconocido: {canal}")
-
-    problemas = plantilla["problemas"]
-    if problemas:
-        # Encolar algo que se sabe roto solo produce errores más tarde y un
-        # cliente que ya recibió medio mensaje.
-        raise ValueError(f"El mensaje «{plantilla['clave']}» tiene problemas: {problemas[0]}")
-
-    partes = json.dumps(
-        [
-            {"texto": p["texto"], "media_tipo": p["media_tipo"], "media_ref": p["media_ref"]}
-            for p in plantilla["partes"]
-        ],
-        ensure_ascii=False,
-    )
-
-    creados = []
-    for destino in destinos:
-        destino = destino.strip()
-        if not destino:
-            continue
-        creados.append(
-            pool.consultar_uno(
-                """
-                INSERT INTO envios (plantilla_id, partes, canal, destino_id, creado_por)
-                VALUES (%s, %s::jsonb, %s, %s, %s)
-                RETURNING *
-                """,
-                (plantilla["id"], partes, canal, destino, usuario),
-            )
-        )
-    return creados
-
-
-def listar_envios(limite: int = 200, incluir_tecnico: bool = False) -> list[dict[str, Any]]:
-    """Histórico de envíos.
-
-    `error_tecnico` solo se devuelve al administrador: al cliente se le muestra
-    `error_cliente`, que es la parte accionable ("no se pudo abrir la imagen").
-    """
-    columnas = (
-        "e.id, e.canal, e.destino_id, e.estado, e.intentos, e.error_cliente, "
-        "e.creado_en, e.enviado_en, e.creado_por, e.partes_enviadas, "
-        "jsonb_array_length(e.partes) AS total_partes, p.clave AS plantilla"
-    )
-    if incluir_tecnico:
-        columnas += ", e.error_tecnico"
-    return pool.consultar(
-        f"""
-        SELECT {columnas}
-        FROM envios e
-        LEFT JOIN plantillas_mensaje p ON p.id = e.plantilla_id
-        ORDER BY e.creado_en DESC
-        LIMIT %s
-        """,
-        (int(limite),),
-    )
+# `encolar_envios` y `listar_envios` vivían aquí y se los llevó
+# `services/envios.py`: un envío ya no es «una plantilla y unos destinos»
+# sino una SESIÓN, con su origen (mensaje, palabra clave o ciudad), su ritmo
+# y su progreso. Aquí queda lo que sigue siendo de un envío suelto:
+# reintentarlo, reportarlo y las incidencias.
 
 
 def obtener_envio(envio_id: int) -> dict[str, Any] | None:
@@ -273,10 +311,6 @@ def reportar(envio_id: int, usuario: str) -> tuple[bool, str]:
         (envio_id,),
     )
     return True, "Reportado. El administrador ya lo puede revisar."
-
-
-def eliminar_envio(envio_id: int) -> int:
-    return pool.ejecutar("DELETE FROM envios WHERE id = %s", (envio_id,))
 
 
 def _detalle_incidencia(envio: dict[str, Any]) -> str:

@@ -156,7 +156,17 @@ def salir_de_cuenta(request: Request, usuario=Depends(security.requiere_admin_ti
     return RedirectResponse(url="/admin/usuarios?aviso=Volviste a tu cuenta.", status_code=303)
 
 
-# --- Cambio de contraseña propio ---------------------------------------------
+# --- Cambio de contraseña ----------------------------------------------------
+#
+# «Mi cuenta» ya NO es una página: con qué cuenta estás dentro, de qué proyecto
+# es y el cambio de contraseña viven en una ventana flotante del armazón
+# (`templates/base.html`), disponible desde el menú de la cuenta en cualquier
+# pantalla. Como página era un panel de «sesiones abiertas» y un rol que decía
+# «cliente»: nada que le sirviera a quien la abría.
+#
+# Esta ruta se queda porque el cambio OBLIGATORIO del primer ingreso sí necesita
+# una pantalla propia: ahí no hay panel al que volver hasta que la contraseña
+# provisional se sustituya.
 
 @router.get("/password")
 def password_form(request: Request, usuario=Depends(security.requiere_sesion)):

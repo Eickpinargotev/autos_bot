@@ -1,80 +1,285 @@
 {% extends "base.html" %}
 {% block titulo %}{{ negocio.nombre }}{% endblock %}
 
+{# El perfil del proyecto es el centro del panel: desde aquí se ve su actividad,
+   se leen sus conversaciones, se configura su WhatsApp y se entra a su cuenta.
+   Todo lo que no es «mirar» vive en ventanas flotantes sobre esta misma página,
+   para no perder el sitio en el que estabas. #}
+
 {% block contenido %}
-<h1>{{ negocio.nombre }}</h1>
-<p class="sub">
-  <span class="estado {{ 'si' if negocio.activo else 'no' }}">{{ 'Activo' if negocio.activo else 'Inactivo' }}</span>
-  · {{ negocio.numero or 'sin número' }} · <a href="/admin/negocios">todos los clientes</a>
-</p>
-
-<div class="cifras">
-  <div class="cifra">
-    <div class="etiqueta">Conversaciones</div>
-    <div class="valor">{{ resumen.conversaciones or 0 }}</div>
-    <div class="nota">{{ resumen.clientes or 0 }} clientes distintos</div>
+<div class="titulo-con-acciones">
+  <div>
+    <h1>{{ negocio.nombre }}</h1>
+    <p class="sub" style="margin-bottom:0">
+      <span class="estado {{ 'si' if negocio.activo else 'no' }}">{{ 'Activo' if negocio.activo else 'Inactivo' }}</span>
+      · {{ negocio.numero or 'sin número' }}
+    </p>
   </div>
-  <div class="cifra">
-    <div class="etiqueta">Facturado</div>
-    <div class="valor">{{ resumen.facturado_microusd | usd }}</div>
-    <div class="nota">Costo real {{ resumen.real_microusd | usd }}</div>
-  </div>
-  <div class="cifra">
-    <div class="etiqueta">Reportes pendientes</div>
-    <div class="valor">{{ resumen.reportes_pendientes or 0 }}</div>
-    <div class="nota">Sin revisar por el negocio</div>
-  </div>
-  <div class="cifra">
-    <div class="etiqueta">Última actividad</div>
-    <div class="valor" style="font-size:19px">
-      {% if resumen.ultima_actividad %}{{ resumen.ultima_actividad | fecha }}{% else %}—{% endif %}
-    </div>
-    <div class="nota">{{ negocio.eventos_recibidos }} eventos recibidos</div>
+  <div class="acciones-cabecera">
+    <button class="boton mini" data-abre="dlg-conversaciones">Ver conversaciones</button>
+    <button class="boton mini" data-abre="dlg-config">Configuración</button>
+    {% if negocio.usuario_id %}
+    <button class="boton mini" data-abre="dlg-entrar">Entrar a su cuenta</button>
+    {% endif %}
+    <button class="icono-accion peligro" data-abre="dlg-eliminar" title="Eliminar proyecto" aria-label="Eliminar proyecto">
+      {{ iconos.icono('basura') }}
+    </button>
   </div>
 </div>
 
-<div class="panel linea" style="margin-top:16px;flex-wrap:wrap;gap:8px">
-  <a class="boton mini" href="/admin/logs?negocio={{ negocio.id }}">Ver conversaciones</a>
-  <button class="boton mini" data-abre="dlg-webhook">Webhook y eventos</button>
-  <button class="boton mini" data-abre="dlg-wasender">WasenderAPI</button>
-  <button class="boton mini" data-abre="dlg-config">Configuración</button>
-  {% if negocio.usuario_id %}
-  <form method="post" action="/admin/usuarios/{{ negocio.usuario_id }}/entrar" style="display:inline">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="mini">Entrar como este cliente</button>
-  </form>
-  {% endif %}
-  <span style="flex:1"></span>
-  <button class="icono-accion peligro" data-abre="dlg-eliminar" title="Eliminar cliente" aria-label="Eliminar cliente">
-    {{ iconos.icono('basura') }}
-  </button>
+{% if nueva_password %}
+<div class="panel" style="border-color: var(--acento)">
+  <strong>Contraseña de «{{ nueva_cuenta }}»</strong>
+  <p class="sub" style="margin:6px 0">
+    Se muestra una sola vez. Cópiala ahora y pásasela a su usuario; después solo queda
+    guardada cifrada y la única salida es generar otra. Al entrar por primera vez
+    tendrá que elegir una suya.
+  </p>
+  <span class="credencial" data-copiar>{{ nueva_password }}</span>
+</div>
+{% endif %}
+
+<div data-vivo="uso conversaciones reportes" data-refrescar="/admin/negocios/{{ negocio.id }}/resumen">
+  {% include "_negocio_resumen.html" %}
 </div>
 
-{# --- Webhook ------------------------------------------------------------- #}
-<dialog class="flotante" id="dlg-webhook">
+{# --- Conversaciones del negocio ------------------------------------------
+   Dos columnas: a la izquierda sus clientes, a la derecha el chat. Aquí y no
+   en el menú lateral porque una lista con los clientes de TODOS los proyectos
+   mezclados no sirve para nada: un chat solo se entiende dentro del negocio al
+   que le escribieron. Las dos columnas se cargan por fetch, así que abrir un
+   chat no recarga la página ni cierra la ventana. #}
+<dialog class="flotante conversaciones" id="dlg-conversaciones"
+        data-conv-inicio="/admin/negocios/{{ negocio.id }}/conversaciones">
   <div class="cabecera">
-    <h2>Webhook de {{ negocio.nombre }}</h2>
+    <h2>Conversaciones de {{ negocio.nombre }}</h2>
     <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
   </div>
-  <div class="cuerpo">
-    <p class="sub" style="margin-top:0">
-      Esta es la URL que se pega en WasenderAPI. Se le asignó al crear el cliente y
-      no cambia mientras exista: si se regenera, la que esté puesta deja de funcionar.
-    </p>
-    <span class="credencial" data-copiar>{{ negocio.url_webhook }}</span>
+  <div class="conv-doble">
+    <aside class="conv-lista" data-conv-panel>
+      <p class="sub">Cargando…</p>
+    </aside>
+    <section class="conv-hilo" data-conv-detalle>
+      <p class="vacio">Elige una conversación de la izquierda.</p>
+    </section>
+  </div>
+</dialog>
 
-    <h3>Eventos que hay que activar</h3>
-    <ul class="lista-eventos">
-      {% for e in eventos %}<li><code>{{ e.nombre }}</code> — {{ e.para }}</li>{% endfor %}
-    </ul>
+{# --- Configuración --------------------------------------------------------
+   UNA ventana con categorías a la izquierda, no cuatro botones sueltos. El
+   webhook y las credenciales de WasenderAPI están en la MISMA pestaña porque
+   son la misma cosa: lo que hay que pegar en el proveedor y lo que el proveedor
+   entrega. Tenerlos separados obligaba a saltar entre ventanas para configurar
+   un solo servicio. #}
+<dialog class="flotante ancha" id="dlg-config">
+  <div class="cabecera">
+    <h2>Configuración de {{ negocio.nombre }}</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
 
-    <h3>Dejar apagados</h3>
-    <ul class="lista-eventos apagados">
-      {% for e in eventos_no %}<li><code>{{ e.nombre }}</code> — {{ e.para }}</li>{% endfor %}
-    </ul>
+  <div class="dialogo-secciones" data-pestanas>
+    <nav class="dialogo-nav">
+      <button type="button" class="activo" data-pestana="cfg-general">General</button>
+      <button type="button" data-pestana="cfg-whatsapp">WhatsApp</button>
+      <button type="button" data-pestana="cfg-acceso">Usuario</button>
+      <button type="button" data-pestana="cfg-telegram">Telegram</button>
+    </nav>
 
-    <div class="linea" style="justify-content:flex-end;margin-top:18px">
-      <button class="mini" type="button" data-abre="dlg-regenerar">Regenerar webhook</button>
+    <div class="dialogo-cuerpo">
+
+      {# --- General --- #}
+      <section id="cfg-general" data-panel>
+        <form method="post" action="/admin/negocios/{{ negocio.id }}/config">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <div style="margin-bottom:12px">
+            <label for="cfg-nombre">Nombre</label>
+            <input id="cfg-nombre" name="nombre" required value="{{ negocio.nombre }}" style="width:100%">
+          </div>
+          <div style="margin-bottom:12px">
+            <label for="cfg-numero">Número de WhatsApp</label>
+            <input id="cfg-numero" name="numero" value="{{ negocio.numero }}" style="width:100%">
+          </div>
+          <div style="margin-bottom:12px">
+            <label for="cfg-zona">Zona horaria</label>
+            <select id="cfg-zona" name="zona_horaria" style="width:100%">
+              {% for z in zonas %}
+              <option value="{{ z }}" {{ 'selected' if z == negocio.zona_horaria }}>{{ z }}</option>
+              {% endfor %}
+            </select>
+            <p class="sub" style="margin:6px 0 0">
+              Con esta hora se muestran sus chats: la de su negocio, no la del servidor.
+            </p>
+          </div>
+          <div style="margin-bottom:16px">
+            <label for="cfg-notas">Notas internas</label>
+            <textarea id="cfg-notas" name="notas" rows="3" style="width:100%">{{ negocio.notas }}</textarea>
+          </div>
+          <div class="linea" style="justify-content:flex-end">
+            <button class="primario">Guardar</button>
+          </div>
+        </form>
+
+        <hr class="separador">
+
+        <form method="post" action="/admin/negocios/{{ negocio.id }}/activo" class="linea">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <span class="sub" style="margin:0;flex:1">
+            {% if negocio.activo %}Desactivar corta su webhook al instante.
+            {% else %}Está desactivado: su webhook rechaza los eventos.{% endif %}
+          </span>
+          <button class="mini">{{ 'Desactivar' if negocio.activo else 'Activar' }}</button>
+        </form>
+      </section>
+
+      {# --- WhatsApp: el webhook y las credenciales, juntos --- #}
+      <section id="cfg-whatsapp" data-panel hidden>
+        <h3 style="margin-top:0">URL del webhook</h3>
+        <p class="sub" style="margin-top:0">
+          Esto es lo que se pega en WasenderAPI. Se le asignó al crear el proyecto y no
+          cambia mientras exista. Haz clic para copiarla.
+        </p>
+        <span class="credencial" data-copiar>{{ negocio.url_webhook }}</span>
+
+        <h3>Credenciales de WasenderAPI</h3>
+        <p class="sub" style="margin-top:0">
+          Las dos de la pantalla de tu sesión, copiadas tal cual. No hay que poner ninguna
+          URL de API: ese dominio es del proveedor y es el mismo para todos.
+        </p>
+        <form method="post" action="/admin/negocios/{{ negocio.id }}/wasender">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <div style="margin-bottom:14px">
+            <label for="wa-key">API Access Token</label>
+            <input id="wa-key" name="wasender_api_key" type="password" autocomplete="off" style="width:100%"
+                   placeholder="{{ 'guardado — escribe otro para reemplazarlo' if negocio.wasender_api_key else 'sin configurar' }}">
+            <p class="sub" style="margin:4px 0 0">Autentica los mensajes que se envían desde este número.</p>
+          </div>
+          <div style="margin-bottom:8px">
+            <label for="wa-secret">Webhook Secret</label>
+            <input id="wa-secret" name="wasender_webhook_secret" type="password" autocomplete="off" style="width:100%"
+                   placeholder="{{ 'guardado — escribe otro para reemplazarlo' if negocio.wasender_webhook_secret else 'opcional, sin configurar' }}">
+            <p class="sub" style="margin:4px 0 0">
+              Opcional. Si lo pones, cada evento entrante tendrá que traerlo: además de saber
+              a qué proyecto va (eso lo dice el token de la URL), se comprueba que lo mandó
+              WasenderAPI de verdad.
+            </p>
+          </div>
+          <p class="sub" style="margin:12px 0 16px">
+            Lo guardado no se muestra. Dejar un campo vacío lo conserva.
+          </p>
+          <div class="linea" style="justify-content:flex-end">
+            <button class="primario">Guardar credenciales</button>
+          </div>
+        </form>
+
+        <hr class="separador">
+
+        <h3 style="margin-top:0">Eventos que hay que activar</h3>
+        <ul class="lista-eventos">
+          {% for e in eventos %}<li><code>{{ e.nombre }}</code> — {{ e.para }}</li>{% endfor %}
+        </ul>
+
+        <h3>Dejar apagados</h3>
+        <ul class="lista-eventos apagados">
+          {% for e in eventos_no %}<li><code>{{ e.nombre }}</code> — {{ e.para }}</li>{% endfor %}
+        </ul>
+
+        <div class="linea" style="justify-content:flex-end;margin-top:18px">
+          <button class="mini" type="button" data-abre="dlg-regenerar">Regenerar webhook</button>
+        </div>
+      </section>
+
+      {# --- Usuario del proyecto ---
+         UN proyecto, UN usuario. No es una lista de cuentas con permisos: la
+         persona que administra este proyecto es una, y esta cuenta es su llave.
+         Por eso cuando ya existe no se ofrece «vincular otra» —eso sugería que
+         podía haber varias— sino lo que de verdad hace falta: corregirle el
+         nombre y darle contraseña nueva. #}
+      <section id="cfg-acceso" data-panel hidden>
+        {% if negocio.cuenta %}
+        <p class="sub" style="margin-top:0">
+          Este proyecto lo administra <strong>{{ negocio.cuenta }}</strong>, y es su
+          único usuario. Tú puedes entrar a ese panel sin su contraseña —aunque él la
+          cambie— y el acceso queda registrado.
+        </p>
+
+        <form method="post" action="/admin/negocios/{{ negocio.id }}/cuenta/renombrar">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="usuario_id" value="{{ negocio.usuario_id }}">
+          <label for="cuenta-renombrar">Nombre de usuario</label>
+          <div class="linea">
+            <input id="cuenta-renombrar" name="nombre" required style="flex:1" value="{{ negocio.cuenta }}">
+            <button class="mini">Guardar nombre</button>
+          </div>
+          <p class="sub" style="margin:6px 0 0">
+            Es el nombre con el que ingresa. Sus sesiones abiertas siguen valiendo.
+          </p>
+        </form>
+
+        <hr class="separador">
+
+        <div class="linea">
+          <button class="boton mini" type="button" data-abre="dlg-entrar">Entrar a su cuenta</button>
+          <form method="post" action="/admin/usuarios/{{ negocio.usuario_id }}/password">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini">Restablecer su contraseña</button>
+          </form>
+          <span style="flex:1"></span>
+          <button class="mini peligro" type="button" data-abre="dlg-desvincular">Desvincular</button>
+        </div>
+
+        {% else %}
+        <p class="sub" style="margin-top:0">
+          Este proyecto todavía no tiene usuario. Créalo aquí: la contraseña se genera
+          sola y se muestra <strong>una sola vez</strong> para que se la pases.
+          Pon el nombre de la persona, no el del proyecto.
+        </p>
+        <form method="post" action="/admin/negocios/{{ negocio.id }}/cuenta/crear">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label for="cuenta-nombre">Usuario</label>
+          <div class="linea">
+            <input id="cuenta-nombre" name="nombre" required style="flex:1" placeholder="Enrique">
+            <button class="primario">Crear usuario</button>
+          </div>
+        </form>
+
+        {% if cuentas %}
+        <hr class="separador">
+        <p class="sub">O usa una cuenta que ya exista y todavía no sea de ningún proyecto.</p>
+        <form method="post" action="/admin/negocios/{{ negocio.id }}/cuenta" class="linea">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <select name="usuario_id" style="flex:1">
+            <option value="">— elige una —</option>
+            {% for c in cuentas %}<option value="{{ c.id }}">{{ c.usuario }}</option>{% endfor %}
+          </select>
+          <button class="mini">Vincular</button>
+        </form>
+        {% endif %}
+        {% endif %}
+      </section>
+
+      {# --- Telegram --- #}
+      <section id="cfg-telegram" data-panel hidden>
+        <p class="sub" style="margin-top:0">
+          Hoy Telegram es <strong>uno para todo el despliegue</strong>, no uno por proyecto:
+          el bot escucha con un único token (<code>TELEGRAM_BOT_TOKEN</code> del entorno) y
+          ese mismo canal es el que recibe los códigos para recuperar tu contraseña.
+        </p>
+        <dl>
+          <div class="dato">
+            <dt>Bot de Telegram</dt>
+            <dd>
+              {% if ajustes.TELEGRAM_BOT_TOKEN %}<span class="pastilla ok">configurado</span>
+              {% else %}<span class="pastilla alerta">sin configurar</span>{% endif %}
+            </dd>
+          </div>
+        </dl>
+        <p class="sub">
+          Darle a cada proyecto su propio número de Telegram no es un campo más en esta
+          ficha: obliga a que el bot escuche con varios tokens a la vez, un proceso por
+          cada uno. Es un cambio del bot, no del panel.
+        </p>
+      </section>
+
     </div>
   </div>
 </dialog>
@@ -87,7 +292,7 @@
   <div class="cuerpo">
     <p style="margin-top:0">
       La URL actual dejará de aceptar eventos. Hasta que pegues la nueva en
-      WasenderAPI, <strong>los mensajes de este cliente no llegarán al bot</strong>.
+      WasenderAPI, <strong>los mensajes de este proyecto no llegarán al bot</strong>.
     </p>
     <form method="post" action="/admin/negocios/{{ negocio.id }}/regenerar" class="linea" style="justify-content:flex-end">
       <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -97,116 +302,50 @@
   </div>
 </dialog>
 
-{# --- WasenderAPI --------------------------------------------------------- #}
-<dialog class="flotante" id="dlg-wasender">
+{# El aviso de que vas a entrar a la cuenta de otro no puede ser un confirm()
+   del navegador: es una acción que queda registrada y conviene leerla. #}
+{% if negocio.usuario_id %}
+<dialog class="flotante" id="dlg-entrar">
   <div class="cabecera">
-    <h2>Credenciales de WasenderAPI</h2>
+    <h2>Entrar a la cuenta de {{ negocio.cuenta }}</h2>
     <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
   </div>
   <div class="cuerpo">
-    <p class="sub" style="margin-top:0">
-      Las dos credenciales de la pantalla de tu sesión en WasenderAPI, copiadas tal cual.
-      No hay que poner ninguna URL: el dominio de WasenderAPI es el mismo para todos
-      y ya está configurado en el despliegue.
+    <p style="margin-top:0">
+      Vas a ver el panel tal como lo ve ese usuario, y <strong>cualquier cambio que
+      hagas quedará a nombre de su cuenta</strong>. El acceso se registra.
+      Para volver a la tuya, el aviso de arriba tiene el botón.
     </p>
-    <form method="post" action="/admin/negocios/{{ negocio.id }}/wasender">
+    <form method="post" action="/admin/usuarios/{{ negocio.usuario_id }}/entrar"
+          class="linea" style="justify-content:flex-end">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <div style="margin-bottom:14px">
-        <label for="wa-key">API Access Token</label>
-        <input id="wa-key" name="wasender_api_key" type="password" autocomplete="off" style="width:100%"
-               placeholder="{{ 'guardado — escribe otro para reemplazarlo' if negocio.wasender_api_key else 'sin configurar' }}">
-        <p class="sub" style="margin:4px 0 0">Autentica los mensajes que se envían desde este número.</p>
-      </div>
-      <div style="margin-bottom:8px">
-        <label for="wa-secret">Webhook Secret</label>
-        <input id="wa-secret" name="wasender_webhook_secret" type="password" autocomplete="off" style="width:100%"
-               placeholder="{{ 'guardado — escribe otro para reemplazarlo' if negocio.wasender_webhook_secret else 'opcional, sin configurar' }}">
-        <p class="sub" style="margin:4px 0 0">
-          Opcional. Si lo pones, cada evento entrante tendrá que traerlo: además de saber
-          a qué cliente va (eso lo dice el token de la URL), se comprueba que lo mandó
-          WasenderAPI de verdad.
-        </p>
-      </div>
-      <p class="sub" style="margin:12px 0 16px">
-        Lo guardado no se muestra. Dejar un campo vacío lo conserva.
-      </p>
-      <div class="linea" style="justify-content:flex-end">
-        <button class="mini" type="button" data-cierra>Cancelar</button>
-        <button class="primario">Guardar</button>
-      </div>
+      <button class="mini" type="button" data-cierra>Cancelar</button>
+      <button class="primario">Entrar</button>
     </form>
   </div>
 </dialog>
+{% endif %}
 
-{# --- Configuración -------------------------------------------------------- #}
-<dialog class="flotante" id="dlg-config">
+{% if negocio.usuario_id %}
+<dialog class="flotante" id="dlg-desvincular">
   <div class="cabecera">
-    <h2>Configuración</h2>
+    <h2>¿Desvincular a {{ negocio.cuenta }}?</h2>
     <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
   </div>
   <div class="cuerpo">
-    <form method="post" action="/admin/negocios/{{ negocio.id }}/config">
+    <p style="margin-top:0">
+      El proyecto se queda <strong>sin nadie que pueda entrar a su panel</strong> hasta
+      que le asignes otro usuario. La cuenta no se borra: queda suelta, sin proyecto.
+    </p>
+    <form method="post" action="/admin/negocios/{{ negocio.id }}/cuenta" class="linea" style="justify-content:flex-end">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <div style="margin-bottom:12px">
-        <label for="cfg-nombre">Nombre</label>
-        <input id="cfg-nombre" name="nombre" required value="{{ negocio.nombre }}" style="width:100%">
-      </div>
-      <div style="margin-bottom:12px">
-        <label for="cfg-numero">Número de WhatsApp</label>
-        <input id="cfg-numero" name="numero" value="{{ negocio.numero }}" style="width:100%">
-      </div>
-      <div style="margin-bottom:12px">
-        <label for="cfg-zona">Zona horaria</label>
-        <select id="cfg-zona" name="zona_horaria" style="width:100%">
-          {% for z in zonas %}
-          <option value="{{ z }}" {{ 'selected' if z == negocio.zona_horaria }}>{{ z }}</option>
-          {% endfor %}
-        </select>
-        <p class="sub" style="margin:6px 0 0">
-          Con esta hora se muestran sus chats: la de su negocio, no la del servidor.
-        </p>
-      </div>
-      <div style="margin-bottom:16px">
-        <label for="cfg-notas">Notas internas</label>
-        <textarea id="cfg-notas" name="notas" rows="3" style="width:100%">{{ negocio.notas }}</textarea>
-      </div>
-      <div class="linea" style="justify-content:flex-end">
-        <button class="mini" type="button" data-cierra>Cancelar</button>
-        <button class="primario">Guardar</button>
-      </div>
-    </form>
-
-    <hr style="border:0;border-top:1px solid var(--borde);margin:22px 0">
-
-    <form method="post" action="/admin/negocios/{{ negocio.id }}/cuenta">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label for="cfg-cuenta">Cuenta de acceso del cliente</label>
-      <p class="sub" style="margin:4px 0 8px">
-        Con la que entra a su propio panel. Es también la que se usa al «entrar como».
-      </p>
-      <div class="linea">
-        <select id="cfg-cuenta" name="usuario_id" style="flex:1">
-          <option value="">— sin vincular —</option>
-          {% for c in cuentas %}
-          <option value="{{ c.id }}" {{ 'selected' if c.id == negocio.usuario_id }}>{{ c.usuario }}</option>
-          {% endfor %}
-        </select>
-        <button class="mini">Vincular</button>
-      </div>
-    </form>
-
-    <hr style="border:0;border-top:1px solid var(--borde);margin:22px 0">
-
-    <form method="post" action="/admin/negocios/{{ negocio.id }}/activo" class="linea">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <span class="sub" style="margin:0;flex:1">
-        {% if negocio.activo %}Desactivar corta su webhook al instante.
-        {% else %}Está desactivado: su webhook rechaza los eventos.{% endif %}
-      </span>
-      <button class="mini">{{ 'Desactivar' if negocio.activo else 'Activar' }}</button>
+      <input type="hidden" name="usuario_id" value="">
+      <button class="mini" type="button" data-cierra>Cancelar</button>
+      <button class="primario">Sí, desvincular</button>
     </form>
   </div>
 </dialog>
+{% endif %}
 
 <dialog class="flotante" id="dlg-eliminar">
   <div class="cabecera">
@@ -215,7 +354,7 @@
   </div>
   <div class="cuerpo">
     <p style="margin-top:0">
-      Se borra el cliente y con él su webhook. La URL pasará a rechazar todo.
+      Se borra el proyecto y con él su webhook. La URL pasará a rechazar todo.
       No se puede deshacer.
     </p>
     <form method="post" action="/admin/negocios/{{ negocio.id }}/eliminar" class="linea" style="justify-content:flex-end">

@@ -1,69 +1,22 @@
 {% extends "base.html" %}
 {% block titulo %}Envíos{% endblock %}
 
+{# Cien filas sueltas no contestaban «¿cómo va lo que mandé hace un rato?».
+   Ahora cada tanda es una SESIÓN con su barra, y el detalle —qué número falló y
+   por qué— se abre en una ventana sin salir de aquí. #}
+
 {% block contenido %}
 <h1>Envíos</h1>
 <p class="sub">
-  Los pendientes se mandan solos en unos segundos; recarga para ver el estado.
-  Un envío con error se puede reintentar hasta {{ max_intentos }} veces.
+  Cada tanda es una sesión. Salen uno cada unos quince segundos con un margen
+  aleatorio, así que una lista larga tarda un rato: la barra avanza sola.
+  Las sesiones se borran solas a los {{ retencion_dias }} días.
 </p>
 
-<div class="panel tabla-scroll">
-  <table>
-    <thead>
-      <tr>
-        <th>Fecha</th><th>Plataforma</th><th>Destino</th><th>Mensaje</th>
-        <th>Estado</th><th class="num">Partes</th><th class="num">Intentos</th><th>Detalle</th><th>Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for e in envios %}
-      <tr>
-        <td style="white-space:nowrap">{{ e.creado_en | fecha }}</td>
-        <td>{{ e.canal }}</td>
-        <td>{{ e.destino_id }}</td>
-        <td>{{ e.plantilla or '(mensaje eliminado)' }}</td>
-        <td>
-          {% if e.estado == 'enviado' %}<span class="pastilla ok">enviado</span>
-          {% elif e.estado == 'error' %}<span class="pastilla error">error</span>
-          {% elif e.estado == 'en_revision' %}<span class="pastilla alerta">en revisión</span>
-          {% else %}<span class="pastilla">{{ e.estado }}</span>{% endif %}
-        </td>
-        <td class="num">{{ e.partes_enviadas }}/{{ e.total_partes }}</td>
-        <td class="num">{{ e.intentos }}</td>
-        <td style="max-width:340px">
-          {% if e.error_cliente %}{{ e.error_cliente }}{% endif %}
-          {% if es_admin and e.error_tecnico %}
-            <details><summary style="cursor:pointer;font-size:12px;color:var(--suave)">Detalle técnico</summary>
-              <pre style="white-space:pre-wrap;font-size:11px">{{ e.error_tecnico }}</pre>
-            </details>
-          {% endif %}
-        </td>
-        <td style="white-space:nowrap">
-          {% if e.estado == 'error' %}
-            {% if e.intentos < max_intentos %}
-            <form method="post" action="/envios/{{ e.id }}/reintentar" style="display:inline">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <button class="mini">Reintentar</button>
-            </form>
-            {% else %}
-            <form method="post" action="/envios/{{ e.id }}/reportar" style="display:inline">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <button class="mini">Reportar</button>
-            </form>
-            {% endif %}
-            <form method="post" action="/envios/{{ e.id }}/eliminar" style="display:inline"
-                  onsubmit="return confirm('¿Eliminar este envío del historial?')">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <button class="mini peligro">Eliminar</button>
-            </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="9" class="vacio">Todavía no has hecho envíos.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+{# El fragmento se vuelve a pedir cuando el worker mueve algo (tema «envios»),
+   no cada N segundos: la barra avanza sola y sin consultar de más. `data-cada`
+   queda de respaldo por si el flujo de eventos no se pudiera establecer. #}
+<div data-vivo="envios" data-refrescar="/envios/sesiones" data-cada="5000">
+  {% include "_envios_sesiones.html" %}
 </div>
 {% endblock %}

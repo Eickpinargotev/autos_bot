@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block titulo %}Bloqueos{% endblock %}
+
+{# Los bloqueos no se ponen a mano: los pone el sistema. Esta pantalla existe
+   para lo contrario, para levantarlos, que era lo único que no se podía hacer
+   sin entrar a la base. #}
+
+{% block contenido %}
+<h1>Usuarios bloqueados</h1>
+<p class="sub">
+  Mientras alguien está bloqueado, el bot no le responde. Se bloquean solos: cuando
+  el dueño contesta desde su teléfono (12 días para no pisarle la conversación),
+  cuando alguien entra al grupo del curso, o con un <code>/block</code>.
+</p>
+
+<div class="panel">
+  <form class="linea" method="get" action="/admin/bloqueos">
+    <input name="q" value="{{ busqueda }}" placeholder="Buscar por número…"
+           inputmode="tel" autocomplete="off">
+    <button>Buscar</button>
+  </form>
+  <p class="sub" style="margin:8px 0 0">
+    Solo por número: los guiones, espacios y el «+» se ignoran.
+  </p>
+</div>
+
+{# La búsqueda viaja en la URL del refresco: lo que llegue solo tiene que seguir
+   siendo el resultado que estabas mirando, no la lista entera. #}
+<div data-vivo="bloqueos" data-refrescar="/admin/bloqueos/lista{{ '?q=' ~ busqueda | urlencode if busqueda }}">
+  {% include "_bloqueos_lista.html" %}
+</div>
+{% endblock %}

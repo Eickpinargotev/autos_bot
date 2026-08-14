@@ -1,0 +1,13 @@
+-- Un mensaje se identifica por su CLAVE, y con eso basta.
+--
+-- `plantillas_mensaje` nació con `clave` y `nombre`: la clave es con lo que se
+-- identifica el mensaje (ALAJUELA, TAREAS) y el nombre era un rótulo
+-- descriptivo al lado. En la práctica el nombre acababa siendo la clave otra
+-- vez escrita en minúsculas, ocupaba la mitad del formulario y no se usaba para
+-- nada: ni se busca por él, ni el bot lo lee, ni sale en ningún envío.
+--
+-- Aquí solo se le pone un valor por defecto para que los INSERT puedan
+-- ignorarlo. La columna se ELIMINA en la migración de palabras clave, que es la
+-- que deja de sembrar filas con nombre en esta tabla; quitarla ahora rompería
+-- esa semilla (la 007), que se sigue aplicando en bases nuevas.
+ALTER TABLE plantillas_mensaje ALTER COLUMN nombre SET DEFAULT '';

@@ -12,9 +12,24 @@ RUTAS_SOLO_ADMIN = (
     "/admin/periodos",
     "/admin/tarifas",
     "/admin/logs",
+    # El visor por negocio. Devuelve un fragmento para la ventana flotante, pero
+    # sirve exactamente lo mismo que el listado completo: las conversaciones de
+    # los clientes. Si se abriera al negocio, vería los chats de otros.
+    "/admin/negocios/1/conversaciones",
+    # Las cifras del perfil, que se refrescan solas. Llevan el costo real y el
+    # margen: servírselas a un negocio sería enseñarle lo que ganamos con él.
+    "/admin/negocios/1/resumen",
+    "/admin/bloqueos",
     "/admin/incidencias",
     "/admin/usuarios",
     "/admin/configuracion",
+    # Los fragmentos que el panel vuelve a pedir solo cuando algo cambia. Son
+    # rutas como cualquier otra: devolver un trozo de HTML en vez de la página
+    # entera no las hace menos sensibles, y sin esta línea una podría quedarse
+    # sin `requiere_admin` sin que nada fallara.
+    "/admin/bloqueos/lista",
+    "/admin/incidencias/lista",
+    "/admin/logs/lista",
 )
 
 # Páginas del panel del NEGOCIO. El administrador tampoco entra: no son su
@@ -25,13 +40,27 @@ RUTAS_DEL_NEGOCIO = (
     "/reportes",
     "/conocimiento",
     "/preguntas",
-    "/ciudades",
     "/mensajes",
     "/enviar",
     "/envios",
+    # Los fragmentos que se refrescan solos, por el mismo motivo que arriba.
+    "/reportes/lista",
+    "/preguntas/lista",
+    "/clientes/lista",
 )
 
 RUTAS_DEL_CLIENTE = RUTAS_DEL_NEGOCIO
+
+# Páginas de cualquiera que tenga sesión, sea del rol que sea. «Mi cuenta» ya no
+# está aquí: dejó de ser una página y es una ventana del armazón. Queda
+# `/password`, que es la pantalla del cambio obligatorio del primer ingreso.
+RUTAS_DE_CUALQUIER_SESION = ("/password",)
+
+
+def test_el_cambio_de_contrasena_lo_ve_cualquier_sesion(sesion_admin, sesion_cliente):
+    for ruta in RUTAS_DE_CUALQUIER_SESION:
+        assert sesion_admin.get(ruta).status_code == 200, ruta
+        assert sesion_cliente.get(ruta).status_code == 200, ruta
 
 
 def test_sin_sesion_se_redirige_al_login(cliente_http):
@@ -51,6 +80,12 @@ def test_el_negocio_si_entra_a_lo_suyo(sesion_cliente):
 
 
 def test_el_admin_entra_a_lo_suyo(sesion_admin):
+    from src.services import clientes_whatsapp
+
+    # Hay rutas de la lista que son de UN proyecto (`/admin/negocios/1/...`), y
+    # sin ninguno creado responderían 404 antes de llegar a comprobar nada.
+    clientes_whatsapp.crear("Escuela de prueba")
+
     for ruta in RUTAS_SOLO_ADMIN:
         assert sesion_admin.get(ruta).status_code == 200, ruta
 

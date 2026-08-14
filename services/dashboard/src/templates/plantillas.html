@@ -1,102 +1,199 @@
 {% extends "base.html" %}
 {% block titulo %}Mensajes{% endblock %}
 
-{# Un mensaje por fila plegada: la lista cabe de un vistazo y solo se despliega
-   el que se va a editar. Antes se pintaban todas las partes de todos los
-   mensajes a la vez y la página era un muro de formularios. #}
+{# Tres niveles, cada uno con una sola cosa dentro:
+
+   1. La PÁGINA es la lista de claves. Se lee de un vistazo y no se despliega
+      nada: antes cada mensaje era un <details> que al abrirse volcaba todas sus
+      partes, todos sus formularios y sus botones en mitad de la lista.
+   2. La VENTANA de un mensaje: su clave y sus mensajes como botoncitos.
+   3. La VENTANA de un mensaje suelto: su texto y su adjunto.
+
+   El verde no es decoración: significa «esto se puede enviar tal cual». Un
+   mensaje de solo texto lo está siempre; uno con adjunto, cuando el archivo de
+   Drive se pudo abrir de verdad al guardarlo. #}
 
 {% block contenido %}
-<h1>Mensajes</h1>
-<p class="sub">
-  Cada mensaje tiene una <strong>clave</strong> con la que se identifica al enviarlo,
-  y puede tener varias partes que salen una tras otra. Los adjuntos se comprueban
-  al guardar, no al enviar: un enlace roto se descubre aquí y no cuando ya es tarde.
-</p>
+<div class="titulo-con-acciones">
+  <div>
+    <h1>Mensajes</h1>
+    <p class="sub" style="margin-bottom:0">
+      Cada uno tiene una <strong>clave</strong> con la que se elige al enviarlo, y
+      puede estar formado por varios mensajes que salen uno tras otro. Los adjuntos
+      se comprueban al guardar, no al enviar: un enlace roto se descubre aquí y no
+      cuando el cliente ya recibió media cadena.
+    </p>
+  </div>
+  <div class="acciones-cabecera">
+    {# Revisar TODO de una vez: el permiso de un archivo de Drive puede cambiar
+       sin que nadie toque el panel, y comprobarlo mensaje por mensaje son
+       decenas de clics. Tarda unos segundos porque va a buscar cada archivo. #}
+    <form method="post" action="/mensajes/revisar">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="boton mini">Revisar adjuntos</button>
+    </form>
+    <button class="boton primario mini" data-abre="nuevo-mensaje">Nuevo mensaje</button>
+  </div>
+</div>
 
-{% for p in plantillas %}
-<details class="panel plegable" {{ 'open' if abierto == p.id }}>
-  <summary>
+<div class="msgs">
+  {% for p in plantillas %}
+  <article class="msg {{ 'listo' if not p.problemas else 'roto' }}" data-abre="msg-{{ p.id }}"
+           role="button" tabindex="0" aria-label="Abrir {{ p.clave }}">
     <span class="clave">{{ p.clave }}</span>
-    <span class="sub" style="margin:0">{{ p.nombre }}</span>
-    <span style="flex:1"></span>
+    <span class="msg-resumen">{{ p.partes[0].texto | truncate(90) if p.partes else 'Sin mensajes' }}</span>
     {% if p.problemas %}
-    <span class="estado no" style="color:var(--error)">{{ p.problemas | length }} por revisar</span>
+    <span class="estado no">{{ p.problemas | length }} por revisar</span>
     {% else %}
-    <span class="estado si">{{ p.partes | length }} parte{{ '' if p.partes | length == 1 else 's' }}</span>
+    <span class="estado si">{{ p.partes | length }} mensaje{{ '' if p.partes | length == 1 else 's' }}</span>
     {% endif %}
-  </summary>
+  </article>
+  {% else %}
+  <div class="panel vacio">Todavía no hay mensajes.</div>
+  {% endfor %}
+</div>
 
-  <div class="plegable-cuerpo">
+{# --- Nivel 2: la ventana de un mensaje ------------------------------------ #}
+{% for p in plantillas %}
+<dialog class="flotante" id="msg-{{ p.id }}" {{ 'data-abrir-al-cargar' if abierto == p.id }}>
+  <div class="cabecera">
+    <h2>{{ p.clave }}</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/mensajes/{{ p.id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="clave-{{ p.id }}">Clave</label>
+      <div class="linea">
+        <input id="clave-{{ p.id }}" name="clave" value="{{ p.clave }}" required style="flex:1">
+        <button class="mini">Guardar</button>
+      </div>
+      <p class="sub" style="margin:6px 0 0">No puede repetirse: es lo que identifica el mensaje.</p>
+    </form>
+
+    <hr class="separador">
+
+    <h3 style="margin-top:0">Mensajes que salen, en orden</h3>
     {% if p.problemas %}
     <ul class="lista-problemas">
       {% for problema in p.problemas %}<li>{{ problema }}</li>{% endfor %}
     </ul>
     {% endif %}
 
-    <form class="linea" method="post" action="/mensajes/{{ p.id }}">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <div><label>Clave</label><input name="clave" value="{{ p.clave }}" required></div>
-      <div><label>Nombre</label><input name="nombre" value="{{ p.nombre }}"></div>
-      <button class="mini">Guardar</button>
-    </form>
-
-    {% for parte in p.partes %}
-    <div class="parte">
-      <form method="post" action="/mensajes/{{ p.id }}/parte/{{ parte.orden }}">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <div class="linea" style="margin-bottom:6px">
-          <label style="margin:0">Parte {{ parte.orden }}</label>
-          <span style="flex:1"></span>
-          {% if parte.media_ref and parte.media_ok %}
-          <span class="estado si">adjunto verificado</span>
-          {% endif %}
-        </div>
-        <textarea name="texto" rows="4">{{ parte.texto }}</textarea>
-        <div class="campos">
-          <div>
-            <label>Adjunto</label>
-            <select name="media_tipo">
-              <option value="" {{ 'selected' if not parte.media_tipo }}>Sin adjunto</option>
-              <option value="imagen" {{ 'selected' if parte.media_tipo == 'imagen' }}>Imagen</option>
-              <option value="video" {{ 'selected' if parte.media_tipo == 'video' }}>Video</option>
-            </select>
-          </div>
-          <div>
-            <label>ID o enlace de Google Drive</label>
-            <input name="media_ref" value="{{ parte.media_ref }}"
-                   placeholder="Pega el enlace de Drive o el ID; se extrae solo">
-          </div>
-        </div>
-        {% if parte.media_ref and parte.media_ok is false %}
-        <p class="error-linea">{{ parte.media_error }}</p>
-        {% endif %}
-        <div class="linea" style="justify-content:flex-end;margin-top:8px">
-          <button class="mini">Guardar parte</button>
-        </div>
-      </form>
-      <form method="post" action="/mensajes/parte/{{ parte.id }}/eliminar" class="quitar-parte">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="icono-accion peligro" title="Eliminar la parte {{ parte.orden }}"
-                aria-label="Eliminar la parte {{ parte.orden }}">{{ iconos.icono('basura') }}</button>
-      </form>
+    {# Cada mensaje es un botoncito con su papelera al lado. Se ve de un golpe
+       cuántos hay y cuál falla, que era imposible con todos desplegados. #}
+    <div class="piezas">
+      {% for parte in p.partes %}
+      <span class="pieza {{ 'listo' if not parte.problema else 'roto' }}">
+        <button type="button" class="pieza-abrir" data-abre="parte-{{ p.id }}-{{ parte.orden }}">
+          Mensaje {{ parte.orden }}
+          {% if parte.media_ref %}<span class="pieza-clip" title="Lleva adjunto">◉</span>{% endif %}
+        </button>
+        <button type="button" class="pieza-quitar" data-abre="quitar-{{ parte.id }}"
+                title="Eliminar el mensaje {{ parte.orden }}"
+                aria-label="Eliminar el mensaje {{ parte.orden }}">×</button>
+      </span>
+      {% else %}
+      <p class="sub" style="margin:0">Todavía no tiene ningún mensaje.</p>
+      {% endfor %}
     </div>
-    {% endfor %}
 
-    <div class="linea" style="margin-top:12px">
+    <div class="linea" style="margin-top:16px">
       <form method="post" action="/mensajes/{{ p.id }}/parte">
         <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="mini">Añadir parte</button>
+        <button class="boton mini">Añadir mensaje</button>
       </form>
       <form method="post" action="/mensajes/{{ p.id }}/revisar">
         <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="mini">Revisar adjuntos</button>
+        <button class="mini">Volver a comprobar los adjuntos</button>
       </form>
       <span style="flex:1"></span>
       <button class="icono-accion peligro" data-abre="borrar-{{ p.id }}"
-              title="Eliminar el mensaje" aria-label="Eliminar el mensaje">{{ iconos.icono('basura') }}</button>
+              title="Eliminar el mensaje entero" aria-label="Eliminar el mensaje entero">{{ iconos.icono('basura') }}</button>
     </div>
   </div>
-</details>
+</dialog>
+
+{# --- Nivel 3: la ventana de UN mensaje suelto ----------------------------- #}
+{% for parte in p.partes %}
+<dialog class="flotante" id="parte-{{ p.id }}-{{ parte.orden }}"
+        {{ 'data-abrir-al-cargar' if abierto == p.id and parte_abierta == parte.orden }}>
+  <div class="cabecera">
+    <h2>{{ p.clave }} · mensaje {{ parte.orden }}</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    {% if parte.problema %}
+    <div class="mensaje aviso" style="margin-top:0">{{ parte.problema }}</div>
+    {% endif %}
+
+    <form method="post" action="/mensajes/{{ p.id }}/parte/{{ parte.orden }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="texto-{{ parte.id }}">Texto</label>
+      <textarea id="texto-{{ parte.id }}" name="texto" rows="8" style="width:100%">{{ parte.texto }}</textarea>
+
+      {# El switch decide si hay adjunto. Apagado, los campos ni se ven: la
+         mayoría de mensajes son solo texto y no tienen por qué enseñar un
+         desplegable y un campo de ID que no van a usar. #}
+      <label class="switch" style="margin-top:14px">
+        <input type="checkbox" name="con_media" value="1" data-revela="media-{{ parte.id }}"
+               {{ 'checked' if parte.media_ref }}>
+        <span class="switch-pista"><span class="switch-bola"></span></span>
+        <span>Incluye imagen o video</span>
+      </label>
+
+      <div id="media-{{ parte.id }}" class="campos" style="margin-top:12px" {{ '' if parte.media_ref else 'hidden' }}>
+        <div>
+          <label for="tipo-{{ parte.id }}">Qué es</label>
+          <select id="tipo-{{ parte.id }}" name="media_tipo" style="width:100%">
+            <option value="imagen" {{ 'selected' if parte.media_tipo != 'video' }}>Imagen</option>
+            <option value="video" {{ 'selected' if parte.media_tipo == 'video' }}>Video</option>
+          </select>
+        </div>
+        <div>
+          <label for="ref-{{ parte.id }}">ID de Google Drive</label>
+          <input id="ref-{{ parte.id }}" name="media_ref" value="{{ parte.media_ref }}" style="width:100%"
+                 placeholder="Pega el enlace de Drive o el ID; se extrae solo">
+        </div>
+      </div>
+
+      <p class="sub" style="margin:10px 0 0">
+        Aquí no se suben archivos: se pone el ID de Drive. Al guardar se intenta
+        descargar para comprobar que existe y es público — no se guarda ninguna
+        copia, solo se comprueba. Si falla, te lo digo aquí mismo.
+      </p>
+
+      <div class="linea" style="justify-content:space-between;margin-top:16px">
+        <button class="icono-accion peligro" type="button" data-abre="quitar-{{ parte.id }}"
+                title="Eliminar este mensaje" aria-label="Eliminar este mensaje">{{ iconos.icono('basura') }}</button>
+        <span class="linea">
+          <button class="mini" type="button" data-cierra>Cancelar</button>
+          <button class="primario">Guardar</button>
+        </span>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog class="flotante" id="quitar-{{ parte.id }}">
+  <div class="cabecera">
+    <h2>¿Eliminar el mensaje {{ parte.orden }}?</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <p style="margin-top:0">
+      Se quita de la cadena de «{{ p.clave }}». Los envíos ya hechos no cambian:
+      cada uno guarda su propia copia de lo que mandó.
+    </p>
+    <form method="post" action="/mensajes/parte/{{ parte.id }}/eliminar" class="linea" style="justify-content:flex-end">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="plantilla_id" value="{{ p.id }}">
+      <button class="mini" type="button" data-cierra>Cancelar</button>
+      <button class="primario">Sí, eliminar</button>
+    </form>
+  </div>
+</dialog>
+{% endfor %}
 
 <dialog class="flotante" id="borrar-{{ p.id }}">
   <div class="cabecera">
@@ -105,8 +202,8 @@
   </div>
   <div class="cuerpo">
     <p style="margin-top:0">
-      Se borra con todas sus partes. Los envíos ya hechos conservan su copia, así que
-      no cambia nada de lo que ya salió.
+      Se borra con todos sus mensajes y no se puede deshacer. Los envíos ya hechos
+      conservan su copia, así que no cambia nada de lo que ya salió.
     </p>
     <form method="post" action="/mensajes/{{ p.id }}/eliminar" class="linea" style="justify-content:flex-end">
       <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -115,13 +212,7 @@
     </form>
   </div>
 </dialog>
-{% else %}
-<div class="panel vacio">Todavía no hay mensajes.</div>
 {% endfor %}
-
-<p style="margin-top:14px">
-  <button class="boton mini" data-abre="nuevo-mensaje">Nuevo mensaje</button>
-</p>
 
 <dialog class="flotante" id="nuevo-mensaje">
   <div class="cabecera">
@@ -131,14 +222,11 @@
   <div class="cuerpo">
     <form method="post" action="/mensajes">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <div style="margin-bottom:12px">
-        <label for="clave">Clave</label>
-        <input id="clave" name="clave" required placeholder="ALAJUELA" style="width:100%">
-      </div>
-      <div style="margin-bottom:16px">
-        <label for="nombre">Nombre descriptivo (opcional)</label>
-        <input id="nombre" name="nombre" style="width:100%">
-      </div>
+      <label for="clave">Clave</label>
+      <input id="clave" name="clave" required placeholder="ALAJUELA" style="width:100%">
+      <p class="sub" style="margin:6px 0 16px">
+        Con esto se elige al enviarlo. No puede repetirse.
+      </p>
       <div class="linea" style="justify-content:flex-end">
         <button class="mini" type="button" data-cierra>Cancelar</button>
         <button class="primario">Crear</button>

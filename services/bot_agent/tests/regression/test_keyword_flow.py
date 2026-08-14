@@ -12,7 +12,45 @@ from src.application.conversation_orchestrator import ConversationOrchestrator
 from src.domain.entities import Channel, InboundMessage, MessageType
 
 
+# Las palabras clave dejaron de estar escritas en el código: son filas que el
+# negocio administra desde el panel. Estos tests prueban el FLUJO (bloquear,
+# enviar, agendar, cancelar lo anterior), no de dónde salen los textos, así que
+# la tabla se simula con este diccionario en vez de montar una base.
+_PALABRAS = {
+    "tareas": {
+        "id": 1,
+        "palabra": "tareas",
+        "textos": ["Para iniciar con el curso teórico...\nMOTOCICLETA: enlace"],
+    },
+    "transporte": {
+        "id": 2,
+        "palabra": "transporte",
+        "textos": ["Para iniciar con el curso teórico de transporte público..."],
+    },
+}
+
+
+def _buscar(texto):
+    return _PALABRAS.get(" ".join(str(texto or "").split()).lower())
+
+
+def _textos_de(palabra_id):
+    for palabra in _PALABRAS.values():
+        if palabra["id"] == palabra_id:
+            return palabra["textos"]
+    return []
+
+
 class KeywordFlowTests(unittest.TestCase):
+    def setUp(self):
+        for nombre, doble in (("buscar", _buscar), ("textos_de", _textos_de)):
+            parche = patch(
+                f"src.application.conversation_orchestrator.palabras_clave_repository.{nombre}",
+                side_effect=doble,
+            )
+            parche.start()
+            self.addCleanup(parche.stop)
+
     def _message(self, text: str) -> InboundMessage:
         return InboundMessage(
             channel=Channel.WHATSAPP,
@@ -43,7 +81,7 @@ class KeywordFlowTests(unittest.TestCase):
         )
         registry_mock.assert_called_once_with("50688888888", "Cliente", Channel.WHATSAPP, "tareas")
         register_mock.assert_called_once_with(Channel.WHATSAPP, "50688888888")
-        schedule_mock.assert_called_once_with((Channel.WHATSAPP.value, "50688888888"))
+        schedule_mock.assert_called_once_with((Channel.WHATSAPP.value, "50688888888", 1))
         self.assertEqual(len(actions), 1)
         self.assertIn("curso teórico", actions[0].text)
         self.assertIn("MOTOCICLETA", actions[0].text)
@@ -120,7 +158,9 @@ class KeywordFlowTests(unittest.TestCase):
                 )
                 registry_mock.assert_called_once_with("50688888888", "Cliente", Channel.WHATSAPP, keyword)
                 register_mock.assert_called_once_with(Channel.WHATSAPP, "50688888888")
-                schedule_mock.assert_called_once_with((Channel.WHATSAPP.value, "50688888888"))
+                schedule_mock.assert_called_once_with(
+                    (Channel.WHATSAPP.value, "50688888888", _PALABRAS[keyword]["id"])
+                )
                 consume_keyword_report_mock.assert_not_called()
                 report_mock.assert_not_called()
                 self.assertEqual(len(actions), 1)

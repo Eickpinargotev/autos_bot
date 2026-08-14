@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block titulo %}Panel{% endblock %} · Escuela de manejo</title>
+  <title>{% block titulo %}Panel{% endblock %} · Base de Control</title>
   {# El ?v= se sube al cambiar el CSS o el JS: sin él, un navegador con la
      versión anterior en caché mezclaría estilos viejos con el marcado nuevo. #}
-  <link rel="stylesheet" href="/static/app.css?v=5">
+  <link rel="stylesheet" href="/static/app.css?v=19">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14'>📊</text></svg>">
 </head>
 {% import "_iconos.html" as iconos %}
@@ -16,43 +16,120 @@
 {# Menú lateral: una sección por área de trabajo. La lista sale de
    core/navegacion.py, no se escribe a mano aquí. #}
 <aside class="lateral" id="lateral">
+  {# La marca es la PLATAFORMA, no el cliente: «Base de Control» es el producto
+     y cada cliente es un proyecto dentro de él. Antes decía «Escuela de manejo»
+     —el nombre de un proyecto— en el panel de todo el mundo, incluido el del
+     administrador, que no es de ningún proyecto. Debajo, quien está dentro de
+     un proyecto ve de cuál, que es la pregunta que la pantalla no contestaba. #}
   <div class="lateral-cabecera">
-    <span class="logo">EM</span>
-    <span class="marca">Escuela de manejo</span>
+    <span class="logo">BC</span>
+    <span class="marca">
+      Base de Control
+      {% if proyecto %}<span class="marca-proyecto">{{ proyecto.nombre }}</span>{% endif %}
+    </span>
   </div>
 
-  <nav class="lateral-nav">
-    {% for seccion in secciones %}
-      <div class="grupo">
-        <span class="grupo-titulo">{{ seccion.titulo }}</span>
-        {% for pagina in seccion.paginas %}
-          <a href="{{ pagina.url }}" class="{{ 'activo' if pagina.activa }}">
-            {{ iconos.icono(pagina.icono) }}<span>{{ pagina.etiqueta }}</span>
-          </a>
-        {% endfor %}
-      </div>
-    {% endfor %}
+  {# El menú lleva las pastillas de pendientes y se pone al día SI la página ya
+     tenía abierto el flujo de eventos por su propio contenido. `data-secundario`
+     es justo eso: «actualízate si hay flujo, pero no lo abras tú».
+
+     No es un detalle de estilo. El menú está en TODAS las páginas, así que
+     dejarlo abrir flujo convertía en «viva» hasta una pantalla de catálogo como
+     `/mensajes`. Cada pestaña se llevaba una de las SEIS conexiones que Chrome
+     permite por origen en HTTP/1.1, y al sexto clic en el menú el navegador se
+     quedaba sin ranuras: la página siguiente se encolaba y el panel parecía
+     colgado. Las pastillas se pintan igual al cargar; lo único que se pierde en
+     una pantalla quieta es que suban solas. #}
+  <nav class="lateral-nav" data-secundario data-vivo="reportes preguntas incidencias"
+       data-refrescar="/pendientes?en={{ request.url.path | urlencode }}">
+    {% include "_lateral_nav.html" %}
   </nav>
 
-  {# La cuenta vive abajo del lateral; su menú se abre hacia arriba. #}
+  {# La cuenta vive abajo del lateral; su menú se abre hacia arriba.
+
+     Debajo del nombre va el PROYECTO, no el rol. «cliente» es el valor que
+     guarda la base y no significaba nada en pantalla; lo que hace falta saber
+     es a qué proyecto pertenece la cuenta con la que estás dentro. #}
   <div class="cuenta" data-menu>
     <button class="cuenta-boton" type="button" data-abre-menu>
       <span class="avatar">{{ usuario.usuario[:2] | upper }}</span>
       <span class="cuenta-datos">
         <span class="cuenta-nombre">{{ usuario.usuario }}</span>
-        <span class="cuenta-rol">{{ usuario.rol }}</span>
+        <span class="cuenta-rol">
+          {%- if es_admin %}Administrador
+          {%- elif proyecto %}{{ proyecto.nombre }}
+          {%- else %}Sin proyecto asignado{% endif -%}
+        </span>
       </span>
       <span class="cuenta-flecha">⌃</span>
     </button>
+    {# «Configuración» abre una VENTANA, no una página: ver con qué cuenta estás
+       y cambiar la contraseña son cosas que se hacen sin salir de donde estabas.
+       Antes «Mi cuenta» era una página entera con un panel de sesiones abiertas
+       que no le servía a nadie. #}
     <div class="menu" hidden>
-      {% if es_admin %}<a href="/admin/configuracion">Ajustes del sistema</a>{% endif %}
-      <a href="/password">Mi cuenta</a>
+      <button type="button" data-abre="dlg-mi-cuenta">Configuración</button>
+      {% if es_admin %}
+      <a href="/admin/usuarios">Cuentas de acceso</a>
+      <a href="/admin/configuracion">Ajustes del sistema</a>
+      {% endif %}
       <form method="post" action="/logout">
         <button class="menu-salir">Cerrar sesión</button>
       </form>
     </div>
   </div>
 </aside>
+
+<dialog class="flotante" id="dlg-mi-cuenta">
+  <div class="cabecera">
+    <h2>Mi cuenta</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    {% if usuario.suplantado_por %}
+    <div class="mensaje aviso" style="margin-top:0">
+      Estás dentro de la cuenta de <strong>{{ usuario.usuario }}</strong>, no en la tuya.
+    </div>
+    {% endif %}
+
+    <dl>
+      <div class="dato"><dt>Usuario</dt><dd>{{ usuario.usuario }}</dd></div>
+      {% if es_admin %}
+      <div class="dato"><dt>Rol</dt><dd>Administrador de la plataforma</dd></div>
+      {% elif proyecto %}
+      <div class="dato"><dt>Proyecto</dt><dd>{{ proyecto.nombre }}</dd></div>
+      <div class="dato"><dt>WhatsApp</dt><dd>{{ proyecto.numero or '—' }}</dd></div>
+      <div class="dato"><dt>Zona horaria</dt><dd>{{ proyecto.zona_horaria }}</dd></div>
+      {% endif %}
+    </dl>
+
+    {% if usuario.suplantado_por %}
+    <p class="sub">
+      La contraseña de esta cuenta no se cambia desde aquí: sería cambiársela a su
+      dueño sin que lo sepa. Sal de la cuenta para cambiar la tuya.
+    </p>
+    {% else %}
+    <hr class="separador">
+    <h3 style="margin-top:0">Cambiar contraseña</h3>
+    <p class="sub" style="margin-top:0">
+      Al cambiarla se cierran todas tus sesiones y hay que volver a ingresar.
+    </p>
+    <form method="post" action="/password">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="mc-actual">Contraseña actual</label>
+      <input id="mc-actual" name="actual" type="password" autocomplete="current-password" required style="width:100%">
+      <label for="mc-nueva">Contraseña nueva (mínimo 10 caracteres)</label>
+      <input id="mc-nueva" name="nueva" type="password" autocomplete="new-password" minlength="10" required style="width:100%">
+      <label for="mc-repetir">Repite la nueva</label>
+      <input id="mc-repetir" name="repetir" type="password" autocomplete="new-password" minlength="10" required style="width:100%">
+      <div class="linea" style="justify-content:flex-end;margin-top:16px">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Guardar</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</dialog>
 
 <div class="velo" data-alternar="lateral" hidden></div>
 {% endif %}
@@ -64,16 +141,27 @@
       {{ iconos.icono_lateral() }}
     </button>
 
+    {# Cada tramo es un enlace, salvo el último (dónde estás). Antes era texto
+       plano: decía «Operación › Clientes» y no había forma de volver. #}
     <nav class="miga">
-      {% if seccion_actual %}<span>{{ seccion_actual }}</span><span class="miga-sep">›</span>{% endif %}
-      <span class="miga-actual">{{ pagina_actual or self.titulo() }}</span>
+      {% for tramo in migas %}
+        {% if not loop.last or miga_final %}
+          <a href="{{ tramo.url }}">{{ tramo.etiqueta }}</a><span class="miga-sep">›</span>
+        {% else %}
+          <span class="miga-actual">{{ tramo.etiqueta }}</span>
+        {% endif %}
+      {% else %}
+        <span class="miga-actual">{{ pagina_actual or self.titulo() }}</span>
+      {% endfor %}
+      {% if miga_final %}<span class="miga-actual">{{ miga_final }}</span>{% endif %}
     </nav>
   </header>
   {% endif %}
 
   {% if usuario and usuario.suplantado_por %}
   <div class="suplantando">
-    Estás dentro de la cuenta de <strong>{{ usuario.usuario }}</strong> y ves exactamente su panel.
+    Estás dentro de la cuenta de <strong>{{ usuario.usuario }}</strong>{% if proyecto %}
+    (proyecto {{ proyecto.nombre }}){% endif %} y ves exactamente su panel.
     Cualquier cambio queda a nombre de esa cuenta.
     <form method="post" action="/salir-de-cuenta" style="display:inline">
       <button class="mini">Volver a mi cuenta</button>
@@ -95,6 +183,6 @@
   {% if error %}<div class="toast malo">{{ error }}<button class="cerrar" aria-label="Cerrar">×</button></div>{% endif %}
 </div>
 
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=19"></script>
 </body>
 </html>

@@ -122,8 +122,11 @@ class RagService:
         prompt = self._answer_prompt(question, context, last_question, conversation_history or [], chunks)
         try:
             started = time.monotonic()
+            # Redactar con el contexto ya recuperado no exige el modelo caro: lo
+            # difícil (encontrar los fragmentos) ya lo hizo la búsqueda vectorial.
+            modelo = settings.OPENAI_MODEL_AUXILIAR
             completion = self.openai.chat.completions.create(
-                model=settings.OPENAI_MODEL,
+                model=modelo,
                 response_format=ANSWER_RESPONSE_FORMAT,
                 messages=[
                     {"role": "system", "content": "Devuelve JSON estricto. Responde solo con información respaldada por el contexto."},
@@ -131,7 +134,7 @@ class RagService:
                 ],
             )
             seguimiento_service.registrar_uso_llm(
-                client_id, canal, getattr(completion, "usage", None), origen="rag"
+                client_id, canal, getattr(completion, "usage", None), origen="rag", modelo=modelo
             )
             data = json.loads(completion.choices[0].message.content or "{}")
             has_answer = bool(data.get("has_answer"))
@@ -206,7 +209,7 @@ class RagService:
         del propio dashboard, que es quien edita la base de conocimiento.
         """
         registro = consultar_uno(
-            "SELECT id, titulo, contenido FROM rag_chunks WHERE id = %s AND activo",
+            "SELECT id, contenido FROM rag_chunks WHERE id = %s AND activo",
             (int(chunk_id),),
         )
         if not registro:
@@ -224,7 +227,7 @@ class RagService:
         """
         try:
             return consultar(
-                "SELECT id, titulo, contenido FROM rag_chunks WHERE activo ORDER BY id"
+                "SELECT id, contenido FROM rag_chunks WHERE activo ORDER BY id"
             )
         except Exception as e:
             print(f"Error leyendo chunks del RAG en Postgres: {e}")
@@ -392,16 +395,18 @@ class RagService:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, text)) if text else ""
 
     def record_text(self, record: dict[str, Any]) -> str:
-        """Texto que se embebe: el título y el contenido del chunk.
+        """Texto que se embebe: el contenido del chunk, tal cual.
 
-        Se mantiene el recorrido genérico como respaldo para filas con otra
-        forma (p. ej. durante la migración), pero el caso normal es
-        titulo + contenido.
+        Un chunk es UN trozo de texto. Hubo un campo `titulo` que se embebía
+        pegado delante del contenido, pero no era un índice —nadie buscaba por
+        él— y solo obligaba a inventarle un titular a cada trozo; la migración
+        014 lo fundió dentro del contenido y lo eliminó.
+
+        Se mantiene el recorrido genérico de abajo como respaldo para filas con
+        otra forma, pero el caso normal es el contenido y nada más.
         """
-        if "titulo" in record or "contenido" in record:
-            titulo = str(record.get("titulo") or "").strip()
-            contenido = str(record.get("contenido") or "").strip()
-            return "\n".join(parte for parte in (titulo, contenido) if parte).strip()
+        if "contenido" in record:
+            return str(record.get("contenido") or "").strip()
 
         ignored = {"Id", "id", "ID", "_id", "CreatedAt", "UpdatedAt", "created_at", "updated_at", "activo"}
         parts = []

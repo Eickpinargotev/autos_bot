@@ -10,20 +10,74 @@ workers, cada uno se lleva filas distintas sin bloquearse entre sí y sin que un
 mismo envío salga dos veces.
 """
 
+import random
 from typing import Any
 
 from src.infrastructure.repositories.postgres_conn import consultar, ejecutar
 
+# Ritmo de una tanda: un mensaje cada ~15 segundos. El margen aleatorio es lo
+# que importa: a intervalos exactos, cien mensajes puntuales cada quince
+# segundos son la firma más obvia de un bot. Con un 60% de margen cada espera
+# cae entre 6 y 24 segundos y el patrón desaparece.
+RITMO_SEGUNDOS = 15
+RITMO_MARGEN = 0.6
+
+
+def _espera_hasta_el_siguiente() -> float:
+    minimo = RITMO_SEGUNDOS * (1 - RITMO_MARGEN)
+    maximo = RITMO_SEGUNDOS * (1 + RITMO_MARGEN)
+    return random.uniform(minimo, maximo)
+
 
 def tomar_pendientes(limite: int = 20) -> list[dict[str, Any]]:
-    """Marca como 'enviando' y devuelve los envíos pendientes más antiguos."""
-    return consultar(
+    """Toma UN envío por sesión, y solo de las sesiones a las que les toca.
+
+    Tres reglas, todas en la misma consulta para que sigan valiendo con varios
+    workers:
+
+    * **Una por sesión y por pasada** (`DISTINCT ON (lote_id)`). Si se tomaran
+      veinte de la misma tanda, saldrían las veinte seguidas y el ritmo no
+      existiría.
+    * **Solo si ya toca** (`proximo_en <= NOW()`), y solo si la tanda ya empezó
+      (`empieza_en <= NOW()`, que es lo que permite programarla para más tarde).
+    * **Nada de tandas canceladas.**
+
+    Los envíos sin sesión (los que se crearon antes de que existieran los lotes)
+    siguen saliendo sin ritmo: no tienen dónde apuntarlo y son historia.
+
+    Después de tomarlos se adelanta el reloj de cada sesión con una espera
+    aleatoria. Se hace AQUÍ y no tras enviar a propósito: si el worker muere a
+    mitad, la sesión ya tiene su pausa puesta y no se dispara una ráfaga al
+    volver.
+    """
+    tomados = consultar(
         """
-        WITH tomados AS (
-            SELECT id FROM envios
-            WHERE estado = 'pendiente'
-            ORDER BY creado_en
+        WITH elegibles AS (
+            -- `DISTINCT ON` y `FOR UPDATE` no se pueden combinar, así que
+            -- primero se ELIGE (sin bloquear) y después se bloquea por id.
+            --
+            -- El COALESCE es lo que deja fuera del agrupado a los envíos sin
+            -- sesión: `-id` nunca choca con un `lote_id` (que es positivo), así
+            -- que cada uno queda en su propio grupo y siguen saliendo todos de
+            -- una pasada, como siempre. Son de antes de que existieran los
+            -- lotes y no tienen dónde apuntar un ritmo.
+            SELECT DISTINCT ON (COALESCE(e.lote_id, -e.id)) e.id
+            FROM envios e
+            LEFT JOIN envios_lote l ON l.id = e.lote_id
+            WHERE e.estado = 'pendiente'
+              AND (
+                    e.lote_id IS NULL
+                    OR (NOT l.cancelado AND l.empieza_en <= NOW() AND l.proximo_en <= NOW())
+                  )
+            ORDER BY COALESCE(e.lote_id, -e.id), e.creado_en, e.id
             LIMIT %s
+        ),
+        tomados AS (
+            SELECT e.id FROM envios e
+            WHERE e.id IN (SELECT id FROM elegibles)
+              -- Se vuelve a comprobar bajo el candado: entre elegir y bloquear,
+              -- otro worker pudo llevárselo.
+              AND e.estado = 'pendiente'
             FOR UPDATE SKIP LOCKED
         )
         UPDATE envios e
@@ -34,6 +88,15 @@ def tomar_pendientes(limite: int = 20) -> list[dict[str, Any]]:
         """,
         (int(limite),),
     )
+
+    for envio in tomados:
+        if envio.get("lote_id"):
+            ejecutar(
+                "UPDATE envios_lote SET proximo_en = NOW() + (%s || ' seconds')::interval "
+                "WHERE id = %s",
+                (str(_espera_hasta_el_siguiente()), envio["lote_id"]),
+            )
+    return tomados
 
 
 def marcar_parte_enviada(envio_id: int, enviadas: int) -> None:
@@ -97,4 +160,20 @@ def rescatar_atascados(minutos: int = 5) -> int:
         WHERE estado = 'enviando' AND actualizado_en < NOW() - (%s || ' minutes')::interval
         """,
         (str(int(minutos)),),
+    )
+
+
+def purgar_lotes_vencidos(dias: int = 12) -> int:
+    """Borra las sesiones de envío que cumplieron su plazo, con sus destinatarios.
+
+    Es un histórico de trabajo, no un libro contable: pasado el plazo, a nadie le
+    sirve saber que hace dos semanas un número no contestó. `uso_eventos` NO se
+    toca — el consumo de esos envíos ya se facturó y el pasado no se recalcula.
+
+    El plazo tiene que coincidir con `envios.RETENCION_DIAS` del dashboard, que
+    es quien lo anuncia en pantalla.
+    """
+    return ejecutar(
+        "DELETE FROM envios_lote WHERE creado_en < NOW() - (%s || ' days')::interval",
+        (str(int(dias)),),
     )

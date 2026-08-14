@@ -18,9 +18,21 @@ _CLAVE_DESINCRONIZADO = "admin_password_fuera_del_env"
 # --- Consultas ---------------------------------------------------------------
 
 def listar() -> list[dict[str, Any]]:
+    """Las cuentas, con el negocio de cada una.
+
+    El nombre del negocio va en la misma consulta porque «rol: cliente» a secas
+    no dice nada: en el panel del administrador, «cliente» es un NEGOCIO, y lo
+    que hace falta saber de una cuenta es a cuál pertenece.
+    """
     return pool.consultar(
-        "SELECT id, usuario, rol, activo, debe_cambiar_password, creado_en, ultimo_acceso "
-        "FROM dashboard_usuarios ORDER BY rol, usuario"
+        """
+        SELECT u.id, u.usuario, u.rol, u.activo, u.debe_cambiar_password,
+               u.creado_en, u.ultimo_acceso,
+               c.id AS negocio_id, c.nombre AS negocio
+        FROM dashboard_usuarios u
+        LEFT JOIN clientes_whatsapp c ON c.usuario_id = u.id
+        ORDER BY u.rol, u.usuario
+        """
     )
 
 
@@ -71,6 +83,35 @@ def crear(usuario: str, password: str, rol: str, debe_cambiar: bool = True) -> d
         """,
         (usuario.strip(), security.hashear_password(password), rol, debe_cambiar),
     )
+
+
+def renombrar(usuario_id: int, nuevo: str) -> dict[str, Any]:
+    """Cambia el nombre con el que una cuenta ingresa.
+
+    Existe porque el nombre de la cuenta se elige al crearla y hasta ahora era
+    definitivo: un proyecto se quedaba con «Cliente Germán» de por vida, que ni
+    es una persona ni dice quién entra. El nombre es la credencial con la que se
+    ingresa, así que se valida contra el resto: dos cuentas con el mismo nombre
+    harían que el login no supiera cuál es cuál.
+
+    NO cierra las sesiones abiertas: la sesión va por token, no por nombre, y
+    echar a alguien del panel por corregirle una letra sería un castigo raro.
+    """
+    nuevo = str(nuevo or "").strip()
+    if not nuevo:
+        raise ValueError("El nombre de usuario no puede estar vacío.")
+
+    ocupado = buscar_por_usuario(nuevo)
+    if ocupado and ocupado["id"] != int(usuario_id):
+        raise ValueError(f"Ya existe una cuenta con el usuario «{nuevo}».")
+
+    fila = pool.consultar_uno(
+        "UPDATE dashboard_usuarios SET usuario = %s WHERE id = %s RETURNING id, usuario, rol, activo",
+        (nuevo, int(usuario_id)),
+    )
+    if not fila:
+        raise ValueError("Esa cuenta ya no existe.")
+    return fila
 
 
 def cambiar_password(usuario_id: int, password: str) -> None:

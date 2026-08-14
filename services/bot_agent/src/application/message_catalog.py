@@ -33,16 +33,15 @@ def get_messages_for_node(category: str, node: str) -> list[str]:
 
 
 # Qué mensaje del panel («clave» de `plantillas_mensaje`) sustituye a cada nodo
-# del archivo. Solo están los que el NEGOCIO administra: la palabra clave, sus
-# recordatorios y la bienvenida al grupo. Los textos del agente conversacional
-# no entran aquí — esos son fragmentos que el prompt referencia por id y
-# cambiarlos desde el panel rompería el contrato con el modelo.
+# del archivo. Los textos del agente conversacional NO entran aquí: son
+# fragmentos que el prompt referencia por id y cambiarlos desde el panel rompería
+# el contrato con el modelo.
+#
+# Los nodos KEYWORD (T1, H1, T2, T3, T4) estaban aquí y se fueron: las palabras
+# clave dejaron de ser textos de este archivo y son filas de `palabras_clave`,
+# con su propia tabla, sus recordatorios y sus minutos (migración 016). Las lee
+# `palabras_clave_repository`, no esto.
 CLAVES_EDITABLES = {
-    ("KEYWORD", "T1"): "TAREAS",
-    ("KEYWORD", "H1"): "TRANSPORTE",
-    ("KEYWORD", "T2"): "TAREAS_R1",
-    ("KEYWORD", "T3"): "TAREAS_R2",
-    ("KEYWORD", "T4"): "TAREAS_R3",
     ("WELCOME", "W"): "BIENVENIDA_GRUPO",
 }
 

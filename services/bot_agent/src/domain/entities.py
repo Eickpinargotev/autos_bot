@@ -11,9 +11,11 @@ class MessageType(Enum):
     AUDIO = "audio"
     IMAGE = "image"
     DOCUMENT = "document"
-    # Los stickers se distinguen de OTHER porque merecen otra respuesta: no son
-    # una consulta que el bot no pueda leer, son un gesto. Contestarles con "no
-    # podemos ver imágenes" suena a error donde no lo hubo.
+    VIDEO = "video"
+    # Los stickers se distinguen de OTHER porque se IGNORAN por completo: no son
+    # una consulta que el bot no pueda leer, son un gesto. Cualquier acuse ("no
+    # podemos ver imágenes", o incluso un agradecimiento) suena a error donde no
+    # lo hubo, y en WhatsApp además gasta la cuota de envío del minuto.
     STICKER = "sticker"
     OTHER = "other"
 

@@ -24,6 +24,7 @@ class WebhookAppTests(unittest.TestCase):
         self.assertIn("/webhooks/wasender", routes)
         self.assertIn("/webhooks/wasender/{token}", routes)
         self.assertIn("/internal/rag/sync/{chunk_id}", routes)
+        self.assertIn("/internal/conversaciones/{canal}/{client_id}/olvidar", routes)
 
 
 class WasenderWebhookTests(unittest.TestCase):
@@ -273,6 +274,58 @@ class RagSyncEndpointTests(unittest.TestCase):
         self.assertEqual(resultado["status"], "ok")
         self.assertEqual(resultado["upserted"], 1)
         sync_mock.assert_called_once_with(7)
+
+
+class OlvidarConversacionEndpointTests(unittest.TestCase):
+    """Borra estado: mismo guardarraíl que el reindexado, nunca abierto."""
+
+    def test_disabled_without_internal_token(self):
+        with patch("src.infrastructure.webhooks.app.settings.INTERNAL_API_TOKEN", ""):
+            with self.assertRaises(HTTPException) as ctx:
+                webhook_app.olvidar_conversacion("whatsapp", "50688888888", token="cualquiera")
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_rejects_wrong_token(self):
+        with patch("src.infrastructure.webhooks.app.settings.INTERNAL_API_TOKEN", "secreto"):
+            with self.assertRaises(HTTPException) as ctx:
+                webhook_app.olvidar_conversacion("whatsapp", "50688888888", token="incorrecto")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_canal_inventado_se_rechaza(self):
+        """Un canal que no existe no debe llegar a construir claves de Redis."""
+        with patch("src.infrastructure.webhooks.app.settings.INTERNAL_API_TOKEN", "secreto"):
+            with self.assertRaises(HTTPException) as ctx:
+                webhook_app.olvidar_conversacion("signal", "50688888888", token="secreto")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_olvida_estado_recordatorios_y_buffer(self):
+        from src.application import buffer_service, conversation_reset
+        from src.infrastructure.repositories.conversation_state_repo import (
+            ConversationState,
+            ConversationStateRepo,
+        )
+
+        ConversationStateRepo.set(Channel.WHATSAPP, "50688888888", ConversationState(flow="CURSO"))
+        buffer_service.BufferService.add_message("50688888888", "hola", Channel.WHATSAPP)
+
+        with patch("src.infrastructure.webhooks.app.settings.INTERNAL_API_TOKEN", "secreto"), patch.object(
+            conversation_reset.ReminderService, "cancel"
+        ) as cancel_mock, patch.object(
+            conversation_reset, "_cancelar_tareas_programadas"
+        ) as programadas_mock:
+            resultado = webhook_app.olvidar_conversacion("whatsapp", "50688888888", token="secreto")
+
+        self.assertEqual(resultado["status"], "ok")
+        cancel_mock.assert_called_once()
+        programadas_mock.assert_called_once()
+        # El hilo ya no existe: el siguiente mensaje entra como conversación nueva.
+        self.assertEqual(ConversationStateRepo.get(Channel.WHATSAPP, "50688888888").flow, "INICIO")
+        self.assertEqual(
+            buffer_service.redis_client.llen(
+                buffer_service.scoped_key("buffer", Channel.WHATSAPP, "50688888888")
+            ),
+            0,
+        )
 
 
 if __name__ == "__main__":

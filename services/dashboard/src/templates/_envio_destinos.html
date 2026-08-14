@@ -1,0 +1,72 @@
+{# Qué pasó con cada número de una sesión. Se inyecta en su ventana. #}
+
+{% if not lote %}
+<p class="vacio">Esa sesión ya no existe.</p>
+{% else %}
+<div class="linea" style="margin-bottom:12px">
+  <span class="sub" style="margin:0">
+    <strong>{{ lote.enviados }}</strong> enviados ·
+    <strong>{{ lote.errores }}</strong> fallaron ·
+    {{ lote.quedan }} en cola
+  </span>
+  <span style="flex:1"></span>
+  {% if lote.errores %}
+  {# El `?` va FUERA de la expresión: si la query se arma dentro de un `{{ }}`,
+     el enlace deja de poder comprobarse contra las rutas reales (test_enlaces). #}
+  <a class="mini boton" href="/envios/{{ lote.id }}/destinos?fallidos={{ 0 if solo_fallidos else 1 }}"
+     data-carga="/envios/{{ lote.id }}/destinos?fallidos={{ 0 if solo_fallidos else 1 }}"
+     data-carga-en="cuerpo-{{ lote.id }}">
+    {{ 'Ver todos' if solo_fallidos else 'Ver solo los que fallaron' }}
+  </a>
+  {% endif %}
+</div>
+
+<div class="tabla-scroll">
+  <table>
+    <thead>
+      <tr><th>Número</th><th>Estado</th><th class="num">Mensajes</th><th>Qué pasó</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for d in destinos %}
+      <tr>
+        <td style="white-space:nowrap">{{ d.destino_id }}</td>
+        <td>
+          {% if d.estado == 'enviado' %}<span class="pastilla ok">enviado</span>
+          {% elif d.estado == 'error' %}<span class="pastilla error">falló</span>
+          {% elif d.estado == 'en_revision' %}<span class="pastilla alerta">en revisión</span>
+          {% else %}<span class="pastilla">{{ d.estado }}</span>{% endif %}
+        </td>
+        <td class="num">{{ d.partes_enviadas }}/{{ d.total_partes }}</td>
+        <td>
+          {# El motivo, escrito para quien envió y no para un programador: tiene
+             que poder arreglarlo sin ayuda. Si viene vacío es que la causa no
+             está en sus manos y lo único que cabe es reportarlo. #}
+          {% if d.error_cliente %}{{ d.error_cliente }}
+          {% elif d.estado == 'error' %}<span class="sub">No es cosa tuya: repórtalo y lo miro yo.</span>
+          {% elif d.enviado_en %}<span class="sub">{{ d.enviado_en | hora }}</span>{% endif %}
+        </td>
+        <td style="white-space:nowrap">
+          {% if d.estado == 'error' %}
+            {% if d.intentos < max_intentos %}
+            <form method="post" action="/envios/mensaje/{{ d.id }}/reintentar" style="display:inline">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="mini">Reintentar</button>
+            </form>
+            {% else %}
+            <form method="post" action="/envios/mensaje/{{ d.id }}/reportar" style="display:inline">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="mini">Reportar</button>
+            </form>
+            {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="vacio">
+        {% if solo_fallidos %}No falló ninguno.{% else %}No hay destinatarios.{% endif %}
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

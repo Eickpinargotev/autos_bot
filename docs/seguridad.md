@@ -26,13 +26,14 @@ existe solo para no romper el arranque local.
 ### Endpoints con efectos: apagados por defecto, nunca abiertos
 
 Regla del proyecto: **si falta el secreto, el endpoint responde 503**, no se queda
-accesible. Son dos:
+accesible:
 
 | Endpoint | Riesgo si queda abierto | Secreto |
 | --- | --- | --- |
 | `POST /webhooks/wasender/{token}` | Cualquiera podría hacer que el bot conteste y **gaste tokens de OpenAI** a costa del dueño | El token de la ruta (fila de `clientes_whatsapp`) |
 | `POST /webhooks/wasender` | Igual que la anterior, en la instalación de un solo cliente | `WASENDER_WEBHOOK_SECRET` |
 | `POST /internal/rag/sync/{id}` | Escribe en la base de conocimiento: se podrían **envenenar las respuestas del RAG** | `INTERNAL_API_TOKEN` |
+| `POST /internal/conversaciones/{canal}/{id}/olvidar` | **Borra estado**: el hilo en Redis y los recordatorios agendados de una conversación | `INTERNAL_API_TOKEN` |
 
 - Los secretos se comparan con `hmac.compare_digest` (tiempo constante).
 - El de Wasender se acepta por cabecera (`X-Webhook-Signature`) o por query, porque la
@@ -138,10 +139,14 @@ degrada a una aclaración genérica (`_fallback_decision`) y el clasificador dev
 ## 4. Checklist de despliegue seguro (producción)
 
 1. `.env` con valores reales: `POSTGRES_PASSWORD` fuerte, `SESSION_SECRET` aleatorio
-   largo, `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`. Si se usa WhatsApp:
-   `WASENDER_API_KEY`, y `PUBLIC_WEBHOOK_BASE_URL` con el dominio público del
-   servicio de webhooks (el panel lo usa para armar la URL que se copia en
-   WasenderAPI). Si se quiere reindexado inmediato del RAG: `INTERNAL_API_TOKEN`.
+   largo, `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`. Si se usa WhatsApp,
+   `PUBLIC_WEBHOOK_BASE_URL` con el dominio público del servicio de webhooks (el
+   panel lo usa para armar la URL que se copia en WasenderAPI). Si se quiere
+   reindexado inmediato del RAG: `INTERNAL_API_TOKEN`.
+   Las credenciales de WasenderAPI **no** van aquí: son por negocio y se guardan
+   en `clientes_whatsapp` desde el panel. Una clave global en el `.env` obligaría
+   a redesplegar por cada alta y dejaría a todos los negocios compartiendo la
+   misma credencial de envío.
 2. `COOKIE_SECURE=true` (el valor por defecto en la nube) y el dashboard **detrás de
    HTTPS**. Con HTTP plano la cookie de sesión viaja en claro.
 3. Usar `docker-compose.yml` (nunca el `.local` en el servidor).

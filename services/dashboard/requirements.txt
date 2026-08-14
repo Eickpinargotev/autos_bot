@@ -1,13 +1,21 @@
-fastapi
-uvicorn
-jinja2
-psycopg2-binary
-pydantic
-pydantic-settings
-python-multipart
-bcrypt
-httpx
+# Versiones FIJAS a propósito. Sin ellas, dos `docker build` del mismo commit
+# podían traer FastAPI distintas y romper en producción sin que cambiara una
+# línea del repo. Para subir una, súbela a mano y corre la suite.
+
+fastapi==0.141.1
+# El extra `[standard]` trae uvloop y httptools: el bucle de eventos y el
+# analizador de HTTP en C, en vez de los de Python puros. Es la misma aplicación
+# con menos latencia por petición, sin tocar una línea de código. También es lo
+# que hace falta para que el flujo de eventos (SSE) se sirva sin sorpresas.
+uvicorn[standard]==0.52.0
+jinja2==3.1.6
+psycopg2-binary==2.9.12
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-multipart==0.0.32
+bcrypt==5.0.0
+httpx==0.28.1
 # Base de zonas horarias para `zoneinfo`. La imagen slim de Debian no trae
 # /usr/share/zoneinfo, así que sin esto el panel no podría mostrar las horas en
 # la zona del negocio (ZONA_HORARIA) y caería a la del contenedor (UTC).
-tzdata
+tzdata==2026.3

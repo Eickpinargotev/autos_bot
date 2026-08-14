@@ -29,7 +29,7 @@ from typing import Any
 from src.application.buffer_service import redis_client, scoped_key
 from src.core.config import settings
 from src.domain.entities import Channel
-from src.infrastructure.repositories import billing_repository
+from src.infrastructure.repositories import billing_repository, precios_repository
 from src.infrastructure.repositories.fechas import parse_timestamp
 from src.infrastructure.repositories.postgres_conn import ejecutar
 from src.infrastructure.repositories.seguimiento_repository import SeguimientoRepository
@@ -51,14 +51,40 @@ _MICRO = 1_000_000
 
 # --- Costo de tokens ---------------------------------------------------------
 
-def costo_microusd(prompt_tokens: int, cached_tokens: int, completion_tokens: int) -> int:
-    """Costo en micro-USD de una llamada, según los precios configurados."""
+def costo_microusd(
+    prompt_tokens: int,
+    cached_tokens: int,
+    completion_tokens: int,
+    modelo: str = "",
+) -> int:
+    """Costo en micro-USD de una llamada, con el precio del modelo que la atendió.
+
+    El `modelo` es obligatorio en la práctica: desde que cada tipo de tarea usa
+    el suyo, cobrar todo al mismo precio falsea la factura en los dos sentidos
+    (una decisión del auxiliar cuesta 10 veces menos que una del supervisor).
+    Se deja con valor por defecto solo para no romper llamadas antiguas, que
+    caen en el precio de respaldo.
+    """
+    precio = precios_repository.precio_de(modelo or settings.OPENAI_MODEL)
     no_cacheados = max(int(prompt_tokens) - int(cached_tokens), 0)
     usd = (
-        no_cacheados * settings.OPENAI_PRICE_INPUT_USD_PER_1M
-        + int(cached_tokens) * settings.OPENAI_PRICE_CACHED_INPUT_USD_PER_1M
-        + int(completion_tokens) * settings.OPENAI_PRICE_OUTPUT_USD_PER_1M
+        no_cacheados * precio.entrada_usd_1m
+        + int(cached_tokens) * precio.cacheado_usd_1m
+        + int(completion_tokens) * precio.salida_usd_1m
     ) / 1_000_000
+    return round(usd * _MICRO)
+
+
+def costo_audio_microusd(segundos: int, modelo: str = "") -> int:
+    """Costo en micro-USD de transcribir N segundos de audio.
+
+    Se cobra por minuto, pero se mide en SEGUNDOS y sin redondear hacia arriba:
+    una nota de voz de 8 segundos no puede facturarse como un minuto. El
+    redondeo final a micro-USD es el único, y ahí sí a entero, porque todo el
+    dinero del sistema es entero en micro-USD.
+    """
+    precio = precios_repository.precio_de(modelo or settings.OPENAI_MODEL_TRANSCRIPCION)
+    usd = (max(int(segundos), 0) / 60.0) * precio.audio_usd_minuto
     return round(usd * _MICRO)
 
 
@@ -69,6 +95,7 @@ def registrar_uso_llm(
     canal: Channel | str,
     usage: Any,
     origen: str = "agente",
+    modelo: str = "",
 ) -> None:
     """Acumula el costo/tokens de una llamada al LLM (objeto `usage` de OpenAI).
 
@@ -78,6 +105,11 @@ def registrar_uso_llm(
     2. Anota el hecho facturable en `uso_eventos`, que es lo que el dashboard
        suma en vivo. `origen` dice qué parte del bot gastó (agente, recordatorio,
        rag, publicidad) para poder desglosarlo.
+
+    El `modelo` lo pasa quien hizo la llamada, no se adivina aquí: cada tarea usa
+    el suyo y su precio difiere hasta 10x. Tomarlo de la configuración global
+    —como se hacía cuando había un solo modelo— le cobraría al cliente el precio
+    del supervisor por una decisión del auxiliar.
     """
     try:
         if usage is None:
@@ -90,7 +122,8 @@ def registrar_uso_llm(
         cached = _entero_estricto(getattr(detalles, "cached_tokens", 0))
         if not prompt and not completion:
             return
-        micro = costo_microusd(prompt, cached, completion)
+        modelo_usado = modelo or settings.OPENAI_MODEL
+        micro = costo_microusd(prompt, cached, completion, modelo_usado)
 
         pipe = redis_client.pipeline()
         if client_id and canal:
@@ -117,12 +150,50 @@ def registrar_uso_llm(
         client_id=client_id,
         canal=canal,
         origen=origen,
-        modelo=settings.OPENAI_MODEL,
+        modelo=modelo_usado,
         tokens_entrada=prompt,
         tokens_cacheados=cached,
         tokens_salida=completion,
         costo_real_microusd=micro,
     )
+
+
+def registrar_uso_audio(
+    client_id: str,
+    canal: Channel | str,
+    segundos: int,
+    modelo: str = "",
+    origen: str = "transcripcion",
+) -> int:
+    """Anota la transcripción de una nota de voz. Devuelve el costo real.
+
+    Suma al mismo buffer de costo por cliente que el LLM (el cliente ve UN
+    total), pero en el libro mayor va con categoría propia para que el panel
+    pueda desglosar tokens y audios por separado.
+    """
+    micro = costo_audio_microusd(segundos, modelo)
+    try:
+        pipe = redis_client.pipeline()
+        if client_id and canal:
+            key = scoped_key(DELTAS_PREFIX, canal, client_id)
+            pipe.hincrby(key, "costo_microusd", micro)
+            pipe.expire(key, _BUFFER_TTL_SECONDS)
+        mes_key = _mes_key(_mes_actual())
+        pipe.hincrby(mes_key, "costo_microusd", micro)
+        pipe.expire(mes_key, _BUFFER_TTL_SECONDS)
+        pipe.execute()
+    except Exception as e:
+        print(f"Error registrando uso de audio en seguimiento: {e}")
+
+    billing_repository.registrar_evento_audio(
+        client_id=client_id,
+        canal=canal,
+        origen=origen,
+        modelo=modelo or settings.OPENAI_MODEL_TRANSCRIPCION,
+        segundos=segundos,
+        costo_real_microusd=micro,
+    )
+    return micro
 
 
 def registrar_uso_codigo(

@@ -62,7 +62,7 @@ async def wasender_webhook_cliente(
         raise HTTPException(status_code=401, detail="Firma del webhook inválida")
 
     clientes_whatsapp_repo.registrar_evento(cliente["id"], wasender.nombre_evento(payload))
-    return _procesar_evento(payload)
+    return _procesar_evento(payload, cliente_id=cliente["id"])
 
 
 @app.post("/webhooks/wasender")
@@ -87,17 +87,31 @@ async def wasender_webhook(
     return _procesar_evento(payload)
 
 
-def _procesar_evento(payload: dict[str, Any]) -> dict[str, str]:
+def _vincular(cliente_id: int | None, user_id: str) -> None:
+    """Deja anotado el negocio de esa conversación, si el evento trae uno."""
+    if cliente_id and user_id:
+        clientes_whatsapp_repo.vincular_conversacion(
+            cliente_id, Channel.WHATSAPP.value, user_id
+        )
+
+
+def _procesar_evento(payload: dict[str, Any], cliente_id: int | None = None) -> dict[str, str]:
     """Traduce un evento de WasenderAPI a una acción del bot.
 
     Nunca responde con error por un evento que no interesa: un 4xx haría que
     WasenderAPI reintente en bucle. Lo que no se procesa se acepta y se ignora.
+
+    `cliente_id` es el negocio dueño de la URL por la que entró el evento. Se
+    anota en cada mensaje porque es el ÚNICO punto del recorrido donde se sabe:
+    la respuesta se envía después, desde el worker, que solo recibe canal y
+    número. De esa anotación sale luego la credencial de salida.
     """
     # 1. Alguien entró al grupo del curso. Cierra el flujo de publicidad: se
     #    cancelan los recordatorios pendientes y el chat queda bloqueado.
     ingresos = wasender.ingresos_a_grupo(payload)
     if ingresos:
         for numero in ingresos:
+            _vincular(cliente_id, numero)
             MessageHandler.handle_incoming_message(
                 user_id=numero,
                 content="",
@@ -111,6 +125,8 @@ def _procesar_evento(payload: dict[str, Any]) -> dict[str, str]:
     if mensaje is None:
         # Recibos de lectura, estados de sesión, mensajes de grupo: nada que hacer.
         return {"status": "ignored"}
+
+    _vincular(cliente_id, mensaje.user_id)
 
     # 2. Mensaje SALIENTE. Puede ser el eco de lo que mandó el propio bot o el
     #    dueño escribiendo desde su teléfono; solo el segundo caso es una
@@ -140,6 +156,9 @@ def _procesar_evento(payload: dict[str, Any]) -> dict[str, str]:
         user_name=mensaje.user_name,
         channel=Channel.WHATSAPP,
         message_id=mensaje.message_id,
+        # El evento completo, que la nota de voz necesita para descifrar su
+        # media. No se guarda: solo viaja hasta la tarea de transcripción.
+        raw_payload=payload,
     )
     return {"status": "ok"}
 
@@ -153,9 +172,36 @@ def sincronizar_chunk(chunk_id: int, token: str = Query(default="")):
     igual se actualiza solo por la sincronización perezosa
     (RAG_SYNC_TTL_SECONDS); esto únicamente la hace instantánea.
     """
+    _exigir_token_interno(token)
+    return {"status": "ok", **rag_service.sync_chunk_id(chunk_id)}
+
+
+@app.post("/internal/conversaciones/{canal}/{client_id}/olvidar")
+def olvidar_conversacion(canal: str, client_id: str, token: str = Query(default="")):
+    """Suelta lo que el bot recuerda de una conversación que el panel borró.
+
+    El historial durable lo borra el dashboard (esas tablas son suyas); lo que
+    solo el bot puede tocar es Redis y las tareas agendadas, porque el esquema
+    de claves y los ids de tarea son de aquí. Sin esto, borrar una conversación
+    dejaría al bot contestando el siguiente mensaje con el hilo entero en
+    memoria, y llegarían recordatorios de un chat que ya no existe.
+
+    Mismo guardarraíl que el reindexado: sin `INTERNAL_API_TOKEN` responde 503
+    en vez de quedar abierto — es un endpoint que borra estado.
+    """
+    _exigir_token_interno(token)
+    try:
+        canal_valido = Channel(canal)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Canal desconocido: {canal}")
+
+    from src.application.conversation_reset import olvidar_conversacion as olvidar
+
+    return {"status": "ok", **olvidar(canal_valido, client_id)}
+
+
+def _exigir_token_interno(token: str) -> None:
     if not settings.INTERNAL_API_TOKEN:
         raise HTTPException(status_code=503, detail="Endpoint disabled: set INTERNAL_API_TOKEN")
     if not hmac.compare_digest(token, settings.INTERNAL_API_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid internal token")
-
-    return {"status": "ok", **rag_service.sync_chunk_id(chunk_id)}

@@ -1,15 +1,18 @@
 {% extends "base.html" %}
-{% block titulo %}Clientes{% endblock %}
+{% block titulo %}Proyectos{% endblock %}
 
 {% block contenido %}
-<h1>Clientes</h1>
-<p class="sub">Los negocios que atendemos. Entra a uno para ver su actividad, su gasto y su configuración de WhatsApp.</p>
+<h1>Proyectos</h1>
+<p class="sub">
+  Cada cliente al que le damos el servicio es un proyecto: su número de WhatsApp,
+  su bot y su factura. Entra a uno para ver su actividad, su gasto y su configuración.
+</p>
 
 <div class="panel tabla-scroll">
   <table>
     <thead>
       <tr>
-        <th>Cliente</th><th>Número</th><th>Cuenta de acceso</th>
+        <th>Proyecto</th><th>Número</th><th>Usuario asignado</th>
         <th>Estado</th><th>Último evento</th><th></th>
       </tr>
     </thead>
@@ -23,7 +26,7 @@
         <td>{{ n.numero or '—' }}</td>
         <td>
           {% if n.cuenta %}{{ n.cuenta }}
-          {% else %}<span style="color:var(--tenue)">sin vincular</span>{% endif %}
+          {% else %}<span style="color:var(--tenue)">sin usuario</span>{% endif %}
         </td>
         <td><span class="estado {{ 'si' if n.activo else 'no' }}">{{ 'Activo' if n.activo else 'Inactivo' }}</span></td>
         <td>
@@ -37,19 +40,19 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="vacio">Todavía no hay clientes.</td></tr>
+      <tr><td colspan="6" class="vacio">Todavía no hay proyectos.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
 <p style="margin-top:14px">
-  <button class="boton mini" data-abre="nuevo-cliente">Nuevo cliente</button>
+  <button class="boton mini" data-abre="nuevo-cliente">Nuevo proyecto</button>
 </p>
 
 <dialog class="flotante" id="nuevo-cliente">
   <div class="cabecera">
-    <h2>Nuevo cliente</h2>
+    <h2>Nuevo proyecto</h2>
     <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
   </div>
   <div class="cuerpo">
@@ -59,8 +62,8 @@
     <form method="post" action="/admin/negocios">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <div style="margin-bottom:12px">
-        <label for="nombre">Nombre del negocio</label>
-        <input id="nombre" name="nombre" required placeholder="Escuela de manejo" style="width:100%">
+        <label for="nombre">Nombre del proyecto</label>
+        <input id="nombre" name="nombre" required placeholder="Escuela de Manejo" style="width:100%">
       </div>
       <div style="margin-bottom:16px">
         <label for="numero">Número de WhatsApp (opcional)</label>
@@ -68,7 +71,7 @@
       </div>
       <div class="linea" style="justify-content:flex-end">
         <button class="mini" type="button" data-cierra>Cancelar</button>
-        <button class="primario">Crear cliente</button>
+        <button class="primario">Crear proyecto</button>
       </div>
     </form>
   </div>

@@ -1,6 +1,6 @@
 """Libro mayor del consumo facturable (`uso_eventos`).
 
-Dos categorías, tal como se cobra:
+Tres categorías, tal como se cobra:
 
 - `llm`: el turno pasó por el modelo. El costo REAL sale de los tokens y de los
   precios del proveedor; al cliente se le cobra ese costo multiplicado por el
@@ -9,6 +9,10 @@ Dos categorías, tal como se cobra:
   palabra clave `tareas`/`transporte`, los flujos programados, los envíos
   manuales). No tiene costo real de proveedor y al cliente se le cobra una
   tarifa fija por mensaje.
+- `audio`: transcripción de una nota de voz. Se separa de `llm` porque el
+  negocio quiere ver aparte "lo que pago por tokens" y "lo que pago por audios",
+  y porque no encaja en las otras dos: tiene costo real de proveedor (a
+  diferencia de `codigo`) pero se mide en segundos y no en tokens.
 
 Todo se resuelve en UNA sentencia: el periodo abierto y la tarifa vigente se
 buscan dentro del propio INSERT. Así no hay caché que quede obsoleta ni ventana
@@ -23,6 +27,7 @@ from src.infrastructure.repositories.postgres_conn import ejecutar
 
 CATEGORIA_LLM = "llm"
 CATEGORIA_CODIGO = "codigo"
+CATEGORIA_AUDIO = "audio"
 
 
 def _canal(canal: Channel | str) -> str:
@@ -86,6 +91,66 @@ def registrar_evento_llm(
     except Exception as e:
         # Perder una anotación de consumo no puede tumbar la atención al cliente.
         print(f"Error registrando evento de uso (llm) en Postgres: {e}")
+        return False
+
+
+def registrar_evento_audio(
+    *,
+    client_id: str,
+    canal: Channel | str,
+    origen: str,
+    modelo: str,
+    segundos: int,
+    costo_real_microusd: int,
+) -> bool:
+    """Anota la transcripción de una nota de voz.
+
+    Tercera categoría, separada de `llm` a pedido del negocio: el cliente quiere
+    ver por un lado lo que paga en tokens y por otro lo que paga en audios. No
+    encaja en las otras dos — tiene costo real de proveedor (a diferencia de
+    `codigo`) pero no se mide en tokens (a diferencia de `llm`).
+
+    Se le aplica el mismo margen que al LLM: es el margen del negocio sobre lo
+    que le cuesta operar, no una tarifa por tecnología.
+    """
+    if segundos <= 0 and costo_real_microusd <= 0:
+        return False
+    try:
+        ejecutar(
+            """
+            INSERT INTO uso_eventos (
+                periodo_id, tarifa_id, client_id, canal, categoria, origen, modelo,
+                segundos_audio, mensajes, costo_real_microusd, costo_cliente_microusd
+            )
+            SELECT
+                p.id,
+                t.id,
+                %s, %s, 'audio', %s, %s,
+                %s, 1,
+                %s,
+                ROUND(%s * COALESCE(t.multiplicador_llm, 1))
+            FROM (
+                SELECT id FROM periodos_facturacion
+                WHERE cerrado_en IS NULL ORDER BY id DESC LIMIT 1
+            ) p
+            LEFT JOIN LATERAL (
+                SELECT id, multiplicador_llm FROM tarifas
+                WHERE vigente_desde <= NOW() ORDER BY vigente_desde DESC, id DESC LIMIT 1
+            ) t ON TRUE
+            """,
+            (
+                str(client_id or ""),
+                _canal(canal),
+                origen or "",
+                modelo or "",
+                int(segundos or 0),
+                int(costo_real_microusd or 0),
+                int(costo_real_microusd or 0),
+            ),
+        )
+        return True
+    except Exception as e:
+        print(f"Error registrando evento de uso (audio) en Postgres: {e}")
         return False
 
 

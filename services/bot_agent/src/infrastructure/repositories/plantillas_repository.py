@@ -22,10 +22,43 @@ from src.infrastructure.repositories.postgres_conn import consultar
 CACHE_TTL_SEGUNDOS = 30
 
 _cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_cache_claves: tuple[float, list[str]] | None = None
 
 
 def limpiar_cache() -> None:
+    global _cache_claves
+
     _cache.clear()
+    _cache_claves = None
+
+
+def claves() -> list[str]:
+    """Las claves de todos los mensajes del panel, de la más larga a la más corta.
+
+    La usa el flujo de publicidad para reconocer de qué mensaje habla el cliente.
+    El orden por longitud no es cosmético: si existen «LIBERIA» y «LICENCIA EN
+    LIBERIA», el texto completo tiene que ganarle al trozo, y buscando por
+    subcadena gana el primero que se pruebe.
+    """
+    global _cache_claves
+
+    ahora = time.monotonic()
+    if _cache_claves and (ahora - _cache_claves[0]) < CACHE_TTL_SEGUNDOS:
+        return _cache_claves[1]
+
+    try:
+        filas = consultar("SELECT clave FROM plantillas_mensaje ORDER BY clave")
+    except Exception as e:
+        print(f"Error leyendo las claves de los mensajes del panel: {e}")
+        return []
+
+    encontradas = sorted(
+        (str(fila.get("clave") or "").strip().upper() for fila in filas if fila.get("clave")),
+        key=len,
+        reverse=True,
+    )
+    _cache_claves = (ahora, encontradas)
+    return encontradas
 
 
 def partes_de(clave: str) -> list[dict[str, Any]]:

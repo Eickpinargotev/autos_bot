@@ -1,10 +1,14 @@
-"""Envíos manuales: preparar, mandar, reintentar y reportar."""
+"""Envíos manuales: preparar una tanda y verla avanzar."""
+
+from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from src.core import security
 from src.core.plantillas import render
+from src.services import envios as svc_envios
 from src.services import mensajeria
 
 router = APIRouter()
@@ -12,11 +16,18 @@ router = APIRouter()
 
 @router.get("/enviar")
 def formulario(request: Request, usuario=Depends(security.requiere_negocio)):
+    """El formulario, con las tres categorías cargadas de una vez.
+
+    Se mandan las tres al navegador y el desplegable de «qué enviar» se rellena
+    solo al cambiar de categoría: recargar la página por elegir entre tres
+    opciones sería perder lo que ya se escribió en la lista de números.
+    """
     return render(
         request,
         "enviar.html",
         usuario,
-        plantillas=mensajeria.listar_plantillas(),
+        categorias=svc_envios.CATEGORIAS,
+        opciones={clave: svc_envios.opciones(clave) for clave in svc_envios.CATEGORIAS},
         canales=mensajeria.CANALES,
     )
 
@@ -24,80 +35,142 @@ def formulario(request: Request, usuario=Depends(security.requiere_negocio)):
 @router.post("/enviar")
 def encolar(
     request: Request,
-    plantilla_id: int = Form(...),
+    categoria: str = Form(...),
+    referencia_id: int = Form(...),
     canal: str = Form(...),
     destinos: str = Form(""),
+    empieza_en: str = Form(""),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
-    """Deja los envíos en la cola; el bot los manda en segundo plano.
-
-    Se acepta un destino por línea (o separados por coma) para poder mandar el
-    mismo mensaje a varias personas de una vez.
-    """
+    """Crea la sesión de envío. El bot la va soltando a su ritmo."""
     security.verificar_csrf(request, csrf)
 
-    lista = [
-        parte.strip()
-        for linea in destinos.replace(",", "\n").splitlines()
-        for parte in [linea]
-        if parte.strip()
-    ]
-    if not lista:
-        return RedirectResponse(url="/enviar?error=Escribe al menos un ID de destino.", status_code=303)
+    validos, rechazados = svc_envios.numeros(destinos)
+    if not validos:
+        detalle = (
+            "Ninguno de los números tiene código de país."
+            if rechazados
+            else "Escribe al menos un número, uno por línea."
+        )
+        return RedirectResponse(url=f"/enviar?error={quote(detalle)}", status_code=303)
 
     try:
-        creados = mensajeria.encolar_envios(plantilla_id, canal, lista, usuario["usuario"])
+        lote = svc_envios.crear_lote(
+            categoria=categoria,
+            referencia_id=referencia_id,
+            canal=canal,
+            destinos=validos,
+            usuario=usuario["usuario"],
+            empieza_en=_momento(empieza_en),
+        )
     except ValueError as e:
-        return RedirectResponse(url=f"/enviar?error={e}", status_code=303)
+        return RedirectResponse(url=f"/enviar?error={quote(str(e))}", status_code=303)
 
-    return RedirectResponse(
-        url=f"/envios?aviso={len(creados)} envío(s) en cola. Aquí verás cómo van.",
-        status_code=303,
-    )
+    aviso = f"{len(validos)} envío(s) en cola."
+    if rechazados:
+        # No se calla: si se pegaron cien números y tres iban sin código de país,
+        # hay que saber CUÁLES quedaron fuera, no solo que faltan tres.
+        aviso += f" Sin código de país, no se envían: {', '.join(rechazados[:5])}"
+        if len(rechazados) > 5:
+            aviso += f" y {len(rechazados) - 5} más"
+    return RedirectResponse(url=f"/envios?aviso={quote(aviso)}#lote-{lote['id']}", status_code=303)
+
+
+def _momento(valor: str) -> datetime | None:
+    """Convierte el `datetime-local` del formulario. Vacío = ahora."""
+    valor = (valor or "").strip()
+    if not valor:
+        return None
+    try:
+        return datetime.fromisoformat(valor)
+    except ValueError:
+        return None
 
 
 @router.get("/envios")
 def historial(request: Request, usuario=Depends(security.requiere_negocio)):
-    """Histórico de envíos.
+    return render(request, "envios.html", usuario, **_datos_de_envios(usuario))
 
-    El detalle técnico del error solo se carga si quien mira es administrador:
-    al cliente le sirve el mensaje accionable, no la traza.
+
+@router.get("/envios/sesiones")
+def sesiones(request: Request, usuario=Depends(security.requiere_negocio)):
+    """Fragmento que el navegador vuelve a pedir cada pocos segundos.
+
+    Es como avanza la barra de progreso sin websockets ni estado en el servidor:
+    una consulta agregada por índice, igual que la de la factura.
     """
-    es_admin = usuario["rol"] == security.ROL_ADMIN
+    return render(request, "_envios_sesiones.html", usuario, **_datos_de_envios(usuario))
+
+
+def _datos_de_envios(usuario: dict) -> dict:
+    lotes = [svc_envios.con_progreso(lote) for lote in svc_envios.listar_lotes()]
+    return {
+        "lotes": lotes,
+        "retencion_dias": svc_envios.RETENCION_DIAS,
+        "max_intentos": mensajeria.MAX_INTENTOS,
+    }
+
+
+@router.get("/envios/{lote_id}/destinos")
+def destinos(
+    request: Request,
+    lote_id: int,
+    usuario=Depends(security.requiere_negocio),
+):
+    """Los números de una sesión, para la ventana de detalle.
+
+    Se puede abrir en cualquier momento, no solo al terminar: si de los primeros
+    veinte fallan quince, más vale enterarse antes de que salgan los ochenta.
+    """
+    solo_fallidos = request.query_params.get("fallidos") == "1"
     return render(
         request,
-        "envios.html",
+        "_envio_destinos.html",
         usuario,
-        envios=mensajeria.listar_envios(incluir_tecnico=es_admin),
+        lote=svc_envios.obtener_lote(lote_id),
+        destinos=svc_envios.destinos_de(lote_id, solo_fallidos=solo_fallidos),
+        solo_fallidos=solo_fallidos,
         max_intentos=mensajeria.MAX_INTENTOS,
     )
 
 
-@router.post("/envios/{envio_id}/reintentar")
+@router.post("/envios/{lote_id}/cancelar")
+def cancelar(
+    request: Request, lote_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
+):
+    security.verificar_csrf(request, csrf)
+    quitados = svc_envios.cancelar(lote_id)
+    aviso = f"Sesión cancelada: {quitados} envío(s) no saldrán. Lo ya enviado no se puede deshacer."
+    return RedirectResponse(url=f"/envios?aviso={quote(aviso)}", status_code=303)
+
+
+@router.post("/envios/{lote_id}/eliminar")
+def eliminar(
+    request: Request, lote_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
+):
+    security.verificar_csrf(request, csrf)
+    svc_envios.eliminar_lote(lote_id)
+    return RedirectResponse(url="/envios?aviso=Sesión+eliminada+del+historial", status_code=303)
+
+
+# --- Un envío suelto dentro de una sesión ------------------------------------
+
+@router.post("/envios/mensaje/{envio_id}/reintentar")
 def reintentar(
     request: Request, envio_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
     ok, mensaje = mensajeria.reintentar(envio_id)
     clave = "aviso" if ok else "error"
-    return RedirectResponse(url=f"/envios?{clave}={mensaje}", status_code=303)
+    return RedirectResponse(url=f"/envios?{clave}={quote(mensaje)}", status_code=303)
 
 
-@router.post("/envios/{envio_id}/reportar")
+@router.post("/envios/mensaje/{envio_id}/reportar")
 def reportar(
     request: Request, envio_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
     ok, mensaje = mensajeria.reportar(envio_id, usuario["usuario"])
     clave = "aviso" if ok else "error"
-    return RedirectResponse(url=f"/envios?{clave}={mensaje}", status_code=303)
-
-
-@router.post("/envios/{envio_id}/eliminar")
-def eliminar(
-    request: Request, envio_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
-):
-    security.verificar_csrf(request, csrf)
-    mensajeria.eliminar_envio(envio_id)
-    return RedirectResponse(url="/envios?aviso=Envío eliminado.", status_code=303)
+    return RedirectResponse(url=f"/envios?{clave}={quote(mensaje)}", status_code=303)
