@@ -17,11 +17,16 @@ import pytest
 from src.core import eventos
 from src.db import pool
 from src.services import trazabilidad
+from tests.conftest import ServicioDeProyecto
+
+trazabilidad = ServicioDeProyecto(trazabilidad, {
+    "marcar_reporte_revisado", "mensajes_de",
+})
 
 
 def _reporte(problema: str = "algo") -> None:
     pool.ejecutar(
-        "INSERT INTO reportes (nombre, numero, problema) VALUES ('Ana', '50611112222', %s)",
+        "INSERT INTO reportes (proyecto_id, nombre, numero, problema) VALUES (1, 'Ana', '50611112222', %s)",
         (problema,),
     )
 
@@ -29,8 +34,8 @@ def _reporte(problema: str = "algo") -> None:
 def _mensaje(client_id: str, texto: str, direccion: str = "inbound") -> int:
     pool.ejecutar(
         """
-        INSERT INTO conversation_messages (client_id, canal, direction, author, text)
-        VALUES (%s, 'whatsapp', %s, 'cliente', %s)
+        INSERT INTO conversation_messages (proyecto_id, client_id, canal, direction, author, text)
+        VALUES (1, %s, 'whatsapp', %s, 'cliente', %s)
         """,
         (client_id, direccion, texto),
     )
@@ -40,7 +45,9 @@ def _mensaje(client_id: str, texto: str, direccion: str = "inbound") -> int:
 # --- Las señales --------------------------------------------------------------
 
 def test_las_senales_traen_un_valor_por_tema():
-    assert set(eventos.senales()) == set(eventos.TOPICS)
+    claves = set(eventos.senales())
+    assert {f"admin:{tema}" for tema in eventos.TOPICS} <= claves
+    assert {f"p1:{tema}" for tema in eventos.TOPICS} <= claves
 
 
 def test_un_reporte_nuevo_mueve_su_tema_y_ningun_otro():
@@ -49,7 +56,7 @@ def test_un_reporte_nuevo_mueve_su_tema_y_ningun_otro():
     despues = eventos.senales()
 
     cambiados = {t for t in antes if antes[t] != despues[t]}
-    assert cambiados == {"reportes"}
+    assert cambiados == {"admin:reportes", "p1:reportes"}
 
 
 def test_marcar_un_reporte_revisado_tambien_se_nota():
@@ -63,13 +70,27 @@ def test_marcar_un_reporte_revisado_tambien_se_nota():
     trazabilidad.marcar_reporte_revisado(fila["id"])
     despues = eventos.senales()
 
-    assert antes["reportes"] != despues["reportes"]
+    assert antes["p1:reportes"] != despues["p1:reportes"]
 
 
 def test_un_mensaje_nuevo_mueve_el_tema_de_conversaciones():
     antes = eventos.senales()
     _mensaje("50600000001", "hola")
-    assert eventos.senales()["conversaciones"] != antes["conversaciones"]
+    assert eventos.senales()["p1:conversaciones"] != antes["p1:conversaciones"]
+
+
+def test_borrar_un_chat_mueve_el_tema_aunque_no_tuviera_el_ultimo_id():
+    """Otra pestaña debe quitarlo del listado sin esperar un mensaje nuevo."""
+    _mensaje("50600000001", "chat que se borrará")
+    _mensaje("50600000002", "este conserva el id máximo")
+    antes = eventos.senales()
+
+    pool.ejecutar(
+        "DELETE FROM conversation_messages WHERE proyecto_id = 1 AND client_id = %s",
+        ("50600000001",),
+    )
+
+    assert eventos.senales()["p1:conversaciones"] != antes["p1:conversaciones"]
 
 
 def test_sin_movimiento_las_senales_no_cambian():
@@ -86,14 +107,14 @@ def test_el_proyecto_no_recibe_los_temas_del_administrador():
 
     assert "reportes" in del_negocio
     assert "preguntas" in del_negocio
-    assert "conversaciones" not in del_negocio
+    assert "conversaciones" in del_negocio
     assert "incidencias" not in del_negocio
-    assert "bloqueos" not in del_negocio
+    assert "bloqueos" in del_negocio
 
 
 def test_el_administrador_recibe_lo_suyo():
     del_admin = eventos.topics_para({"rol": "admin"})
-    assert {"conversaciones", "bloqueos", "incidencias"} <= del_admin
+    assert del_admin == {"uso", "incidencias"}
 
 
 def test_sin_sesion_no_se_recibe_nada():
@@ -139,7 +160,7 @@ def test_sin_suscriptores_el_hub_no_consulta(monkeypatch):
 
 
 def test_el_hub_avisa_solo_de_lo_que_cambio(monkeypatch):
-    foto = {"reportes": (1, 1), "uso": (5,)}
+    foto = {"admin:reportes": (1, 1), "admin:uso": (5,)}
     monkeypatch.setattr(eventos, "senales", lambda: dict(foto))
     monkeypatch.setattr(eventos, "INTERVALO", 0.01)
 
@@ -150,7 +171,7 @@ def test_el_hub_avisa_solo_de_lo_que_cambio(monkeypatch):
                 await asyncio.sleep(0.05)  # la primera foto es la referencia
                 assert cola.empty(), "avisó en el primer tick, sin nada con qué comparar"
 
-                foto["reportes"] = (2, 2)
+                foto["admin:reportes"] = (2, 2)
                 temas = await asyncio.wait_for(cola.get(), timeout=2)
                 assert temas == {"reportes"}
         finally:
@@ -224,15 +245,12 @@ def test_el_flujo_no_se_cachea_ni_se_bufferiza():
 FRAGMENTOS_DEL_NEGOCIO = (
     ("/reportes", "/reportes/lista"),
     ("/preguntas", "/preguntas/lista"),
-    ("/clientes", "/clientes/lista"),
     ("/factura", "/factura/totales"),
     ("/envios", "/envios/sesiones"),
 )
 
 FRAGMENTOS_DEL_ADMIN = (
-    ("/admin/bloqueos", "/admin/bloqueos/lista"),
     ("/admin/incidencias", "/admin/incidencias/lista"),
-    ("/admin/logs", "/admin/logs/lista"),
     ("/admin/costos", "/admin/costos/totales"),
 )
 
@@ -315,7 +333,11 @@ QUIETAS_DEL_ADMIN = ("/admin/usuarios", "/admin/configuracion", "/admin/periodos
 def _abre_flujo(html: str) -> bool:
     """Lo mismo que decide `necesitanFlujo()` en app.js."""
     vivos = re.findall(r"<[^>]*data-refrescar=\"[^\"]*\"[^>]*>", html)
-    return any("data-secundario" not in v for v in vivos) or "data-cola=" in html
+    return (
+        any("data-secundario" not in v for v in vivos)
+        or "data-cola=" in html
+        or "data-conv-inicio=" in html
+    )
 
 
 @pytest.mark.parametrize("ruta", QUIETAS_DEL_NEGOCIO)
@@ -328,7 +350,7 @@ def test_una_pantalla_de_catalogo_del_admin_no_abre_flujo(sesion_admin, ruta):
     assert not _abre_flujo(sesion_admin.get(ruta).text), f"{ruta} gasta una conexión sin necesitarla"
 
 
-@pytest.mark.parametrize("ruta", ("/reportes", "/preguntas", "/clientes", "/factura", "/envios"))
+@pytest.mark.parametrize("ruta", ("/reportes", "/preguntas", "/conversaciones", "/factura", "/envios"))
 def test_las_pantallas_vivas_si_abren_flujo(sesion_cliente, ruta):
     """La otra mitad del trato: lo que sí cambia solo tiene que enterarse."""
     assert _abre_flujo(sesion_cliente.get(ruta).text), f"{ruta} dejó de actualizarse sola"
@@ -371,7 +393,7 @@ def test_leer_hacia_atras_sigue_funcionando_igual():
     assert [m["id"] for m in atras] == [primero]
 
 
-def test_la_cola_del_chat_no_repite_el_separador_de_dia(sesion_admin):
+def test_la_cola_del_chat_no_repite_el_separador_de_dia(sesion_cliente):
     """Añadiendo mensajes por el final, el separador de fecha solo debe salir al
     cambiar de día. Sin decirle en qué día se quedó lo ya pintado, cada tanda
     volvería a estampar el de hoy."""
@@ -380,14 +402,14 @@ def test_la_cola_del_chat_no_repite_el_separador_de_dia(sesion_admin):
     # El día se lee del hilo YA PINTADO, igual que hace el navegador, y no de la
     # base: el separador se calcula en la zona horaria del proyecto, así que la
     # fecha que diga Postgres puede ser otra.
-    hilo = sesion_admin.get("/admin/logs/whatsapp/50666666666?fragmento=1").text
+    hilo = sesion_cliente.get("/conversaciones/whatsapp/50666666666?fragmento=1").text
     dia = re.search(r'data-dia="([^"]*)"', hilo).group(1)
 
     _mensaje("50666666666", "segundo de hoy")
-    base = "/admin/logs/whatsapp/50666666666?fragmento=1&desde=%s" % primero
+    base = "/conversaciones/whatsapp/50666666666?fragmento=1&desde=%s" % primero
 
-    con_dia = sesion_admin.get(f"{base}&dia={dia}").text
-    sin_dia = sesion_admin.get(base).text
+    con_dia = sesion_cliente.get(f"{base}&dia={dia}").text
+    sin_dia = sesion_cliente.get(base).text
 
     assert con_dia.count("separador-dia") == 0
     assert con_dia.count('data-id="') == 1
@@ -395,34 +417,34 @@ def test_la_cola_del_chat_no_repite_el_separador_de_dia(sesion_admin):
     assert sin_dia.count("separador-dia") == 1
 
 
-def test_sin_mensajes_nuevos_la_cola_viene_vacia(sesion_admin):
+def test_sin_mensajes_nuevos_la_cola_viene_vacia(sesion_cliente):
     """Un cuerpo vacío es lo correcto: no es que el chat esté vacío, es que no
     ha llegado nada. Decir «Sin mensajes» borraría la conversación en pantalla."""
     ultimo = _mensaje("50655555555", "el unico")
-    cola = sesion_admin.get(f"/admin/logs/whatsapp/50655555555?fragmento=1&desde={ultimo}")
+    cola = sesion_cliente.get(f"/conversaciones/whatsapp/50655555555?fragmento=1&desde={ultimo}")
 
     assert cola.status_code == 200
     assert cola.text.strip() == ""
 
 
-def test_el_hilo_apaga_la_cola_al_leer_hacia_atras(sesion_admin):
+def test_el_hilo_apaga_la_cola_al_leer_hacia_atras(sesion_cliente):
     """Leyendo una tanda vieja, «lo posterior a lo que veo» sería media
     conversación de golpe."""
     _mensaje("50644444444", "viejo")
     ultimo = _mensaje("50644444444", "nuevo")
 
-    al_final = sesion_admin.get("/admin/logs/whatsapp/50644444444?fragmento=1").text
-    hacia_atras = sesion_admin.get(f"/admin/logs/whatsapp/50644444444?fragmento=1&antes={ultimo}").text
+    al_final = sesion_cliente.get("/conversaciones/whatsapp/50644444444?fragmento=1").text
+    hacia_atras = sesion_cliente.get(f"/conversaciones/whatsapp/50644444444?fragmento=1&antes={ultimo}").text
 
     assert "data-cola=" in al_final
     assert "data-cola=" not in hacia_atras
 
 
-def test_cada_burbuja_dice_su_id_y_su_dia(sesion_admin):
+def test_cada_burbuja_dice_su_id_y_su_dia(sesion_cliente):
     """El navegador los relee del DOM para saber por dónde seguir pidiendo; es
     la única fuente que no se puede desincronizar de lo que hay en pantalla."""
     _mensaje("50633333333", "hola")
-    hilo = sesion_admin.get("/admin/logs/whatsapp/50633333333?fragmento=1").text
+    hilo = sesion_cliente.get("/conversaciones/whatsapp/50633333333?fragmento=1").text
 
     assert 'data-id="' in hilo
     assert 'data-dia="' in hilo

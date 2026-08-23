@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block titulo %}{{ negocio.nombre }}{% endblock %}
 
-{# El perfil del proyecto es el centro del panel: desde aquí se ve su actividad,
-   se leen sus conversaciones, se configura su WhatsApp y se entra a su cuenta.
+{# El perfil del proyecto es el centro administrativo: desde aquí se ve su actividad
+   agregada, se configura su WhatsApp y se entra de forma auditada a su cuenta.
    Todo lo que no es «mirar» vive en ventanas flotantes sobre esta misma página,
    para no perder el sitio en el que estabas. #}
 
@@ -16,7 +16,6 @@
     </p>
   </div>
   <div class="acciones-cabecera">
-    <button class="boton mini" data-abre="dlg-conversaciones">Ver conversaciones</button>
     <button class="boton mini" data-abre="dlg-config">Configuración</button>
     {% if negocio.usuario_id %}
     <button class="boton mini" data-abre="dlg-entrar">Entrar a su cuenta</button>
@@ -39,31 +38,9 @@
 </div>
 {% endif %}
 
-<div data-vivo="uso conversaciones reportes" data-refrescar="/admin/negocios/{{ negocio.id }}/resumen">
+<div data-vivo="uso reportes" data-refrescar="/admin/negocios/{{ negocio.id }}/resumen">
   {% include "_negocio_resumen.html" %}
 </div>
-
-{# --- Conversaciones del negocio ------------------------------------------
-   Dos columnas: a la izquierda sus clientes, a la derecha el chat. Aquí y no
-   en el menú lateral porque una lista con los clientes de TODOS los proyectos
-   mezclados no sirve para nada: un chat solo se entiende dentro del negocio al
-   que le escribieron. Las dos columnas se cargan por fetch, así que abrir un
-   chat no recarga la página ni cierra la ventana. #}
-<dialog class="flotante conversaciones" id="dlg-conversaciones"
-        data-conv-inicio="/admin/negocios/{{ negocio.id }}/conversaciones">
-  <div class="cabecera">
-    <h2>Conversaciones de {{ negocio.nombre }}</h2>
-    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
-  </div>
-  <div class="conv-doble">
-    <aside class="conv-lista" data-conv-panel>
-      <p class="sub">Cargando…</p>
-    </aside>
-    <section class="conv-hilo" data-conv-detalle>
-      <p class="vacio">Elige una conversación de la izquierda.</p>
-    </section>
-  </div>
-</dialog>
 
 {# --- Configuración --------------------------------------------------------
    UNA ventana con categorías a la izquierda, no cuatro botones sueltos. El
@@ -145,6 +122,15 @@
           Las dos de la pantalla de tu sesión, copiadas tal cual. No hay que poner ninguna
           URL de API: ese dominio es del proveedor y es el mismo para todos.
         </p>
+        <div class="linea" style="margin:0 0 16px;gap:8px;flex-wrap:wrap">
+          <span class="pastilla {{ estado_wasender.clase }}">{{ estado_wasender.texto }}</span>
+          <span class="pastilla {{ 'ok' if negocio.wasender_api_key else 'error' }}">
+            API Token {{ 'guardado' if negocio.wasender_api_key else 'sin configurar' }}
+          </span>
+          <span class="pastilla {{ 'ok' if negocio.wasender_webhook_secret else 'alerta' }}">
+            Webhook Secret {{ 'guardado' if negocio.wasender_webhook_secret else 'opcional, sin configurar' }}
+          </span>
+        </div>
         <form method="post" action="/admin/negocios/{{ negocio.id }}/wasender">
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <div style="margin-bottom:14px">
@@ -164,7 +150,8 @@
             </p>
           </div>
           <p class="sub" style="margin:12px 0 16px">
-            Lo guardado no se muestra. Dejar un campo vacío lo conserva.
+            Por seguridad, el valor guardado nunca vuelve a mostrarse. Los indicadores de arriba
+            confirman su estado; dejar un campo vacío conserva el valor actual.
           </p>
           <div class="linea" style="justify-content:flex-end">
             <button class="primario">Guardar credenciales</button>

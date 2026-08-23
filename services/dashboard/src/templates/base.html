@@ -6,7 +6,7 @@
   <title>{% block titulo %}Panel{% endblock %} · Base de Control</title>
   {# El ?v= se sube al cambiar el CSS o el JS: sin él, un navegador con la
      versión anterior en caché mezclaría estilos viejos con el marcado nuevo. #}
-  <link rel="stylesheet" href="/static/app.css?v=19">
+  <link rel="stylesheet" href="/static/app.css?v=23">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14'>📊</text></svg>">
 </head>
 {% import "_iconos.html" as iconos %}
@@ -68,7 +68,10 @@
        Antes «Mi cuenta» era una página entera con un panel de sesiones abiertas
        que no le servía a nadie. #}
     <div class="menu" hidden>
-      <button type="button" data-abre="dlg-mi-cuenta">Configuración</button>
+      <button type="button" data-abre="dlg-mi-cuenta">Mi cuenta</button>
+      {% if not es_admin and proyecto %}
+      <button type="button" data-abre="dlg-config-proyecto">Configuración del proyecto</button>
+      {% endif %}
       {% if es_admin %}
       <a href="/admin/usuarios">Cuentas de acceso</a>
       <a href="/admin/configuracion">Ajustes del sistema</a>
@@ -131,6 +134,19 @@
   </div>
 </dialog>
 
+{% if not es_admin and proyecto %}
+<dialog class="flotante ancha" id="dlg-config-proyecto"
+        data-carga-dialogo="/configuracion-proyecto/bloqueos">
+  <div class="cabecera">
+    <h2>Configuración de {{ proyecto.nombre }}</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo" data-carga-destino>
+    <p class="sub">Cargando configuración…</p>
+  </div>
+</dialog>
+{% endif %}
+
 <div class="velo" data-alternar="lateral" hidden></div>
 {% endif %}
 
@@ -183,6 +199,6 @@
   {% if error %}<div class="toast malo">{{ error }}<button class="cerrar" aria-label="Cerrar">×</button></div>{% endif %}
 </div>
 
-<script src="/static/app.js?v=19"></script>
+<script src="/static/app.js?v=24"></script>
 </body>
 </html>

@@ -26,7 +26,8 @@ Cliente → canal (Telegram long-polling / webhook)
 
 | Riesgo | Mecanismo que lo previene | Dónde |
 | ------ | ------------------------- | ----- |
-| **Conversaciones cruzadas** (estado de un usuario mezclado con otro) | TODAS las claves de Redis llevan scope `prefijo:canal:user_id` (`scoped_key`). No existe estado mutable compartido entre usuarios: el grafo se invoca con estado por llamada, y el estado durable vive en claves aisladas por usuario+canal. | `buffer_service.py` (`scoped_key`), `conversation_state_repo.py`, `redis_state_repo.py`, `runtime_context.py` |
+| **Webhook repetido** (WasenderAPI entrega dos veces el mismo mensaje o reintenta aunque ya se procesó) | Reclamación atómica por `message_id` con `SET NX` y vencimiento de 7 días. Solo la primera petición ejecuta el comando o mete el texto al buffer. | `inbound_registry.py`, antes de cualquier efecto en `webhooks/app.py` |
+| **Conversaciones cruzadas** (estado de un usuario mezclado con otro negocio) | TODAS las claves Redis llevan `proyecto_id + canal + user_id` mediante `scoped_key`; Postgres exige `proyecto_id` y Qdrant filtra su payload por proyecto. | `project_context.py`, `buffer_service.py`, repositorios y migraciones 020–022 |
 | **Procesar la misma ráfaga dos veces** | Drenado del buffer en **un solo script Lua atómico** (`lrange`+`del`): si dos tareas compiten, solo una se lleva los mensajes; la otra recibe lista vacía. | `_DRAIN_BUFFER_LUA` / `_DRAIN_IF_CURRENT_LUA` en `buffer_service.py` |
 | **Responder varias veces a una ráfaga** ("hola" / "quiero info" / "de moto" en 3 mensajes) | Debounce por **número de secuencia**: cada mensaje incrementa `buffer_seq` y agenda una tarea con su número; solo procesa la tarea cuyo número sigue vigente (la del último mensaje). Las demás se descartan. | `BufferService.add_message` / `drain_if_current` |
 | **Dos turnos del mismo usuario en paralelo** (usuario escribe mientras el turno anterior aún espera al LLM → el turno lento pisa el estado del nuevo) | **Candado por conversación** (`processing:canal:user_id`, `SET NX EX 120`). Si está tomado, la tarea se reagenda 2s después sin drenar; el TTL evita conversaciones trabadas si el worker muere. | `process_buffered_messages` en `celery_app.py`; tests en `tests/unit/test_processing_lock.py` |
@@ -37,9 +38,9 @@ Cliente → canal (Telegram long-polling / webhook)
 
 ### Aislamiento multi-canal
 
-`Channel` forma parte de la clave de TODO el estado (buffer, estado FSM, contexto de
-publicidad, bloqueos en Postgres vía `subject_id`). El mismo número en Telegram y
-WhatsApp son **dos conversaciones independientes** por diseño.
+`proyecto_id` y `Channel` forman parte de la clave de TODO el estado (buffer, FSM,
+publicidad, recordatorios y bloqueos). El mismo número en dos proyectos —o en Telegram
+y WhatsApp— son conversaciones independientes por diseño.
 
 ---
 
@@ -74,8 +75,8 @@ Para replicar: separar `celery beat` en su propio servicio.
 
 ## 3. Trazabilidad
 
-Cada conversación es reconstruible end-to-end desde el dashboard (`/admin/logs`), sin
-acceso al servidor ni a la base:
+Cada conversación es reconstruible desde `/conversaciones` dentro de la cuenta del
+proyecto. Soporte debe usar la suplantación auditada; no existe un visor global admin.
 
 | Qué se registra | Dónde | Detalle |
 | --------------- | ----- | ------- |
@@ -114,13 +115,14 @@ problema desapareció: dos `INSERT` concurrentes no compiten por nada.
   (`purge_expired_conversations`) borra el historial vencido; el corte se calcula con
   `MAX(created_at)` **por conversación**, no mensaje a mensaje, para no borrarle el
   arranque del chat a un cliente activo.
-- **Qdrant**: base de conocimiento del RAG (sin datos de clientes).
+- **Qdrant**: base de conocimiento del RAG; cada punto lleva `proyecto_id` y toda
+  búsqueda o limpieza aplica ese filtro.
 
 ## 5. Seguimiento por cliente y resumen mensual
 
 Tablas en Postgres (`services/dashboard/src/db/migrations/001_esquema_inicial.sql`):
 
-- **`seguimiento_clientes`** (una fila por `client_id` + `canal`): contador de
+- **`seguimiento_clientes`** (una fila por `proyecto_id` + `client_id` + `canal`): contador de
   conversaciones iniciadas (una "conversación" dura hasta
   `SEGUIMIENTO_VENTANA_CONVERSACION_HORAS` = 24h desde el primer mensaje del
   cliente; pasado el plazo, el siguiente mensaje abre otra), primera/última

@@ -31,6 +31,7 @@
   var respaldo = null;
   var temporizadorCierre = null;
   var pendienteAlVolver = false;
+  var flujoAbiertoAlgunaVez = false;
 
   function vivos(tema) {
     // Se buscan en el momento y no al cargar la página: así un fragmento que
@@ -112,37 +113,64 @@
 
      Bajar el scroll solo si YA estabas abajo: si subiste a leer algo, un
      mensaje nuevo no puede arrastrarte al final. */
+  function estirarChat(chat) {
+    if (chat.dataset.enVuelo === "1") {
+      // Puede entrar otro aviso mientras todavía se está leyendo el anterior
+      // (es habitual: primero se guarda lo que escribió el cliente y enseguida
+      // la respuesta del bot). No se puede ignorar: si la primera consulta ya
+      // salió de Postgres, ese segundo mensaje quedaría invisible hasta el
+      // próximo aviso o hasta recargar la página.
+      chat.dataset.colaPendiente = "1";
+      return;
+    }
+    chat.dataset.enVuelo = "1";
+
+    var url = chat.getAttribute("data-cola") +
+              "&desde=" + encodeURIComponent(chat.dataset.ultimoId || "0") +
+              "&dia=" + encodeURIComponent(chat.dataset.dia || "");
+
+    fetch(url, { headers: { "X-Fragmento": "1" } })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        if (!html || !html.trim()) return;
+
+        var abajo = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+        chat.insertAdjacentHTML("beforeend", html);
+
+        // El id y el día se releen del DOM recién insertado: es la única
+        // fuente que no se puede desincronizar de lo que hay en pantalla.
+        var ultimas = chat.querySelectorAll("[data-id]");
+        if (ultimas.length) {
+          var ultima = ultimas[ultimas.length - 1];
+          chat.dataset.ultimoId = ultima.getAttribute("data-id");
+          chat.dataset.dia = ultima.getAttribute("data-dia") || chat.dataset.dia;
+        }
+
+        if (abajo) chat.scrollTop = chat.scrollHeight;
+      })
+      .catch(function () { /* lo reintenta el flujo o el respaldo */ })
+      .then(function () {
+        delete chat.dataset.enVuelo;
+        if (chat.dataset.colaPendiente === "1") {
+          delete chat.dataset.colaPendiente;
+          estirarChat(chat);
+        }
+      });
+  }
+
   function estirarChats() {
     document.querySelectorAll("[data-cola]").forEach(function (chat) {
-      if (chat.dataset.enVuelo === "1") return;
-      chat.dataset.enVuelo = "1";
-
-      var url = chat.getAttribute("data-cola") +
-                "&desde=" + encodeURIComponent(chat.dataset.ultimoId || "0") +
-                "&dia=" + encodeURIComponent(chat.dataset.dia || "");
-
-      fetch(url, { headers: { "X-Fragmento": "1" } })
-        .then(function (r) { return r.ok ? r.text() : null; })
-        .then(function (html) {
-          if (!html || !html.trim()) return;
-
-          var abajo = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
-          chat.insertAdjacentHTML("beforeend", html);
-
-          // El id y el día se releen del DOM recién insertado: es la única
-          // fuente que no se puede desincronizar de lo que hay en pantalla.
-          var ultimas = chat.querySelectorAll("[data-id]");
-          if (ultimas.length) {
-            var ultima = ultimas[ultimas.length - 1];
-            chat.dataset.ultimoId = ultima.getAttribute("data-id");
-            chat.dataset.dia = ultima.getAttribute("data-dia") || chat.dataset.dia;
-          }
-
-          if (abajo) chat.scrollTop = chat.scrollHeight;
-        })
-        .catch(function () { /* ya llegará en el siguiente aviso */ })
-        .then(function () { delete chat.dataset.enVuelo; });
+      estirarChat(chat);
     });
+  }
+
+  // Puesta al día completa. Importa que incluya las colas del chat: durante
+  // una desconexión no llega ningún tema que las dispare y los fragmentos
+  // normales por sí solos no añaden las burbujas nuevas.
+  function ponerAlDia() {
+    estirarChats();
+    actualizarListasConversaciones();
+    vivos(null).forEach(refrescar);
   }
 
   function refrescarTema(tema) {
@@ -151,7 +179,11 @@
       pendienteAlVolver = true;
       return;
     }
-    if (tema === "conversaciones") estirarChats();
+    if (tema === "conversaciones") {
+      estirarChats();
+      actualizarListasConversaciones();
+    }
+    if (tema === "bloqueos") refrescarHilosActivos();
     vivos(tema).forEach(refrescar);
   }
 
@@ -159,7 +191,7 @@
     if (respaldo) return;
     respaldo = setInterval(function () {
       if (document.hidden) return;
-      vivos(null).forEach(refrescar);
+      ponerAlDia();
     }, CADA_RESPALDO);
   }
 
@@ -168,7 +200,14 @@
 
     flujo = new EventSource("/eventos");
 
-    flujo.onopen = function () { fallos = 0; };
+    flujo.onopen = function () {
+      fallos = 0;
+      // EventSource se reconecta sin crear otro objeto. El servidor empieza
+      // entonces con una foto nueva como referencia y no reenvía lo ocurrido
+      // durante el corte; por eso hay que pedir explícitamente lo que falte.
+      if (flujoAbiertoAlgunaVez) ponerAlDia();
+      flujoAbiertoAlgunaVez = true;
+    };
 
     flujo.onmessage = function (e) {
       (e.data || "").split(",").forEach(function (tema) {
@@ -203,7 +242,9 @@
      incluidas las de catálogo que no tienen nada que refrescar. Al sexto cambio
      de pestaña el navegador se quedaba sin ranuras y todo se quedaba pensando. */
   function necesitanFlujo() {
-    return document.querySelectorAll("[data-refrescar]:not([data-secundario]), [data-cola]").length;
+    return document.querySelectorAll(
+      "[data-refrescar]:not([data-secundario]), [data-cola], [data-conv-inicio]"
+    ).length;
   }
 
   if (necesitanFlujo()) {
@@ -231,7 +272,7 @@
       // Puesta al día: mientras no mirabas pudo cambiar cualquier cosa.
       if (pendienteAlVolver || !flujo) {
         pendienteAlVolver = false;
-        vivos(null).forEach(refrescar);
+        ponerAlDia();
       }
     });
   }
@@ -541,15 +582,100 @@
       });
   }
 
+  function actualizarListaConversaciones(contenedor, consulta) {
+    if (!contenedor) return;
+    if (contenedor.tagName === "DIALOG" && !contenedor.open) return;
+    var panel = contenedor.querySelector("[data-conv-panel]");
+    var base = contenedor.getAttribute("data-conv-inicio");
+    if (!panel || !base) return;
+
+    if (panel.dataset.enVuelo === "1") {
+      // Un chat puede producir varios avisos seguidos. El último no se pierde
+      // aunque la consulta anterior ya hubiera salido hacia Postgres.
+      panel.dataset.listaPendiente = "1";
+      return;
+    }
+
+    if (typeof consulta !== "string") {
+      var campo = panel.querySelector("[data-conv-buscar] input[name=q]");
+      consulta = campo ? campo.value : "";
+    }
+
+    panel.dataset.enVuelo = "1";
+    var desplazado = panel.scrollTop;
+    var activa = contenedor.dataset.convActiva || "";
+    var url = base + (consulta ? "?q=" + encodeURIComponent(consulta) : "");
+
+    fetch(url, { headers: { "X-Fragmento": "1" } })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        if (html === null) {
+          panel.innerHTML = '<p class="vacio">No se pudo cargar.</p>';
+          return;
+        }
+        panel.innerHTML = html;
+        panel.scrollTop = desplazado;
+
+        // Repintar la lista no debe borrar qué conversación está abierta.
+        panel.querySelectorAll("[data-conv]").forEach(function (item) {
+          item.classList.toggle(
+            "activo",
+            (item.getAttribute("data-conv-clave") || item.getAttribute("data-conv")) === activa
+          );
+        });
+        if (activa && !panel.querySelector('[data-conv-clave="' + CSS.escape(activa) + '"]')) {
+          contenedor.dataset.convActiva = "";
+          contenedor.querySelector("[data-conv-detalle]").innerHTML =
+            '<p class="vacio">La conversación ya no está disponible.</p>';
+        }
+      })
+      .catch(function () {
+        panel.innerHTML = '<p class="mensaje error">No se pudo cargar. <button type="button" class="mini" data-reintenta-conversaciones>Reintentar</button></p>';
+      })
+      .then(function () {
+        delete panel.dataset.enVuelo;
+        if (panel.dataset.listaPendiente === "1") {
+          delete panel.dataset.listaPendiente;
+          actualizarListaConversaciones(contenedor);
+        }
+      });
+  }
+
+  function actualizarListasConversaciones() {
+    // Solo se consultan ventanas abiertas. Esto conserva la carga diferida y
+    // hace que un chat nuevo aparezca (o suba al primer lugar) en tiempo real.
+    document.querySelectorAll("[data-conv-inicio]").forEach(function (contenedor) {
+      if (contenedor.tagName !== "DIALOG" || contenedor.open) {
+        actualizarListaConversaciones(contenedor);
+      }
+    });
+  }
+
+  function refrescarHilosActivos() {
+    document.querySelectorAll("[data-conv-inicio]").forEach(function (contenedor) {
+      var activa = contenedor.dataset.convActiva || "";
+      if (!activa) return;
+      var item = contenedor.querySelector('[data-conv-clave="' + CSS.escape(activa) + '"]');
+      var partes = activa.split(":");
+      var url = item ? item.getAttribute("data-conv") :
+        "/conversaciones/" + encodeURIComponent(partes.shift()) + "/" +
+        encodeURIComponent(partes.join(":")) + "?fragmento=1";
+      traerA(url, contenedor.querySelector("[data-conv-detalle]"));
+    });
+  }
+
   // La lista se carga al abrir la ventana, no al cargar la página: si el
-  // administrador nunca la abre, no se consulta la base.
+  // administrador nunca la abre, no se consulta la base. Se vuelve a pedir en
+  // cada apertura para recuperar cualquier cambio ocurrido mientras estaba
+  // cerrada.
   document.querySelectorAll("[data-conv-inicio]").forEach(function (dialogo) {
-    var cargada = false;
-    dialogo.addEventListener("click", function () {}, false);
+    if (dialogo.tagName !== "DIALOG") {
+      actualizarListaConversaciones(dialogo);
+      return;
+    }
     var observador = function () {
-      if (cargada || !dialogo.open) return;
-      cargada = true;
-      traerA(dialogo.getAttribute("data-conv-inicio"), dialogo.querySelector("[data-conv-panel]"));
+      if (!dialogo.open) return;
+      actualizarListaConversaciones(dialogo);
     };
     // `showModal()` no dispara ningún evento propio, así que se observa el
     // atributo `open`, que es lo que sí cambia.
@@ -559,12 +685,13 @@
   document.addEventListener("click", function (e) {
     var item = e.target.closest && e.target.closest("[data-conv]");
     if (!item) return;
-    var dialogo = item.closest("dialog");
+    var dialogo = item.closest("[data-conv-inicio]");
     if (!dialogo) return;
     dialogo.querySelectorAll(".conv-item.activo").forEach(function (otro) {
       otro.classList.remove("activo");
     });
     item.classList.add("activo");
+    dialogo.dataset.convActiva = item.getAttribute("data-conv-clave") || item.getAttribute("data-conv");
     traerA(item.getAttribute("data-conv"), dialogo.querySelector("[data-conv-detalle]"));
   });
 
@@ -572,8 +699,137 @@
     var form = e.target.closest && e.target.closest("[data-conv-buscar]");
     if (!form) return;
     e.preventDefault();
-    var base = form.getAttribute("data-conv-buscar");
     var q = (form.querySelector("input[name=q]") || {}).value || "";
-    traerA(base + "?q=" + encodeURIComponent(q), form.closest("[data-conv-panel]"));
+    actualizarListaConversaciones(form.closest("[data-conv-inicio]"), q);
+  });
+
+  document.addEventListener("click", function (e) {
+    var boton = e.target.closest && e.target.closest("[data-reintenta-conversaciones]");
+    if (boton) actualizarListaConversaciones(boton.closest("[data-conv-inicio]"));
+  });
+
+  // Bloquear y eliminar desde el hilo no recarga la página. Tras un bloqueo se
+  // vuelve a pedir el hilo; tras borrar se limpian las dos columnas juntas.
+  document.addEventListener("submit", function (e) {
+    var form = e.target.closest && e.target.closest("[data-conv-accion]");
+    if (!form) return;
+    e.preventDefault();
+    var contenedor = form.closest("[data-conv-inicio]");
+    if (!contenedor || form.dataset.enVuelo === "1") return;
+    form.dataset.enVuelo = "1";
+    fetch(form.action, {
+      method: "POST",
+      body: new FormData(form),
+      headers: { "X-Fragmento": "1" }
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
+      .then(function (resultado) {
+        if (!resultado.ok && !resultado.json.eliminada) throw new Error(resultado.json.error || "No se pudo guardar");
+        if (form.getAttribute("data-conv-accion") === "eliminar") {
+          contenedor.dataset.convActiva = "";
+          contenedor.querySelector("[data-conv-detalle]").innerHTML =
+            '<p class="vacio">La conversación fue eliminada.</p>';
+          actualizarListaConversaciones(contenedor);
+          return;
+        }
+        var activa = contenedor.dataset.convActiva;
+        var item = activa && contenedor.querySelector('[data-conv-clave="' + CSS.escape(activa) + '"]');
+        if (item) traerA(item.getAttribute("data-conv"), contenedor.querySelector("[data-conv-detalle]"));
+      })
+      .catch(function () {
+        form.insertAdjacentHTML("beforebegin", '<p class="mensaje error">No se pudo guardar. Inténtalo otra vez.</p>');
+      })
+      .then(function () { delete form.dataset.enVuelo; });
+  });
+
+  // Responder desde el panel conserva el borrador si WasenderAPI falla. En
+  // éxito, la cola normal añade la burbuja sin repintar ni perder el scroll.
+  document.addEventListener("submit", function (e) {
+    var form = e.target.closest && e.target.closest("[data-conv-responder]");
+    if (!form) return;
+    e.preventDefault();
+    if (form.dataset.enVuelo === "1") return;
+    form.dataset.enVuelo = "1";
+    form.querySelectorAll(".mensaje.error").forEach(function (n) { n.remove(); });
+
+    fetch(form.action, {
+      method: "POST",
+      body: new FormData(form),
+      headers: { "X-Fragmento": "1" }
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
+      .then(function (resultado) {
+        if (!resultado.ok) throw new Error(resultado.json.error || "No se pudo enviar");
+        form.querySelector("textarea[name=texto]").value = "";
+        var hilo = form.parentElement;
+        var cabecera = hilo && hilo.querySelector(".panel.linea");
+        if (cabecera && !cabecera.querySelector("[data-pausa-ia]")) {
+          cabecera.insertAdjacentHTML("afterbegin", '<span class="pastilla alerta" data-pausa-ia>IA pausada durante 12 días</span>');
+        }
+        var chat = hilo && hilo.querySelector("[data-cola]");
+        if (chat) estirarChat(chat);
+        actualizarListasConversaciones();
+      })
+      .catch(function (error) {
+        form.insertAdjacentHTML(
+          "afterbegin",
+          '<p class="mensaje error">' + String(error.message || "No se pudo enviar") + '</p>'
+        );
+      })
+      .then(function () { delete form.dataset.enVuelo; });
+  });
+
+  // Configuración del proyecto: no viaja en cada página; se carga al abrir y
+  // vuelve a pedir solo su fragmento después de guardar o buscar.
+  function cargarConfiguracion(dialogo, url) {
+    var destino = dialogo && dialogo.querySelector("[data-carga-destino]");
+    if (!destino || dialogo.dataset.enVuelo === "1") return;
+    dialogo.dataset.enVuelo = "1";
+    destino.setAttribute("aria-busy", "true");
+    fetch(url || dialogo.getAttribute("data-carga-dialogo"), { headers: { "X-Fragmento": "1" } })
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+      .then(function (html) { destino.innerHTML = html; })
+      .catch(function () { destino.innerHTML = '<p class="mensaje error">No se pudo cargar. <button type="button" class="mini" data-reintenta-configuracion>Reintentar</button></p>'; })
+      .then(function () {
+        destino.removeAttribute("aria-busy");
+        delete dialogo.dataset.enVuelo;
+      });
+  }
+
+  document.querySelectorAll("[data-carga-dialogo]").forEach(function (dialogo) {
+    new MutationObserver(function () {
+      if (dialogo.open) cargarConfiguracion(dialogo);
+    }).observe(dialogo, { attributes: true, attributeFilter: ["open"] });
+  });
+
+  document.addEventListener("click", function (e) {
+    var boton = e.target.closest && e.target.closest("[data-reintenta-configuracion]");
+    if (boton) cargarConfiguracion(boton.closest("[data-carga-dialogo]"));
+  });
+
+  document.addEventListener("submit", function (e) {
+    var form = e.target.closest && e.target.closest("[data-config-proyecto-form], [data-config-proyecto-buscar]");
+    if (!form) return;
+    e.preventDefault();
+    var dialogo = form.closest("[data-carga-dialogo]");
+    if (!dialogo) return;
+    if (form.hasAttribute("data-config-proyecto-buscar")) {
+      var q = (form.querySelector("[name=q]") || {}).value || "";
+      cargarConfiguracion(dialogo, form.action + (q ? "?q=" + encodeURIComponent(q) : ""));
+      return;
+    }
+    fetch(form.action, {
+      method: "POST", body: new FormData(form), headers: { "X-Fragmento": "1" }
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) throw new Error(j.error || "No se pudo guardar");
+        var q = (dialogo.querySelector("[data-config-proyecto-buscar] [name=q]") || {}).value || "";
+        var base = dialogo.getAttribute("data-carga-dialogo");
+        cargarConfiguracion(dialogo, base + (q ? "?q=" + encodeURIComponent(q) : ""));
+        refrescarHilosActivos();
+      });
+    }).catch(function (error) {
+      form.insertAdjacentHTML("beforebegin", '<p class="mensaje error">' + error.message + '</p>');
+    });
   });
 })();

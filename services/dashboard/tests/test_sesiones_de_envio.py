@@ -12,7 +12,21 @@ import pytest
 
 from src.db import pool
 from src.services import envios, media, mensajeria, palabras_clave
-from tests.conftest import token_csrf
+from tests.conftest import ServicioDeProyecto, token_csrf
+
+mensajeria = ServicioDeProyecto(mensajeria, {
+    "listar_plantillas", "obtener_plantilla", "buscar_por_clave", "partes_de",
+    "crear_plantilla", "renombrar_plantilla", "eliminar_plantilla", "guardar_parte",
+    "agregar_parte", "eliminar_parte", "obtener_envio", "reintentar", "reportar",
+})
+palabras_clave = ServicioDeProyecto(palabras_clave, {
+    "listar", "obtener", "crear", "renombrar", "alternar_activa", "eliminar",
+    "piezas_de", "agregar_pieza", "guardar_pieza", "eliminar_pieza", "revisar_media_de",
+})
+envios = ServicioDeProyecto(envios, {
+    "opciones", "crear_lote", "listar_lotes", "obtener_lote", "destinos_de",
+    "cancelar", "eliminar_lote",
+})
 
 
 @pytest.fixture(autouse=True)

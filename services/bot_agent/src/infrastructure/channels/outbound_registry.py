@@ -8,16 +8,15 @@ API. Si no se distinguen, cada respuesta del bot se leería como una
 intervención humana y el bot se bloquearía a sí mismo 12 días en el primer
 turno.
 
-Cómo se distinguen, en orden de fiabilidad:
+Cómo se distinguen:
 
-1. **Por id del mensaje**: al enviar, WasenderAPI devuelve el id que tendrá el
-   mensaje. Se guarda; si el evento saliente trae ese id, es nuestro. Es exacto.
-2. **Por huella del texto** (respaldo): si la respuesta del envío no trae id
-   —la API no documenta el formato exacto y puede cambiar— se compara el texto
-   normalizado con lo que acabamos de mandar a ESE destinatario. Puede fallar
-   solo si el dueño escribe, palabra por palabra, el mismo texto que el bot
-   dentro de la ventana; el costo de ese falso positivo (el bot sigue callado
-   cuando ya iba a callarse) es mucho menor que el del falso negativo.
+1. **Por id**, cuando coincide: es la señal exacta. La respuesta de envío suele
+   traer el `msgId` numérico de WasenderAPI mientras el webhook trae el id de
+   WhatsApp, así que no siempre son el mismo valor.
+2. **Por una ficha consumible del texto y destinatario**: cada envío por API
+   agrega UNA ficha y su primer eco la consume. No se conserva un booleano por
+   quince minutos: con ese diseño, si el dueño escribía después exactamente el
+   mismo texto (por ejemplo, "Hola"), también se confundía con el bot.
 
 Todo vive en Redis con TTL: es información desechable, no estado del negocio.
 """
@@ -31,9 +30,10 @@ from src.domain.entities import Channel
 # Cuánto se recuerda un id enviado. Los eventos salientes llegan en segundos;
 # una hora cubre de sobra reintentos y colas atrasadas del proveedor.
 TTL_ID_SEGUNDOS = 3600
-# La huella del texto vive menos: es el camino heurístico y no conviene que una
-# coincidencia se arrastre.
-TTL_TEXTO_SEGUNDOS = 900
+# La ficha de texto solo cubre el lapso entre la respuesta de la API y su eco
+# por webhook. Si el eco no llegara, no debe confundir un mensaje humano mucho
+# tiempo después.
+TTL_TEXTO_SEGUNDOS = 120
 
 
 def _clave_id(mensaje_id: str) -> str:
@@ -42,7 +42,7 @@ def _clave_id(mensaje_id: str) -> str:
 
 def _clave_texto(canal: Channel | str, user_id: str, texto: str) -> str:
     huella = hashlib.sha256(_normalizar(texto).encode("utf-8")).hexdigest()[:32]
-    return f"{scoped_key('wa_envio_texto', canal, user_id)}:{huella}"
+    return f"{scoped_key('wa_envio_pendiente', canal, user_id)}:{huella}"
 
 
 def _normalizar(texto: str) -> str:
@@ -77,9 +77,15 @@ def recordar_envio(user_id: str, texto: str, respuesta: Any, canal: Channel | st
     try:
         mensaje_id = id_de_respuesta(respuesta)
         if mensaje_id:
-            redis_client.setex(_clave_id(mensaje_id), TTL_ID_SEGUNDOS, "1")
+            redis_client.set(_clave_id(mensaje_id), "1", ex=TTL_ID_SEGUNDOS)
         if texto:
-            redis_client.setex(_clave_texto(canal, user_id, texto), TTL_TEXTO_SEGUNDOS, "1")
+            clave = _clave_texto(canal, user_id, texto)
+            pipe = redis_client.pipeline()
+            # Una ficha por envío: dos respuestas iguales generan dos ecos y
+            # ambos siguen reconociéndose, pero cada eco gasta solo una.
+            pipe.rpush(clave, "1")
+            pipe.expire(clave, TTL_TEXTO_SEGUNDOS)
+            pipe.execute()
     except Exception as e:
         print(f"Error recordando el envío propio: {e}")
 
@@ -94,8 +100,10 @@ def es_envio_del_bot(
     try:
         if mensaje_id and redis_client.exists(_clave_id(mensaje_id)):
             return True
-        if texto and redis_client.exists(_clave_texto(canal, user_id, texto)):
-            return True
+        if texto:
+            # LPOP es atómico: dos webhooks concurrentes no pueden consumir la
+            # misma ficha y hacer pasar dos mensajes como si fueran de la API.
+            return redis_client.lpop(_clave_texto(canal, user_id, texto)) is not None
         return False
     except Exception as e:
         # Si Redis no responde hay que elegir un error. Darlo por ajeno

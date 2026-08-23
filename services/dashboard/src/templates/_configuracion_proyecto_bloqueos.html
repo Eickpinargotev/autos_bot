@@ -1,0 +1,18 @@
+<section>
+  <h3 style="margin-top:0">Números bloqueados</h3>
+  <p class="sub">La IA no responderá nunca a estos números. También puedes bloquear desde un chat.</p>
+  <form class="linea" method="post" action="/configuracion-proyecto/bloqueos"
+        data-config-proyecto-form>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="numero" inputmode="tel" placeholder="Número con código de país" required style="flex:1">
+    <button class="primario">Bloquear</button>
+  </form>
+  <form class="linea" method="get" action="/configuracion-proyecto/bloqueos"
+        data-config-proyecto-buscar style="margin-top:14px">
+    <input name="q" value="{{ busqueda }}" inputmode="tel" placeholder="Buscar número…" style="flex:1">
+    <button class="mini">Buscar</button>
+  </form>
+  <div style="margin-top:14px">
+    {% include "_bloqueos_permanentes_lista.html" %}
+  </div>
+</section>

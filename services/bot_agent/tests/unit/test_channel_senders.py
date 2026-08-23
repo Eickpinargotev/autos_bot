@@ -9,7 +9,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.domain.entities import Channel
-from src.infrastructure.channels import wasender
+from src.infrastructure.channels import outbound_registry, wasender
 from src.infrastructure.channels.outbound_attachments import parse_outbound_message, url_publica
 from src.infrastructure.channels.senders import ChannelSenderRegistry, WhatsAppSender
 
@@ -61,6 +61,35 @@ class WhatsAppSenderTests(unittest.TestCase):
         self.assertIn("1abcDEF", url)
         self.assertEqual(pie, "pie de foto")
         self.assertEqual(api_key, "clave")
+
+
+class RegistroDeSalidasTests(unittest.TestCase):
+    def test_el_eco_consume_la_ficha_y_el_mismo_texto_del_dueno_ya_no_se_ignora(self):
+        """El caso real: el bot manda algo y después el dueño escribe lo mismo."""
+        outbound_registry.recordar_envio(
+            "593983512981", "Hola", {"data": {"msgId": 73130526}}
+        )
+
+        self.assertTrue(
+            outbound_registry.es_envio_del_bot(
+                "593983512981", mensaje_id="ID-WHATSAPP-DISTINTO", texto="Hola"
+            )
+        )
+        self.assertFalse(
+            outbound_registry.es_envio_del_bot(
+                "593983512981", mensaje_id="ID-DEL-DUENO", texto="Hola"
+            )
+        )
+
+    def test_dos_envios_iguales_de_api_crean_dos_fichas(self):
+        for msg_id in (1, 2):
+            outbound_registry.recordar_envio(
+                "593983512981", "Texto repetido", {"data": {"msgId": msg_id}}
+            )
+
+        self.assertTrue(outbound_registry.es_envio_del_bot("593983512981", texto="Texto repetido"))
+        self.assertTrue(outbound_registry.es_envio_del_bot("593983512981", texto="Texto repetido"))
+        self.assertFalse(outbound_registry.es_envio_del_bot("593983512981", texto="Texto repetido"))
 
 
 class DestinoLidTests(unittest.TestCase):

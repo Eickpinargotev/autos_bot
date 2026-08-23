@@ -90,7 +90,8 @@ class PublicidadService:
                 nombre=user_name,
                 numero=user_id,
                 problema="no se programó mensajes de publicidad porque faltan campos",
-                link_whatsapp=f"https://wa.me/{user_id}"
+                link_whatsapp=f"https://wa.me/{user_id}",
+                canal=channel_value.value,
             )
                 
             repo.block_user(user_id, reason=f"Falta el enlace del grupo en el mensaje «{clave}»", channel=channel_value)

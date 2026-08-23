@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from src.core.prompts import (
     AGENT_COMMON_CONTRACT,
@@ -155,6 +156,22 @@ class FollowupPromptContractTests(unittest.TestCase):
         self.assertIn("📌 Hola!!!", FOLLOWUP_AGENT_PROMPT)
         self.assertIn("Máximo una pregunta", FOLLOWUP_AGENT_PROMPT)
         self.assertIn("nunca tutees", FOLLOWUP_AGENT_PROMPT)
+
+
+class EditableAgentPlaybookTests(unittest.TestCase):
+    def test_role_playbook_replaces_only_the_editable_body(self):
+        from src.application.unified_agent import _system_prompt_for
+
+        with patch(
+            "src.application.unified_agent.instrucciones_repository.activas",
+            return_value="Use un tono muy breve.",
+        ):
+            prompt = _system_prompt_for("SUPERVISOR")
+
+        self.assertIn("REGLAS DE LOS MENSAJES", prompt)
+        self.assertIn("Use un tono muy breve.", prompt)
+        self.assertIn("TU CATÁLOGO DE FRAGMENTOS", prompt)
+        self.assertNotIn("COORDINADOR / RECEPCIÓN", prompt)
 
 
 if __name__ == "__main__":

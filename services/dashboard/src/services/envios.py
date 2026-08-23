@@ -29,7 +29,7 @@ CATEGORIAS = {
 
 # --- Qué se puede enviar ------------------------------------------------------
 
-def opciones(categoria: str) -> list[dict[str, Any]]:
+def opciones(proyecto_id: int, categoria: str) -> list[dict[str, Any]]:
     """Lo que hay para elegir dentro de una categoría, con sus problemas.
 
     Los dos orígenes viven en tablas distintas y se leen distinto, pero desde
@@ -41,7 +41,7 @@ def opciones(categoria: str) -> list[dict[str, Any]]:
     if categoria == "mensaje":
         return [
             {"id": p["id"], "etiqueta": p["clave"], "piezas": len(p["partes"]), "problemas": p["problemas"]}
-            for p in mensajeria.listar_plantillas()
+            for p in mensajeria.listar_plantillas(proyecto_id)
         ]
 
     if categoria == "palabra_clave":
@@ -55,20 +55,20 @@ def opciones(categoria: str) -> list[dict[str, Any]]:
                 "piezas": len(p["mensajes"]),
                 "problemas": p["problemas"],
             }
-            for p in palabras_clave.listar()
+            for p in palabras_clave.listar(proyecto_id)
         ]
 
     raise ValueError(f"Categoría desconocida: {categoria}")
 
 
-def _contenido(categoria: str, referencia_id: int) -> tuple[str, list[dict[str, Any]]]:
+def _contenido(proyecto_id: int, categoria: str, referencia_id: int) -> tuple[str, list[dict[str, Any]]]:
     """(etiqueta, partes) de lo que se va a mandar, ya validado.
 
     Las partes se COPIAN a cada envío: editar el mensaje después no cambia lo
     que ya se encoló, así el histórico refleja lo que de verdad salió.
     """
     if categoria == "mensaje":
-        plantilla = mensajeria.obtener_plantilla(referencia_id)
+        plantilla = mensajeria.obtener_plantilla(proyecto_id, referencia_id)
         if not plantilla:
             raise ValueError("Ese mensaje ya no existe.")
         _sin_problemas(plantilla["clave"], plantilla["problemas"])
@@ -78,7 +78,7 @@ def _contenido(categoria: str, referencia_id: int) -> tuple[str, list[dict[str, 
         ]
 
     if categoria == "palabra_clave":
-        palabra = palabras_clave.obtener(referencia_id)
+        palabra = palabras_clave.obtener(proyecto_id, referencia_id)
         if not palabra:
             raise ValueError("Esa palabra clave ya no existe.")
         # Solo se miran los MENSAJES, no los recordatorios: aquí se manda lo que
@@ -141,6 +141,7 @@ def numeros(texto: str) -> tuple[list[str], list[str]]:
 
 def crear_lote(
     *,
+    proyecto_id: int,
     categoria: str,
     referencia_id: int,
     canal: str,
@@ -159,15 +160,15 @@ def crear_lote(
     if not destinos:
         raise ValueError("No hay ningún número al que enviar.")
 
-    etiqueta, partes = _contenido(categoria, referencia_id)
+    etiqueta, partes = _contenido(proyecto_id, categoria, referencia_id)
     lote = pool.consultar_uno(
         """
-        INSERT INTO envios_lote (categoria, referencia_id, etiqueta, canal, creado_por,
+        INSERT INTO envios_lote (proyecto_id, categoria, referencia_id, etiqueta, canal, creado_por,
                                  empieza_en, proximo_en)
-        VALUES (%s, %s, %s, %s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()))
+        VALUES (%s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()))
         RETURNING *
         """,
-        (categoria, referencia_id, etiqueta[:120], canal, usuario, empieza_en, empieza_en),
+        (int(proyecto_id), categoria, referencia_id, etiqueta[:120], canal, usuario, empieza_en, empieza_en),
     )
 
     contenido = json.dumps(partes, ensure_ascii=False)
@@ -175,17 +176,17 @@ def crear_lote(
     for destino in destinos:
         pool.ejecutar(
             """
-            INSERT INTO envios (lote_id, plantilla_id, partes, canal, destino_id, creado_por)
-            VALUES (%s, %s, %s::jsonb, %s, %s, %s)
+            INSERT INTO envios (proyecto_id, lote_id, plantilla_id, partes, canal, destino_id, creado_por)
+            VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s)
             """,
-            (lote["id"], plantilla_id, contenido, canal, destino, usuario),
+            (int(proyecto_id), lote["id"], plantilla_id, contenido, canal, destino, usuario),
         )
     return lote
 
 
 # --- Ver cómo van -------------------------------------------------------------
 
-def listar_lotes(limite: int = 60) -> list[dict[str, Any]]:
+def listar_lotes(proyecto_id: int, limite: int = 60) -> list[dict[str, Any]]:
     """Las sesiones, las que están en marcha primero.
 
     El orden es «en marcha» y después por fecha descendente. Eso ya cumple lo
@@ -207,13 +208,14 @@ def listar_lotes(limite: int = 60) -> list[dict[str, Any]]:
                (l.empieza_en > l.creado_en + INTERVAL '1 minute')  AS programada
         FROM envios_lote l
         LEFT JOIN envios e ON e.lote_id = l.id
+        WHERE l.proyecto_id = %s
         GROUP BY l.id
         ORDER BY (COUNT(e.id) FILTER (WHERE e.estado IN ('pendiente', 'enviando')) > 0
                   AND NOT l.cancelado) DESC,
                  l.creado_en DESC
         LIMIT %s
         """,
-        (int(limite),),
+        (int(proyecto_id), int(limite)),
     )
 
 
@@ -235,7 +237,7 @@ def con_progreso(lote: dict[str, Any]) -> dict[str, Any]:
     return lote
 
 
-def obtener_lote(lote_id: int) -> dict[str, Any] | None:
+def obtener_lote(proyecto_id: int, lote_id: int) -> dict[str, Any] | None:
     filas = pool.consultar(
         """
         SELECT l.*,
@@ -251,15 +253,15 @@ def obtener_lote(lote_id: int) -> dict[str, Any] | None:
                (l.empieza_en > l.creado_en + INTERVAL '1 minute')  AS programada
         FROM envios_lote l
         LEFT JOIN envios e ON e.lote_id = l.id
-        WHERE l.id = %s
+        WHERE l.proyecto_id = %s AND l.id = %s
         GROUP BY l.id
         """,
-        (int(lote_id),),
+        (int(proyecto_id), int(lote_id)),
     )
     return con_progreso(filas[0]) if filas else None
 
 
-def destinos_de(lote_id: int, solo_fallidos: bool = False) -> list[dict[str, Any]]:
+def destinos_de(proyecto_id: int, lote_id: int, solo_fallidos: bool = False) -> list[dict[str, Any]]:
     """Los números de una sesión, con lo que pasó con cada uno.
 
     Se puede mirar EN CUALQUIER MOMENTO, no solo al terminar: si de los primeros
@@ -272,23 +274,30 @@ def destinos_de(lote_id: int, solo_fallidos: bool = False) -> list[dict[str, Any
         SELECT id, destino_id, estado, intentos, error_cliente, enviado_en,
                partes_enviadas, jsonb_array_length(partes) AS total_partes
         FROM envios
-        WHERE lote_id = %s {where}
+        WHERE proyecto_id = %s AND lote_id = %s {where}
         ORDER BY (estado = 'error') DESC, id
         """,
-        (int(lote_id),),
+        (int(proyecto_id), int(lote_id)),
     )
 
 
-def cancelar(lote_id: int) -> int:
+def cancelar(proyecto_id: int, lote_id: int) -> int:
     """Para lo que queda por salir. Lo ya enviado no se puede deshacer."""
-    pool.ejecutar("UPDATE envios_lote SET cancelado = TRUE WHERE id = %s", (int(lote_id),))
+    pool.ejecutar(
+        "UPDATE envios_lote SET cancelado = TRUE WHERE proyecto_id = %s AND id = %s",
+        (int(proyecto_id), int(lote_id)),
+    )
     return pool.ejecutar(
-        "DELETE FROM envios WHERE lote_id = %s AND estado = 'pendiente'", (int(lote_id),)
+        "DELETE FROM envios WHERE proyecto_id = %s AND lote_id = %s AND estado = 'pendiente'",
+        (int(proyecto_id), int(lote_id)),
     )
 
 
-def eliminar_lote(lote_id: int) -> int:
-    return pool.ejecutar("DELETE FROM envios_lote WHERE id = %s", (int(lote_id),))
+def eliminar_lote(proyecto_id: int, lote_id: int) -> int:
+    return pool.ejecutar(
+        "DELETE FROM envios_lote WHERE proyecto_id = %s AND id = %s",
+        (int(proyecto_id), int(lote_id)),
+    )
 
 
 def purgar_lotes_vencidos(dias: int = RETENCION_DIAS) -> int:

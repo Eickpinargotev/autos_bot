@@ -9,23 +9,27 @@ from typing import Any
 
 from src.domain.entities import Channel
 from src.infrastructure.repositories.postgres_conn import consultar_uno, ejecutar
+from src.application.project_context import proyecto_actual
 
 
 class KeywordRegistryRepository:
     @staticmethod
     def register_if_missing(registro: str, nombre: str, canal: Channel | str, palabra_clave: str) -> bool:
         canal_value = KeywordRegistryRepository._channel_value(canal)
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
         try:
             # ON CONFLICT DO NOTHING resuelve "registra si no existe" en una sola
             # ida a la base y de forma atómica: dos mensajes simultáneos del mismo
             # cliente no pueden crear filas duplicadas.
             ejecutar(
                 """
-                INSERT INTO keyword_registros (registro, canal, nombre, palabra_clave)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (registro, canal) DO NOTHING
+                INSERT INTO keyword_registros (proyecto_id, registro, canal, nombre, palabra_clave)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (proyecto_id, registro, canal) DO NOTHING
                 """,
-                (str(registro), canal_value, nombre or "Desconocido", palabra_clave or ""),
+                (proyecto_id, str(registro), canal_value, nombre or "Desconocido", palabra_clave or ""),
             )
             return True
         except Exception as e:
@@ -35,10 +39,13 @@ class KeywordRegistryRepository:
     @staticmethod
     def delete(registro: str, canal: Channel | str) -> bool:
         canal_value = KeywordRegistryRepository._channel_value(canal)
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
         try:
             ejecutar(
-                "DELETE FROM keyword_registros WHERE registro = %s AND canal = %s",
-                (str(registro), canal_value),
+                "DELETE FROM keyword_registros WHERE proyecto_id = %s AND registro = %s AND canal = %s",
+                (proyecto_id, str(registro), canal_value),
             )
             return True
         except Exception as e:
@@ -48,9 +55,12 @@ class KeywordRegistryRepository:
     @staticmethod
     def find_by_registro_channel(registro: str, canal: Channel | str) -> dict[str, Any] | None:
         canal_value = KeywordRegistryRepository._channel_value(canal)
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return None
         return consultar_uno(
-            "SELECT * FROM keyword_registros WHERE registro = %s AND canal = %s",
-            (str(registro), canal_value),
+            "SELECT * FROM keyword_registros WHERE proyecto_id = %s AND registro = %s AND canal = %s",
+            (proyecto_id, str(registro), canal_value),
         )
 
     @staticmethod

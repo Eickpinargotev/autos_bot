@@ -81,13 +81,16 @@ def listar(busqueda: str = "") -> list[dict[str, Any]]:
     return [_presentar(fila) for fila in filas]
 
 
-def estado_de(canal: str, client_id: str) -> dict[str, Any] | None:
+def estado_de(proyecto_id: int, canal: str, client_id: str) -> dict[str, Any] | None:
     """El bloqueo EN VIGOR de una conversación, o None.
 
     Lo usa la cabecera del chat: es donde se nota que alguien está bloqueado y
     donde tiene sentido levantarlo, sin tener que ir a buscarlo a otra pantalla.
     """
-    fila = pool.consultar_uno(f"{_SELECT} WHERE b.user_id = ANY(%s)", (_claves(canal, client_id),))
+    fila = pool.consultar_uno(
+        f"{_SELECT} WHERE b.proyecto_id = %s AND b.user_id = ANY(%s)",
+        (int(proyecto_id), _claves(canal, client_id)),
+    )
     if not fila:
         return None
     fila = _presentar(fila)

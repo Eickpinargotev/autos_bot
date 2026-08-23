@@ -44,6 +44,7 @@ from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from src.infrastructure.repositories.conversation_state_repo import ConversationState, ConversationStateRepo
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 from src.infrastructure.repositories.report_repository import ReportRepository
+from src.infrastructure.repositories import instrucciones_repository
 from src.infrastructure.repositories.unanswered_question_repository import UnansweredQuestionRepository
 
 
@@ -524,8 +525,10 @@ class AgentPipeline:
         # El recordatorio inteligente solo se agenda si quedó un paso pendiente
         # y la duda del cliente no quedó abierta (RAG sin respaldo).
         reminder = None
-        if pending and not turn.rag_missed:
-            reminder = {"level": 1, "seconds": settings.FOLLOWUP_FIRST_DELAY_SECONDS}
+        config_recordatorios = instrucciones_repository.configuracion_recordatorios()
+        if pending and not turn.rag_missed and config_recordatorios.get("habilitado", True):
+            minutos = max(1, min(int(config_recordatorios.get("intervalo_minutos") or 60), 20160))
+            reminder = {"level": 1, "seconds": minutos * 60}
         return {"replies": turn.replies, "reminder": reminder}
 
     def _handoff(self, state: AgentGraphState) -> AgentGraphState:
@@ -584,6 +587,7 @@ class AgentPipeline:
             numero=user_id,
             problema=f"[{channel.value}] {reason}",
             link_whatsapp=f"https://wa.me/{user_id}",
+            canal=channel.value,
         )
         PostgresUserRepo().block_user(user_id, reason=reason, days=12, channel=channel)
 

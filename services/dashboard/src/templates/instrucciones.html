@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block titulo %}Prompts de los agentes{% endblock %}
+
+{% block contenido %}
+<section class="cabecera-prompts">
+  <div class="acento-prompts" aria-hidden="true"></div>
+  <div>
+    <h1>Ajustar agentes IA</h1>
+    <p class="sub">Configura y ajusta el comportamiento de cada agente de forma independiente.</p>
+  </div>
+</section>
+
+<section class="panel panel-prompts">
+  <div class="rejilla-agentes">
+  {% for tipo in tipos %}
+    {% set datos = prompts[tipo] %}
+    {% set activa = datos.activa %}
+    <article class="tarjeta-agente">
+      <header class="tarjeta-agente-cabecera">
+        <div>
+          <h2>{{ datos.meta.nombre }}</h2>
+          <p>{{ datos.meta.codigo }}</p>
+        </div>
+        {% if tipo == 'recordatorio' and not config_recordatorios.habilitado %}
+          <span class="estado-agente inactivo">Inactivo</span>
+        {% else %}
+          <span class="estado-agente">Activo</span>
+        {% endif %}
+      </header>
+      <div class="tarjeta-agente-cuerpo">
+        <p class="descripcion-agente">{{ datos.meta.descripcion }}</p>
+        <div class="meta-agente">
+          <span>v{{ activa.version }}</span>
+          <span>Actualizado: {{ activa.creado_en | fecha if activa.creado_en else 'versión inicial' }}</span>
+        </div>
+        <div class="acciones-agente">
+          <button type="button" class="mini boton-con-icono" data-abre="historial-{{ tipo }}">
+            <span aria-hidden="true">◷</span> Historial
+          </button>
+          <button type="button" class="mini boton-con-icono" data-abre="editar-{{ tipo }}">
+            <span aria-hidden="true">✎</span> Editar
+          </button>
+        </div>
+      </div>
+    </article>
+  {% endfor %}
+  </div>
+</section>
+
+{% for tipo in tipos %}
+  {% set datos = prompts[tipo] %}
+  {% set activa = datos.activa %}
+  <dialog class="flotante dialogo-prompt" id="editar-{{ tipo }}">
+    <div class="cabecera">
+      <div>
+        <h2>Editar agente: {{ datos.meta.nombre }}</h2>
+        <p class="sub codigo-dialogo">{{ datos.meta.codigo }} · versión {{ activa.version }}</p>
+      </div>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo">
+      <p class="aviso-contrato">
+        Edita el playbook completo de este agente. El contrato de seguridad, el esquema JSON
+        y el catálogo técnico se agregan automáticamente y permanecen protegidos.
+      </p>
+
+      {% if tipo == 'recordatorio' %}
+      <form method="post" action="/agente/recordatorios/configuracion" class="config-recordatorio-modal">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label class="switch">
+          <input type="checkbox" name="habilitado" value="1"
+                 {% if config_recordatorios.habilitado %}checked{% endif %}>
+          <span class="switch-pista"><span class="switch-bola"></span></span>
+          <span>Recordatorios automáticos activos</span>
+        </label>
+        <div class="intervalo-modal">
+          <label>
+            Intervalo
+            <input type="number" name="cantidad" min="1" required
+                   value="{{ config_recordatorios.cantidad }}">
+          </label>
+          <label>
+            Unidad
+            <select name="unidad">
+              <option value="minutos" {% if config_recordatorios.unidad == 'minutos' %}selected{% endif %}>minutos</option>
+              <option value="horas" {% if config_recordatorios.unidad == 'horas' %}selected{% endif %}>horas</option>
+            </select>
+          </label>
+          <button class="mini" type="submit">Guardar configuración</button>
+        </div>
+        <p class="sub">Se usa el mismo intervalo para un máximo de dos recordatorios.</p>
+      </form>
+      {% endif %}
+
+      <form method="post" action="/agente/prompts/{{ tipo }}" class="formulario-prompt">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="prompt-{{ tipo }}">Instrucción (prompt) <span class="requerido">*</span></label>
+        <textarea id="prompt-{{ tipo }}" name="contenido" required
+                  maxlength="{{ limite }}" data-contador="{{ limite }}">{{ activa.contenido }}</textarea>
+        <footer class="pie-dialogo-prompt">
+          <button type="button" class="mini" data-cierra>Cancelar</button>
+          <button class="primario" type="submit">Guardar nueva versión</button>
+        </footer>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog class="flotante ancha historial-dialogo" id="historial-{{ tipo }}">
+    <div class="cabecera">
+      <div>
+        <h2>Historial: {{ datos.meta.nombre }}</h2>
+        <p class="sub codigo-dialogo">Cada rollback crea una versión nueva y conserva las anteriores.</p>
+      </div>
+      <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+    </div>
+    <div class="cuerpo lista-versiones-prompt">
+      {% for version in datos.historial %}
+      <article class="version-prompt {% if version.activa %}actual{% endif %}">
+        <div class="version-prompt-cabecera">
+          <div>
+            <strong>Versión {{ version.version }}</strong>
+            {% if version.activa %}<span class="pastilla">Actual</span>{% endif %}
+          </div>
+          <span class="sub">{{ version.creado_en | fecha }}</span>
+        </div>
+        <p>{{ version.contenido | truncate(360) }}</p>
+        <div class="version-prompt-pie">
+          <span class="sub">{{ version.creado_por or 'Sistema' }}</span>
+          {% if not version.activa and version.contenido | trim %}
+          <form method="post" action="/agente/prompts/{{ tipo }}/{{ version.version }}/activar">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="mini" type="submit">Rollback</button>
+          </form>
+          {% endif %}
+        </div>
+      </article>
+      {% else %}
+      <p class="vacio">Todavía no hay versiones para este agente.</p>
+      {% endfor %}
+    </div>
+  </dialog>
+{% endfor %}
+{% endblock %}

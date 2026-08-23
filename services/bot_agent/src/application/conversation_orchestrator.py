@@ -3,6 +3,7 @@ import re
 from src.application import seguimiento_service
 from src.application.buffer_service import BufferService, redis_client, scoped_key
 from src.application.message_catalog import mensajes_del_negocio, mensajes_db
+from src.application import human_intervention
 from src.application.runtime_context import (
     AD_REPORT_TEXT,
     WELCOME_REPORT_CONTEXT,
@@ -30,12 +31,6 @@ from src.infrastructure.tasks.celery_app import (
 )
 from src.core.config import settings
 
-
-# Cuando una persona del negocio entra a la conversación, el bot deja de
-# responder durante este plazo. Es largo a propósito: si un humano ya está
-# atendiendo, que el bot vuelva a interrumpir a los pocos días sería peor que
-# no contestar.
-_DIAS_BLOQUEO_POR_INTERVENCION = 12
 
 # Lo que el bot no puede leer se acusa con un texto fijo, distinto por tipo:
 # "recibí tu imagen" y "recibí tu documento" no son lo mismo para quien escribe.
@@ -114,6 +109,13 @@ class ConversationOrchestrator:
         if message.event_type == "group_join":
             return self._handle_group_join(message)
 
+        # Un bloqueo permanente manda incluso sobre comandos, palabras clave y
+        # adjuntos. El mensaje sí queda en el dashboard (se registró arriba),
+        # pero el bot no responde por ningún camino.
+        from src.infrastructure.repositories import bloqueos_permanentes_repository
+        if bloqueos_permanentes_repository.esta_bloqueado(message.user_id, message.channel):
+            return []
+
         if message.message_type == MessageType.TEXT:
             return self._handle_text(message)
 
@@ -177,7 +179,7 @@ class ConversationOrchestrator:
         if palabra:
             return self._handle_keyword_flow(message, palabra, repo)
 
-        if repo.is_blocked(message.user_id, channel=message.channel):
+        if repo.is_blocked(message.user_id, channel=message.channel, include_permanent=False):
             self._handle_blocked_text(message)
             return []
 
@@ -249,63 +251,31 @@ class ConversationOrchestrator:
             return []
 
         try:
-            # Se registra en el log para que la conversación siga siendo
-            # reconstruible: si no, el visor mostraría un hueco inexplicable.
-            ConversationLogRepository.append_message(
-                client_id=message.user_id,
-                canal=message.channel,
-                message={
-                    "direction": "outbound",
-                    "author": "dueño",
-                    "sender_id": "humano",
-                    "sender_name": "Asesor",
-                    "message_type": "text",
-                    "text": message.text or "",
-                    "event_type": "intervencion_humana",
-                },
-            )
-            # También al historial simplificado: si no, el resumen del cliente
-            # mostraría al bot hablando solo y un hueco donde atendió la persona.
-            seguimiento_service.registrar_mensaje(
-                client_id=message.user_id,
-                canal=message.channel,
-                autor="dueño",
-                texto=message.text or "",
-            )
-            seguimiento_service.registrar_intervencion_humana(message.user_id, message.channel)
-
-            PostgresUserRepo().block_user(
-                message.user_id,
-                reason="Intervención de un asesor humano",
-                days=_DIAS_BLOQUEO_POR_INTERVENCION,
-                channel=message.channel,
-            )
-            # Se cancelan los recordatorios ya agendados: llegarían encima de la
-            # conversación que la persona está teniendo.
-            clear_user_runtime_context(
-                message.channel, message.user_id, cancel_scheduled=True, clear_reports=False
-            )
-            BufferService.get_and_clear_buffer(message.user_id, message.channel)
+            human_intervention.registrar(message.channel, message.user_id, message.text or "")
         except Exception as e:
             print(f"Error registrando la intervención humana: {e}")
 
         return []
 
     def _handle_group_join(self, message: InboundMessage) -> list[OrchestratorAction]:
-        if not has_ad_context(message.channel, message.user_id):
+        tenia_publicidad = has_ad_context(message.channel, message.user_id)
+        cancel_scheduled_tasks(message.channel.value, message.user_id)
+        repo = PostgresUserRepo()
+        repo.block_user(message.user_id, reason="Ingreso a grupo", days=12, channel=message.channel)
+        BufferService.get_and_clear_buffer(message.user_id, message.channel)
+
+        # El ingreso se detecta y bloquea aunque la publicidad se hubiera
+        # limpiado o caducado. La bienvenida solo pertenece al flujo de anuncio.
+        if not tenia_publicidad:
             return []
 
-        cancel_scheduled_tasks(message.channel.value, message.user_id)
         welcome_msgs = mensajes_del_negocio("WELCOME", "W")
         # Bienvenida al grupo: la dispara el evento de ingreso, sin pasar por el
         # modelo. Se factura como mensaje de código.
         if not welcome_msgs:
             welcome_msgs = ["📲 Gracias por unirse a nuestro grupo del curso teórico!!!\n\nRecuerde:\n\n🎯 Por política de transparencia no cobramos nada antes del curso y pagas en efectivo hasta ese mismo día.\n\n🎯 Traer documento de identidad \n\n🎯 Traer material para tomar notas (Cuaderno y lapicero) \n\nPor favor presentarse unos 10 minutos antes para hacer la matrícula e iniciar de la mejor manera la obtención de su licencia.\n\nBendiciones"]
 
-        repo = PostgresUserRepo()
-        repo.block_user(message.user_id, reason="Ingreso a grupo", days=12, channel=message.channel)
         set_welcome_context(message.channel, message.user_id)
-        BufferService.get_and_clear_buffer(message.user_id, message.channel)
 
         seguimiento_service.registrar_uso_codigo(
             message.user_id, message.channel, origen="bienvenida", mensajes=len(welcome_msgs)
@@ -321,6 +291,7 @@ class ConversationOrchestrator:
                     numero=message.user_id,
                     problema=report_msg,
                     link_whatsapp=f"https://wa.me/{message.user_id}",
+                    canal=message.channel.value,
                 )
             return
 
@@ -330,6 +301,7 @@ class ConversationOrchestrator:
                 numero=message.user_id,
                 problema=AD_REPORT_TEXT,
                 link_whatsapp=f"https://wa.me/{message.user_id}",
+                canal=message.channel.value,
             )
             if get_ad_reminder_stage(message.channel, message.user_id) == 1:
                 from src.infrastructure.tasks.celery_app import cancel_ad_reminder_stage
@@ -344,6 +316,7 @@ class ConversationOrchestrator:
                 numero=message.user_id,
                 problema=keyword_report,
                 link_whatsapp=f"https://wa.me/{message.user_id}",
+                canal=message.channel.value,
             )
 
     def _handle_keyword_flow(

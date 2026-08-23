@@ -45,6 +45,7 @@ class InboundMessage:
     # Id del mensaje en el proveedor. En WhatsApp sirve para saber si un mensaje
     # saliente lo mandó el bot o una persona del negocio (comparten número).
     message_id: str = ""
+    proyecto_id: int = 0
 
 @dataclass
 class OutboundMessage:

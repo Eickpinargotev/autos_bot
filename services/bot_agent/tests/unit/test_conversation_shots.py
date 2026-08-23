@@ -85,7 +85,8 @@ class ConversationShotTests(unittest.TestCase):
         self.assertTrue(result)
         sql, params = ejecutar_mock.call_args.args
         self.assertIn("INSERT INTO conversation_shots", sql)
-        fecha_hora, id_user, canal, shot_json = params
+        proyecto_id, fecha_hora, id_user, canal, shot_json = params
+        self.assertEqual(proyecto_id, 1)
         self.assertEqual(fecha_hora, "2026-06-06 17:45:33")
         self.assertEqual(id_user, "5061")
         self.assertEqual(canal, "whatsapp")

@@ -23,6 +23,7 @@ from typing import Any
 
 from src.infrastructure.repositories.fechas import a_iso
 from src.infrastructure.repositories.postgres_conn import consultar_uno, ejecutar
+from src.application.project_context import proyecto_actual
 
 # Columnas que el servicio puede escribir. Cualquier otra clave que llegue en
 # `fields` se ignora: así un campo derivado (p. ej. el costo en USD decimal, que
@@ -62,14 +63,21 @@ class SeguimientoRepository:
 
     @staticmethod
     def find_cliente(client_id: str, canal: str) -> dict[str, Any] | None:
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return None
         return consultar_uno(
-            "SELECT * FROM seguimiento_clientes WHERE client_id = %s AND canal = %s",
-            (str(client_id), str(canal)),
+            "SELECT * FROM seguimiento_clientes WHERE proyecto_id = %s AND client_id = %s AND canal = %s",
+            (proyecto_id, str(client_id), str(canal)),
         )
 
     @staticmethod
     def create_cliente(fields: dict[str, Any]) -> bool:
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
         datos = SeguimientoRepository._filtrar(fields, _COLUMNAS_CLIENTE)
+        datos["proyecto_id"] = proyecto_id
         datos["client_id"] = str(fields.get("client_id") or "")
         datos["canal"] = str(fields.get("canal") or "")
         columnas = list(datos.keys())
@@ -84,7 +92,7 @@ class SeguimientoRepository:
                 f"""
                 INSERT INTO seguimiento_clientes ({", ".join(columnas)})
                 VALUES ({marcadores})
-                ON CONFLICT (client_id, canal) DO UPDATE SET {actualizaciones}
+                ON CONFLICT (proyecto_id, client_id, canal) DO UPDATE SET {actualizaciones}
                 """,
                 tuple(datos[col] for col in columnas),
             )
@@ -96,18 +104,28 @@ class SeguimientoRepository:
     @staticmethod
     def update_cliente(record_id: str, fields: dict[str, Any]) -> bool:
         return SeguimientoRepository._update(
-            "seguimiento_clientes", "id", record_id, fields, _COLUMNAS_CLIENTE
+            "seguimiento_clientes", "id", record_id, fields, _COLUMNAS_CLIENTE, por_proyecto=True
         )
 
     # --------------------------- resumen_mensual ----------------------------
 
     @staticmethod
     def find_mes(mes: str) -> dict[str, Any] | None:
-        return consultar_uno("SELECT * FROM resumen_mensual WHERE mes = %s", (str(mes),))
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return None
+        return consultar_uno(
+            "SELECT * FROM resumen_mensual WHERE proyecto_id = %s AND mes = %s",
+            (proyecto_id, str(mes)),
+        )
 
     @staticmethod
     def create_mes(fields: dict[str, Any]) -> bool:
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
         datos = SeguimientoRepository._filtrar(fields, _COLUMNAS_MES)
+        datos["proyecto_id"] = proyecto_id
         datos["mes"] = str(fields.get("mes") or "")
         columnas = list(datos.keys())
         marcadores = ", ".join(["%s"] * len(columnas))
@@ -117,7 +135,7 @@ class SeguimientoRepository:
                 f"""
                 INSERT INTO resumen_mensual ({", ".join(columnas)})
                 VALUES ({marcadores})
-                ON CONFLICT (mes) DO UPDATE SET {actualizaciones}
+                ON CONFLICT (proyecto_id, mes) DO UPDATE SET {actualizaciones}
                 """,
                 tuple(datos[col] for col in columnas),
             )
@@ -128,7 +146,9 @@ class SeguimientoRepository:
 
     @staticmethod
     def update_mes(record_id: str, fields: dict[str, Any]) -> bool:
-        return SeguimientoRepository._update("resumen_mensual", "mes", record_id, fields, _COLUMNAS_MES)
+        return SeguimientoRepository._update(
+            "resumen_mensual", "mes", record_id, fields, _COLUMNAS_MES, por_proyecto=True
+        )
 
     # ------------------------------ comunes ---------------------------------
 
@@ -180,16 +200,22 @@ class SeguimientoRepository:
         clave: Any,
         fields: dict[str, Any],
         columnas: tuple[str, ...],
+        por_proyecto: bool = False,
     ) -> bool:
         datos = SeguimientoRepository._filtrar(fields, columnas)
         if not datos or not clave:
             return False
         asignaciones = ", ".join(f"{col} = %s" for col in datos)
         try:
-            ejecutar(
-                f"UPDATE {tabla} SET {asignaciones} WHERE {columna_clave} = %s",
-                tuple(datos.values()) + (clave,),
-            )
+            proyecto_id = proyecto_actual()
+            if por_proyecto and not proyecto_id:
+                return False
+            filtro = f"{columna_clave} = %s"
+            parametros = tuple(datos.values()) + (clave,)
+            if por_proyecto:
+                filtro += " AND proyecto_id = %s"
+                parametros += (proyecto_id,)
+            ejecutar(f"UPDATE {tabla} SET {asignaciones} WHERE {filtro}", parametros)
             return True
         except Exception as e:
             print(f"Error actualizando {tabla}: {e}")

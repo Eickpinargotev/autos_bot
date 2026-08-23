@@ -86,6 +86,7 @@ nunca en el texto: **el LLM recibe texto plano**, igual que un mensaje escrito.
 Los **enlaces** se reconocen por estructura (`http(s)://`, `www.`, dominio
 suelto), lo cual no contradice la regla de no usar regex para interpretar
 lenguaje natural: reconocer una URL es lo mismo que reconocer `Imagen=` o `/d`.
+
 Los correos quedan excluidos a propósito. Hoy responde el acuse **aunque el
 mensaje traiga además una pregunta**; es decisión del negocio y la condición a
 cambiar está señalada en `conversation_orchestrator._handle_text`.
@@ -113,6 +114,18 @@ Se resuelve en dos capas:
 2. **Al enviar**, un destino que sea un LID se traduce con la libreta de la
    sesión (`GET /api/contacts`, cacheada 10 min). Es la red de seguridad para
    las conversaciones que quedaron guardadas con el LID como identificador.
+
+Los eventos salientes (`fromMe`) usan esa misma traducción antes de decidir su
+origen. En ellos `cleanedSenderPn` identifica al número del negocio, no al
+cliente. Si el `message_id` fue registrado al enviar por API, el webhook lo
+ignora como eco del bot; si no, lo registra como mensaje del dueño y bloquea esa
+misma conversación durante 12 días.
+
+El dueño también puede responder desde el compositor del dashboard. El panel
+pide el envío al endpoint interno autenticado del bot; este usa la misma sesión
+WasenderAPI, registra la burbuja como **Dueño del negocio**, cancela los
+recordatorios y pausa la IA 12 días. El eco `message.sent` queda marcado como
+salida propia para no duplicar la burbuja.
 
 Si la libreta falla, el destino se manda tal cual: es preferible el error del
 proveedor a arriesgarse a escribirle a otra persona.
@@ -201,8 +214,9 @@ que cierra ese flujo. Al entrar:
 2. Se envía la bienvenida al grupo (`WELCOME`/`W` de `mensajes.json`).
 3. El número queda **bloqueado 12 días**.
 
-Las salidas del grupo y los cambios de administrador llegan por el mismo evento
-y se ignoran.
+Las salidas del grupo llegan por el mismo evento con acción `remove` y quedan
+visibles en la conversación como una nota de sistema. No envían mensajes ni
+deshacen automáticamente el bloqueo. Los cambios de administrador se ignoran.
 
 ---
 
@@ -220,12 +234,12 @@ recordatorios inteligentes. Se cancelan igual si el dueño escribe.
 
 ## 5. Ver las conversaciones
 
-`/admin/logs` — listado por actividad reciente, **búsqueda solo por número de
+`/conversaciones` — listado del proyecto autenticado por actividad reciente, **búsqueda solo por número de
 teléfono** (los guiones, espacios y el `+` se ignoran). No se busca dentro del
 texto de los mensajes: eso obligaría a recorrer todo el historial y dejaría el
 panel lento justo cuando más conversaciones hay.
 
-`/admin/logs/{canal}/{numero}` — el chat. Tres voces distinguidas: el **cliente**
+`/conversaciones/{canal}/{numero}` — el chat. Tres voces distinguidas: el **cliente**
 a la izquierda, y a la derecha el **bot** y el **dueño del negocio** (este con
 marca de color). Los eventos técnicos (llamadas a herramientas) están ocultos
 salvo que se pidan.
@@ -233,8 +247,10 @@ salvo que se pidan.
 Se carga **por tandas** de 60 mensajes, con «Cargar mensajes anteriores»: una
 conversación con meses de historial no puede llegar entera en una página.
 
-Las horas son las de **`ZONA_HORARIA`** (`America/Costa_Rica` por defecto), no
-las del servidor, y cada día lleva su separador con la fecha completa.
+Las horas son las de la configuración del proyecto, no las del servidor. El dueño
+puede bloquear permanentemente desde el hilo; la lista se administra con carga
+diferida en «Configuración del proyecto». El administrador solo accede tras entrar a
+la cuenta mediante la suplantación auditada.
 
 > Recuerda que la retención es de 20 días desde la última interacción
 > (`CONVERSATION_RETENTION_DAYS`): pasado ese plazo de inactividad la
@@ -248,7 +264,7 @@ las del servidor, y cada día lleva su separador con la fecha completa.
    cuanto WasenderAPI manda algo. Si sigue vacía, los eventos no están llegando
    (dominio mal apuntado, URL mal pegada o token rotado sin actualizar).
 2. Escribe al número desde otro teléfono: debe aparecer la conversación en
-   `/admin/logs`.
+   `/conversaciones` al entrar a la cuenta del proyecto.
 3. Responde desde el teléfono del negocio: en el chat debe salir como «Dueño del
    negocio» y el bot debe quedarse callado.
 4. Únete al grupo desde un número que venga de publicidad: deben cancelarse sus

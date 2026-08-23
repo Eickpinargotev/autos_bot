@@ -23,13 +23,15 @@ from src.core.modelos import kwargs_de_decision
 from src.core.prompts import (
     AGENT_COMMON_CONTRACT,
     AREA_PROMPT_BODIES,
-    FOLLOWUP_AGENT_PROMPT,
+    FOLLOWUP_AGENT_BODY,
+    FOLLOWUP_TECHNICAL_CONTRACT,
     SPECIALIST_OUTPUT_SCHEMA,
     SUPERVISOR_OUTPUT_SCHEMA,
     SUPERVISOR_PROMPT_BODY,
 )
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
+from src.infrastructure.repositories import instrucciones_repository
 
 
 client = OpenAI(
@@ -133,19 +135,23 @@ _system_prompt_cache: dict[str, str] = {}
 
 
 def _system_prompt_for(role: str) -> str:
+    tipo = role.lower()
+    if role == "SUPERVISOR":
+        body_base = SUPERVISOR_PROMPT_BODY
+        schema = SUPERVISOR_OUTPUT_SCHEMA
+    else:
+        body_base = AREA_PROMPT_BODIES[role]
+        schema = SPECIALIST_OUTPUT_SCHEMA
+    # Se consulta en cada uso para que una versión recién guardada tenga efecto
+    # inmediato. Solo la parte estable y protegida queda cacheada por rol.
+    body = instrucciones_repository.activas(tipo) or body_base
     if role not in _system_prompt_cache:
-        if role == "SUPERVISOR":
-            body = SUPERVISOR_PROMPT_BODY
-            schema = SUPERVISOR_OUTPUT_SCHEMA
-        else:
-            body = AREA_PROMPT_BODIES[role]
-            schema = SPECIALIST_OUTPUT_SCHEMA
         catalog = catalog_for_prompt(AREA_FRAGMENTS.get(role, ()))
         _system_prompt_cache[role] = (
-            f"{AGENT_COMMON_CONTRACT}\n{schema}\n{body}"
+            f"{AGENT_COMMON_CONTRACT}\n{schema}"
             f"\n\n═══ TU CATÁLOGO DE FRAGMENTOS ═══\n\n{catalog}"
         )
-    return _system_prompt_cache[role]
+    return f"{_system_prompt_cache[role]}\n\n{body}"
 
 
 class _DecisionAgent:
@@ -382,11 +388,16 @@ class FollowupAgent:
             "reminder_level": state.reminder_level,
         }
         try:
+            body = instrucciones_repository.activas("recordatorio") or FOLLOWUP_AGENT_BODY
+            inicio_body = "═══ CUÁNDO NO ENVIAR"
+            if inicio_body in body:
+                body = body[body.index(inicio_body):]
+            prompt = f"{FOLLOWUP_TECHNICAL_CONTRACT}\n{body}"
             completion = client.chat.completions.create(
                 model=modelo,
                 response_format=FOLLOWUP_RESPONSE_FORMAT,
                 messages=[
-                    {"role": "system", "content": FOLLOWUP_AGENT_PROMPT},
+                    {"role": "system", "content": prompt},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
                 ],
                 **kwargs_de_decision(modelo),

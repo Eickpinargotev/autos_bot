@@ -5,6 +5,7 @@ y el dashboard lo formatea al mostrarlo.
 """
 
 from src.infrastructure.repositories.postgres_conn import ejecutar
+from src.application.project_context import proyecto_actual
 
 # Cuánto sobrevive un reporte YA REVISADO, desde que se marcó como tal. Lo
 # pendiente no caduca: que nadie lo haya mirado en un mes no lo hace menos
@@ -15,14 +16,35 @@ REPORTES_RETENCION_DIAS = 7
 
 class ReportRepository:
     @staticmethod
-    def create_report(nombre: str, numero: str, problema: str, link_whatsapp: str):
+    def create_report(
+        nombre: str, numero: str, problema: str, link_whatsapp: str, canal: str
+    ):
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False, "mensaje sin proyecto"
         try:
             ejecutar(
                 """
-                INSERT INTO reportes (nombre, numero, problema, link_whatsapp)
-                VALUES (%s, %s, %s, %s)
+                WITH nuevo AS (
+                    INSERT INTO reportes
+                        (proyecto_id, nombre, numero, problema, link_whatsapp)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id
+                )
+                INSERT INTO conversation_messages (
+                    proyecto_id, client_id, canal, direction, author,
+                    sender_id, sender_name, message_type, text, event_type, salida
+                )
+                SELECT %s, %s, %s, 'internal', 'system', 'reportes', 'Sistema',
+                       'system_event', %s, 'report_created',
+                       jsonb_build_object('reporte_id', id)
+                FROM nuevo
                 """,
-                (nombre or "", str(numero or ""), problema or "", link_whatsapp or ""),
+                (
+                    proyecto_id, nombre or "", str(numero or ""), problema or "",
+                    link_whatsapp or "", proyecto_id, str(numero or ""), str(canal or ""),
+                    problema or "",
+                ),
             )
             return True, {}
         except Exception as e:

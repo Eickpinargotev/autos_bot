@@ -189,13 +189,18 @@ class ConversationShotRepository:
         chanel: Channel | str,
         shot: dict[str, Any],
     ) -> bool:
+        from src.application.project_context import proyecto_actual
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
         try:
             ejecutar(
                 """
-                INSERT INTO conversation_shots (fecha_hora, id_user, canal, revisado, shot)
-                VALUES (COALESCE(%s::timestamptz, NOW()), %s, %s, FALSE, %s)
+                INSERT INTO conversation_shots (proyecto_id, fecha_hora, id_user, canal, revisado, shot)
+                VALUES (%s, COALESCE(%s::timestamptz, NOW()), %s, %s, FALSE, %s)
                 """,
                 (
+                    proyecto_id,
                     fecha_hora or None,
                     str(id_user),
                     ConversationShotBuilder._channel_value(chanel),

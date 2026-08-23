@@ -22,7 +22,7 @@ def normalizar_numero(busqueda: str) -> str:
 
 
 def listar_conversaciones(
-    busqueda: str = "", limite: int = 100, negocio_id: int | None = None
+    proyecto_id: int, busqueda: str = "", limite: int = 100
 ) -> list[dict[str, Any]]:
     """Una fila por (cliente, canal) con su última actividad.
 
@@ -49,12 +49,8 @@ def listar_conversaciones(
     if numero:
         condiciones.append("m.client_id LIKE %s")
         params.append(f"%{numero}%")
-    if negocio_id:
-        condiciones.append(
-            "EXISTS (SELECT 1 FROM conversacion_negocio v "
-            "WHERE v.canal = m.canal AND v.client_id = m.client_id AND v.cliente_id = %s)"
-        )
-        params.append(int(negocio_id))
+    condiciones.append("m.proyecto_id = %s")
+    params.append(int(proyecto_id))
     where = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
     params.append(int(limite))
     return pool.consultar(
@@ -62,7 +58,13 @@ def listar_conversaciones(
         SELECT m.client_id,
                m.canal,
                MAX(m.created_at) AS ultima_actividad,
-               COUNT(*)          AS mensajes,
+               COUNT(*) FILTER (WHERE m.direction <> 'internal') AS mensajes,
+               COUNT(*) FILTER (
+                   WHERE m.direction <> 'internal' AND m.author = 'ia'
+               ) AS respuestas_bot,
+               COUNT(*) FILTER (
+                   WHERE m.direction <> 'internal' AND m.author = 'dueño'
+               ) AS respuestas_dueno,
                MAX(m.sender_name) FILTER (WHERE m.direction = 'inbound') AS nombre
         FROM conversation_messages m
         {where}
@@ -81,6 +83,7 @@ MENSAJES_POR_PAGINA = 60
 
 
 def mensajes_de(
+    proyecto_id: int,
     client_id: str,
     canal: str,
     limite: int = MENSAJES_POR_PAGINA,
@@ -110,11 +113,11 @@ def mensajes_de(
     falso — no hay «anteriores» que cargar detrás de lo que acaba de llegar.
     """
     limite = max(1, min(int(limite), 500))
-    condiciones = ["client_id = %s", "canal = %s"]
-    params: list[Any] = [client_id, canal]
+    condiciones = ["proyecto_id = %s", "client_id = %s", "canal = %s"]
+    params: list[Any] = [int(proyecto_id), client_id, canal]
 
     if not incluir_internos:
-        condiciones.append("direction <> 'internal'")
+        condiciones.append("(direction <> 'internal' OR event_type = 'report_created')")
     if desde_id:
         condiciones.append("id > %s")
         params.append(int(desde_id))
@@ -157,7 +160,7 @@ def mensajes_de(
     return {"mensajes": filas, "hay_mas": hay_mas, "cursor": cursor}
 
 
-def eliminar_conversacion(client_id: str, canal: str) -> dict[str, int]:
+def eliminar_conversacion(proyecto_id: int, client_id: str, canal: str) -> dict[str, int]:
     """Borra el historial durable de una conversación.
 
     Se lleva las tres tablas que SON la conversación: el log de mensajes, los
@@ -178,21 +181,21 @@ def eliminar_conversacion(client_id: str, canal: str) -> dict[str, int]:
     """
     return {
         "mensajes": pool.ejecutar(
-            "DELETE FROM conversation_messages WHERE client_id = %s AND canal = %s",
-            (client_id, canal),
+            "DELETE FROM conversation_messages WHERE proyecto_id = %s AND client_id = %s AND canal = %s",
+            (int(proyecto_id), client_id, canal),
         ),
         "shots": pool.ejecutar(
-            "DELETE FROM conversation_shots WHERE id_user = %s AND canal = %s",
-            (client_id, canal),
+            "DELETE FROM conversation_shots WHERE proyecto_id = %s AND id_user = %s AND canal = %s",
+            (int(proyecto_id), client_id, canal),
         ),
         "pertenencia": pool.ejecutar(
-            "DELETE FROM conversacion_negocio WHERE client_id = %s AND canal = %s",
-            (client_id, canal),
+            "DELETE FROM conversacion_negocio WHERE proyecto_id = %s AND client_id = %s AND canal = %s",
+            (int(proyecto_id), client_id, canal),
         ),
     }
 
 
-def resumen_conversacion(client_id: str, canal: str) -> dict[str, Any]:
+def resumen_conversacion(proyecto_id: int, client_id: str, canal: str) -> dict[str, Any]:
     """Cabecera del visor: nombre, cuántos mensajes hay y de cuándo son."""
     fila = pool.consultar_uno(
         """
@@ -202,9 +205,9 @@ def resumen_conversacion(client_id: str, canal: str) -> dict[str, Any]:
                MAX(created_at) AS ultima,
                MAX(sender_name) FILTER (WHERE direction = 'inbound') AS nombre
         FROM conversation_messages
-        WHERE client_id = %s AND canal = %s
+        WHERE proyecto_id = %s AND client_id = %s AND canal = %s
         """,
-        (client_id, canal),
+        (int(proyecto_id), client_id, canal),
     )
     return fila or {}
 
@@ -216,7 +219,7 @@ def resumen_conversacion(client_id: str, canal: str) -> dict[str, Any]:
 REPORTES_RETENCION_DIAS = 7
 
 
-def listar_reportes(solo_pendientes: bool = False, limite: int = 200) -> list[dict[str, Any]]:
+def listar_reportes(proyecto_id: int, solo_pendientes: bool = False, limite: int = 200) -> list[dict[str, Any]]:
     """Los reportes, lo que falta por atender primero.
 
     El orden es `revisado, creado_en DESC`: lo pendiente arriba y, dentro de cada
@@ -224,7 +227,7 @@ def listar_reportes(solo_pendientes: bool = False, limite: int = 200) -> list[di
     reporte sin revisar de ayer quedaba debajo de tres ya resueltos de hoy —
     justo al revés de para qué se abre esta pantalla.
     """
-    where = "WHERE NOT revisado" if solo_pendientes else ""
+    where = "WHERE proyecto_id = %s" + (" AND NOT revisado" if solo_pendientes else "")
     return pool.consultar(
         f"""
         SELECT *,
@@ -233,7 +236,7 @@ def listar_reportes(solo_pendientes: bool = False, limite: int = 200) -> list[di
         ORDER BY revisado, creado_en DESC
         LIMIT %s
         """,
-        (REPORTES_RETENCION_DIAS, int(limite)),
+        (REPORTES_RETENCION_DIAS, int(proyecto_id), int(limite)),
     )
 
 
@@ -259,26 +262,32 @@ def purgar_reportes_revisados(dias: int = REPORTES_RETENCION_DIAS) -> int:
     )
 
 
-def marcar_reporte_revisado(reporte_id: int) -> int:
+def marcar_reporte_revisado(proyecto_id: int, reporte_id: int) -> int:
     """Lo baja al final de la lista y le arranca el plazo de caducidad.
 
     `revisado_en` solo se pone la PRIMERA vez (`WHERE NOT revisado`): volver a
     pulsar el botón no debe regalarle otros 7 días a algo ya resuelto.
     """
     return pool.ejecutar(
-        "UPDATE reportes SET revisado = TRUE, revisado_en = NOW() WHERE id = %s AND NOT revisado",
-        (reporte_id,),
+        "UPDATE reportes SET revisado = TRUE, revisado_en = NOW() "
+        "WHERE proyecto_id = %s AND id = %s AND NOT revisado",
+        (int(proyecto_id), reporte_id),
     )
 
 
-def contar_reportes_pendientes() -> int:
-    fila = pool.consultar_uno("SELECT COUNT(*) AS total FROM reportes WHERE NOT revisado")
+def contar_reportes_pendientes(proyecto_id: int) -> int:
+    fila = pool.consultar_uno(
+        "SELECT COUNT(*) AS total FROM reportes WHERE proyecto_id = %s AND NOT revisado",
+        (int(proyecto_id),),
+    )
     return int((fila or {}).get("total") or 0)
 
 
-def contar_preguntas_pendientes() -> int:
+def contar_preguntas_pendientes(proyecto_id: int) -> int:
     fila = pool.consultar_uno(
-        "SELECT COUNT(*) AS total FROM preguntas_sin_respuesta WHERE NOT atendida"
+        "SELECT COUNT(*) AS total FROM preguntas_sin_respuesta "
+        "WHERE proyecto_id = %s AND NOT atendida",
+        (int(proyecto_id),),
     )
     return int((fila or {}).get("total") or 0)
 
@@ -311,7 +320,7 @@ def _validar_chunk(contenido: str) -> str:
     return contenido
 
 
-def listar_chunks(busqueda: str = "") -> list[dict[str, Any]]:
+def listar_chunks(proyecto_id: int, busqueda: str = "") -> list[dict[str, Any]]:
     """Los chunks, del más nuevo al más viejo.
 
     `demasiado_largo` marca los que ya existían por encima del límite (la carga
@@ -321,45 +330,52 @@ def listar_chunks(busqueda: str = "") -> list[dict[str, Any]]:
     """
     if busqueda:
         filas = pool.consultar(
-            "SELECT * FROM rag_chunks WHERE contenido ILIKE %s ORDER BY id DESC",
-            (f"%{busqueda}%",),
+            "SELECT * FROM rag_chunks WHERE proyecto_id = %s AND contenido ILIKE %s ORDER BY id DESC",
+            (int(proyecto_id), f"%{busqueda}%"),
         )
     else:
-        filas = pool.consultar("SELECT * FROM rag_chunks ORDER BY id DESC")
+        filas = pool.consultar(
+            "SELECT * FROM rag_chunks WHERE proyecto_id = %s ORDER BY id DESC",
+            (int(proyecto_id),),
+        )
     for fila in filas:
         fila["largo"] = len(str(fila.get("contenido") or ""))
         fila["demasiado_largo"] = fila["largo"] > LIMITE_CHUNK
     return filas
 
 
-def crear_chunk(contenido: str) -> dict[str, Any]:
+def crear_chunk(proyecto_id: int, contenido: str) -> dict[str, Any]:
     return pool.consultar_uno(
-        "INSERT INTO rag_chunks (contenido) VALUES (%s) RETURNING *",
-        (_validar_chunk(contenido),),
+        "INSERT INTO rag_chunks (proyecto_id, contenido) VALUES (%s, %s) RETURNING *",
+        (int(proyecto_id), _validar_chunk(contenido)),
     )
 
 
-def actualizar_chunk(chunk_id: int, contenido: str) -> dict[str, Any] | None:
+def actualizar_chunk(proyecto_id: int, chunk_id: int, contenido: str) -> dict[str, Any] | None:
     return pool.consultar_uno(
         """
         UPDATE rag_chunks
         SET contenido = %s, actualizado_en = NOW()
-        WHERE id = %s
+        WHERE proyecto_id = %s AND id = %s
         RETURNING *
         """,
-        (_validar_chunk(contenido), chunk_id),
+        (_validar_chunk(contenido), int(proyecto_id), chunk_id),
     )
 
 
-def alternar_chunk_activo(chunk_id: int) -> dict[str, Any] | None:
+def alternar_chunk_activo(proyecto_id: int, chunk_id: int) -> dict[str, Any] | None:
     return pool.consultar_uno(
-        "UPDATE rag_chunks SET activo = NOT activo, actualizado_en = NOW() WHERE id = %s RETURNING *",
-        (chunk_id,),
+        "UPDATE rag_chunks SET activo = NOT activo, actualizado_en = NOW() "
+        "WHERE proyecto_id = %s AND id = %s RETURNING *",
+        (int(proyecto_id), chunk_id),
     )
 
 
-def eliminar_chunk(chunk_id: int) -> int:
-    return pool.ejecutar("DELETE FROM rag_chunks WHERE id = %s", (chunk_id,))
+def eliminar_chunk(proyecto_id: int, chunk_id: int) -> int:
+    return pool.ejecutar(
+        "DELETE FROM rag_chunks WHERE proyecto_id = %s AND id = %s",
+        (int(proyecto_id), chunk_id),
+    )
 
 
 # --- Preguntas sin respuesta -------------------------------------------------
@@ -374,20 +390,21 @@ def eliminar_chunk(chunk_id: int) -> int:
 PREGUNTAS_RETENCION_HORAS = 24
 
 
-def listar_preguntas_sin_respuesta(limite: int = 200) -> list[dict[str, Any]]:
+def listar_preguntas_sin_respuesta(proyecto_id: int, limite: int = 200) -> list[dict[str, Any]]:
     return pool.consultar(
         """
         SELECT *,
                atendida_en + (%s || ' hours')::interval AS caduca_en
         FROM preguntas_sin_respuesta
+        WHERE proyecto_id = %s
         ORDER BY atendida, creado_en DESC
         LIMIT %s
         """,
-        (PREGUNTAS_RETENCION_HORAS, int(limite)),
+        (PREGUNTAS_RETENCION_HORAS, int(proyecto_id), int(limite)),
     )
 
 
-def marcar_pregunta_atendida(pregunta_id: int) -> int:
+def marcar_pregunta_atendida(proyecto_id: int, pregunta_id: int) -> int:
     """La pone en verde y le arranca las 24 horas.
 
     Como en los reportes, solo la primera vez: volver a pulsar no le regala otro
@@ -395,8 +412,8 @@ def marcar_pregunta_atendida(pregunta_id: int) -> int:
     """
     return pool.ejecutar(
         "UPDATE preguntas_sin_respuesta SET atendida = TRUE, atendida_en = NOW() "
-        "WHERE id = %s AND NOT atendida",
-        (pregunta_id,),
+        "WHERE proyecto_id = %s AND id = %s AND NOT atendida",
+        (int(proyecto_id), pregunta_id),
     )
 
 

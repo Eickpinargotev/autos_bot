@@ -13,7 +13,13 @@ cual» y no «alguien lo escribió».
 import pytest
 
 from src.services import media, mensajeria
-from tests.conftest import token_csrf
+from tests.conftest import ServicioDeProyecto, token_csrf
+
+mensajeria = ServicioDeProyecto(mensajeria, {
+    "listar_plantillas", "obtener_plantilla", "buscar_por_clave", "partes_de",
+    "crear_plantilla", "renombrar_plantilla", "eliminar_plantilla", "guardar_parte",
+    "agregar_parte", "eliminar_parte", "revisar_media_de", "revisar_todos_los_adjuntos",
+})
 
 
 # --- La clave es lo único que identifica un mensaje ---------------------------

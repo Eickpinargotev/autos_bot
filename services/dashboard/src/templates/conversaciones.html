@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block titulo %}Conversaciones{% endblock %}
+
+{% block contenido %}
+<div class="titulo-con-acciones">
+  <div>
+    <h1>Conversaciones</h1>
+    <p class="sub">Tus clientes, su actividad y el chat, en un solo lugar.</p>
+  </div>
+</div>
+
+<div class="conv-doble conversaciones-pagina" data-conv-inicio="/conversaciones/lista"
+     data-vivo="conversaciones">
+  <aside class="conv-lista" data-conv-panel aria-busy="true">
+    <p class="sub">Cargando conversaciones…</p>
+  </aside>
+  <section class="conv-hilo" data-conv-detalle>
+    <p class="vacio">Elige una conversación de la izquierda.</p>
+  </section>
+</div>
+{% endblock %}

@@ -15,6 +15,7 @@ from typing import Any
 
 from src.domain.entities import Channel, MessageType
 from src.infrastructure.repositories.postgres_conn import consultar, ejecutar
+from src.application.project_context import proyecto_actual
 
 
 class ConversationLogRepository:
@@ -117,17 +118,20 @@ class ConversationLogRepository:
         atención de un cliente (mismo criterio que tenía la versión NocoDB).
         """
         canal_value = ConversationLogRepository._channel_value(canal)
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
         try:
             ejecutar(
                 """
                 INSERT INTO conversation_messages (
-                    client_id, canal, direction, author, sender_id, sender_name,
+                    proyecto_id, client_id, canal, direction, author, sender_id, sender_name,
                     message_type, text, event_type, tool_name, status,
                     entrada, salida, error, duration_ms
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    str(client_id),
+                    proyecto_id, str(client_id),
                     canal_value,
                     message.get("direction") or "",
                     message.get("author") or "",
@@ -157,27 +161,33 @@ class ConversationLogRepository:
         depende de ella para razonar (su contexto vive en Redis).
         """
         canal_value = ConversationLogRepository._channel_value(canal)
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return []
         filas = consultar(
             """
             SELECT * FROM (
                 SELECT * FROM conversation_messages
-                WHERE client_id = %s AND canal = %s
+                WHERE proyecto_id = %s AND client_id = %s AND canal = %s
                 ORDER BY created_at DESC, id DESC
                 LIMIT %s
             ) AS ultimos
             ORDER BY created_at ASC, id ASC
             """,
-            (str(client_id), canal_value, int(limite)),
+            (proyecto_id, str(client_id), canal_value, int(limite)),
         )
         return filas
 
     @staticmethod
     def delete_conversation(client_id: str, canal: Channel | str) -> bool:
         canal_value = ConversationLogRepository._channel_value(canal)
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
         try:
             ejecutar(
-                "DELETE FROM conversation_messages WHERE client_id = %s AND canal = %s",
-                (str(client_id), canal_value),
+                "DELETE FROM conversation_messages WHERE proyecto_id = %s AND client_id = %s AND canal = %s",
+                (proyecto_id, str(client_id), canal_value),
             )
             return True
         except Exception as e:
@@ -203,17 +213,17 @@ class ConversationLogRepository:
             filas = consultar(
                 """
                 WITH vencidas AS (
-                    SELECT client_id, canal
+                    SELECT proyecto_id, client_id, canal
                     FROM conversation_messages
-                    GROUP BY client_id, canal
+                    GROUP BY proyecto_id, client_id, canal
                     HAVING MAX(created_at) < %s
                 ), borradas AS (
                     DELETE FROM conversation_messages m
                     USING vencidas v
-                    WHERE m.client_id = v.client_id AND m.canal = v.canal
-                    RETURNING m.client_id, m.canal
+                    WHERE m.proyecto_id = v.proyecto_id AND m.client_id = v.client_id AND m.canal = v.canal
+                    RETURNING m.proyecto_id, m.client_id, m.canal
                 )
-                SELECT COUNT(DISTINCT (client_id, canal)) AS conversaciones FROM borradas
+                SELECT COUNT(DISTINCT (proyecto_id, client_id, canal)) AS conversaciones FROM borradas
                 """,
                 (corte,),
             )

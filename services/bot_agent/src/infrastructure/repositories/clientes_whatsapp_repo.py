@@ -24,13 +24,14 @@ import time
 from typing import Any
 
 from src.infrastructure.repositories.postgres_conn import consultar, consultar_uno, ejecutar
+from src.application.project_context import proyecto_actual
 
 # Cuánto se recuerda la resolución de un token (y también su ausencia: así un
 # token inválido repetido no golpea la base en cada intento).
 CACHE_TTL_SEGUNDOS = 30
 
 _cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
-_cache_credenciales: dict[tuple[str, str], tuple[float, str]] = {}
+_cache_credenciales: dict[tuple[int, str, str], tuple[float, str]] = {}
 
 
 def limpiar_cache() -> None:
@@ -71,7 +72,7 @@ def por_token(token: str) -> dict[str, Any] | None:
     return fila
 
 
-def vincular_conversacion(cliente_id: int, canal: str, client_id: str) -> None:
+def vincular_conversacion(proyecto_id: int, canal: str, client_id: str) -> None:
     """Anota a qué negocio pertenece una conversación.
 
     Se llama en la ENTRADA, que es el único momento en que se sabe: el mensaje
@@ -87,21 +88,29 @@ def vincular_conversacion(cliente_id: int, canal: str, client_id: str) -> None:
     try:
         ejecutar(
             """
-            INSERT INTO conversacion_negocio (canal, client_id, cliente_id)
+            INSERT INTO conversacion_negocio (proyecto_id, canal, client_id)
             VALUES (%s, %s, %s)
-            ON CONFLICT (canal, client_id) DO UPDATE
-                SET cliente_id = EXCLUDED.cliente_id,
-                    actualizado_en = NOW()
+            ON CONFLICT (proyecto_id, canal, client_id) DO UPDATE
+                SET actualizado_en = NOW()
             """,
-            (str(canal), str(client_id)[:80], int(cliente_id)),
+            (int(proyecto_id), str(canal), str(client_id)[:80]),
         )
     except Exception as e:
         print(f"Error vinculando la conversación con su negocio: {e}")
     else:
-        _cache_credenciales.pop((str(canal), str(client_id)), None)
+        _cache_credenciales.pop((int(proyecto_id), str(canal), str(client_id)), None)
 
 
-def api_key_de_envio(canal: str, client_id: str) -> str:
+def conversacion_pertenece(proyecto_id: int, canal: str, client_id: str) -> bool:
+    fila = consultar_uno(
+        "SELECT 1 AS existe FROM conversacion_negocio "
+        "WHERE proyecto_id = %s AND canal = %s AND client_id = %s",
+        (int(proyecto_id), str(canal), str(client_id)),
+    )
+    return bool(fila)
+
+
+def api_key_de_envio(canal: str, client_id: str, proyecto_id: int | None = None) -> str:
     """La clave de WasenderAPI con la que se le responde a ese número.
 
     Orden de resolución:
@@ -115,7 +124,8 @@ def api_key_de_envio(canal: str, client_id: str) -> str:
        cliente desde el número de otro negocio.
     3. Nada. El que llama decide qué hacer; hoy avisa de que falta configurarla.
     """
-    clave_cache = (str(canal), str(client_id))
+    proyecto_id = int(proyecto_id or proyecto_actual() or 0)
+    clave_cache = (proyecto_id, str(canal), str(client_id))
     ahora = time.monotonic()
     guardado = _cache_credenciales.get(clave_cache)
     if guardado and (ahora - guardado[0]) < CACHE_TTL_SEGUNDOS:
@@ -125,13 +135,12 @@ def api_key_de_envio(canal: str, client_id: str) -> str:
         fila = consultar_uno(
             """
             SELECT c.wasender_api_key
-            FROM conversacion_negocio v
-            JOIN clientes_whatsapp c ON c.id = v.cliente_id
-            WHERE v.canal = %s AND v.client_id = %s AND c.activo
+            FROM clientes_whatsapp c
+            WHERE c.id = %s AND c.activo
             """,
-            (str(canal), str(client_id)),
+            (proyecto_id,),
         )
-        if not fila or not (fila.get("wasender_api_key") or ""):
+        if (not proyecto_id) and (not fila or not (fila.get("wasender_api_key") or "")):
             # LIMIT 2 y no LIMIT 1: la pregunta no es «dame uno», es «¿hay
             # exactamente uno?». Con dos filas la respuesta es que no se puede
             # decidir, y se prefiere no enviar a enviar por el número ajeno.

@@ -184,7 +184,7 @@ def _proyecto_de(usuario: dict[str, Any] | None, es_admin: bool) -> dict[str, An
     return clientes_whatsapp.por_usuario(usuario["id"])
 
 
-def pendientes_de(es_admin: bool) -> dict[str, int]:
+def pendientes_de(es_admin: bool, proyecto: dict[str, Any] | None = None) -> dict[str, int]:
     """Cuántas cosas sin atender tiene cada página del menú, para su pastilla.
 
     Solo lo que se puede quedar esperando sin que nadie lo mire: son bandejas
@@ -193,9 +193,11 @@ def pendientes_de(es_admin: bool) -> dict[str, int]:
     """
     if es_admin:
         return {"/admin/incidencias": mensajeria.contar_incidencias_abiertas()}
+    if not proyecto:
+        return {}
     return {
-        "/reportes": trazabilidad.contar_reportes_pendientes(),
-        "/preguntas": trazabilidad.contar_preguntas_pendientes(),
+        "/reportes": trazabilidad.contar_reportes_pendientes(proyecto["id"]),
+        "/preguntas": trazabilidad.contar_preguntas_pendientes(proyecto["id"]),
     }
 
 
@@ -205,6 +207,7 @@ def render(request: Request, nombre: str, usuario: dict[str, Any] | None, **cont
     es_admin = bool(usuario and usuario["rol"] == security.ROL_ADMIN)
     secciones = navegacion.secciones_para(es_admin, request.url.path) if usuario else []
     seccion_actual, pagina_actual = navegacion.ubicacion(secciones)
+    proyecto_actual = _proyecto_de(usuario, es_admin)
     datos = {
         "request": request,
         "usuario": usuario,
@@ -213,13 +216,13 @@ def render(request: Request, nombre: str, usuario: dict[str, Any] | None, **cont
         # El proyecto de la cuenta actual. Lo usa el armazón (marca del lateral
         # y ventana de «Mi cuenta»); una página puede sobrescribirlo por su
         # contexto si necesita otro, igual que cualquier otra variable.
-        "proyecto": _proyecto_de(usuario, es_admin),
+        "proyecto": proyecto_actual,
         "secciones": secciones,
         "seccion_actual": seccion_actual,
         "pagina_actual": pagina_actual,
         # Las pastillas del menú lateral. Una página puede pasar las suyas (la
         # ruta del fragmento lo hace) y entonces mandan las suyas.
-        "pendientes": pendientes_de(es_admin) if usuario else {},
+        "pendientes": pendientes_de(es_admin, proyecto_actual) if usuario else {},
         # Tramos navegables de la cabecera. Una página de detalle (el perfil de
         # un cliente) añade el suyo pasando `miga_final`, y así «Clientes» sigue
         # llevando al listado en vez de quedarse como texto muerto.

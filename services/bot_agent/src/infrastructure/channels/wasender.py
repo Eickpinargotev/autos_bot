@@ -251,22 +251,16 @@ def numero_para_envio(destino: str, api_key: str) -> str:
     return _mapa_lid_a_numero(api_key).get(_solo_numero(destino), destino)
 
 
-def ingresos_a_grupo(evento: dict[str, Any]) -> list[str]:
-    """Números que acaban de ENTRAR a un grupo, según `group-participants.update`.
-
-    Es el evento que cierra el flujo de publicidad: la invitación lleva el link
-    del grupo, y unirse es la señal de que ya no hay que seguir recordándoselo.
-
-    Solo cuenta la acción de alta. Las salidas, ascensos a admin y demás llegan
-    por el mismo evento y no significan nada para el flujo; devolver una lista
-    (y no un solo número) es porque WhatsApp agrupa varias altas en un evento.
-    """
+def _participantes_de_grupo(
+    evento: dict[str, Any], acciones: tuple[str, ...]
+) -> list[str]:
+    """Teléfonos/LID afectados por una acción de participantes del grupo."""
     datos = evento.get("data") or evento
     if not isinstance(datos, dict):
         return []
 
     accion = str(_primero(datos, "action", "type", "participantAction") or "").lower()
-    if accion not in ("add", "invite", "join"):
+    if accion not in acciones:
         return []
 
     crudos = _primero(datos, "participants", "participant", "jids") or []
@@ -276,11 +270,46 @@ def ingresos_a_grupo(evento: dict[str, Any]) -> list[str]:
     numeros = []
     for crudo in crudos:
         if isinstance(crudo, dict):
-            crudo = _primero(crudo, "id", "jid", "phone", "number")
+            # Si el proveedor entrega a la vez teléfono y LID, se prefiere el
+            # teléfono. Evita depender de una consulta posterior a contactos.
+            crudo = _primero(
+                crudo,
+                "phone",
+                "phoneNumber",
+                "pn",
+                "participantPn",
+                "cleanedParticipantPn",
+                "number",
+                "id",
+                "jid",
+            )
         numero = _solo_numero(crudo)
         if numero and numero.isdigit():
             numeros.append(numero)
     return numeros
+
+
+def ingresos_a_grupo(evento: dict[str, Any]) -> list[str]:
+    """Números que acaban de ENTRAR a un grupo, según `group-participants.update`.
+
+    Es el evento que cierra el flujo de publicidad: la invitación lleva el link
+    del grupo, y unirse es la señal de que ya no hay que seguir recordándoselo.
+
+    Solo cuenta la acción de alta. Las salidas se traducen por separado para
+    registrarlas y los cambios de admin no cambian el flujo. Se devuelve una
+    lista porque WhatsApp puede agrupar varias altas en un solo evento.
+    """
+    return _participantes_de_grupo(evento, ("add", "invite", "join"))
+
+
+def salidas_de_grupo(evento: dict[str, Any]) -> list[str]:
+    """Números que salieron o fueron retirados de un grupo.
+
+    WasenderAPI representa ambos casos con la acción ``remove``. La salida se
+    registra para trazabilidad, pero no deshace por sí sola el bloqueo ni
+    dispara mensajes al cliente.
+    """
+    return _participantes_de_grupo(evento, ("remove", "leave", "left"))
 
 
 def mensaje_entrante(evento: dict[str, Any]) -> InboundMessage | None:

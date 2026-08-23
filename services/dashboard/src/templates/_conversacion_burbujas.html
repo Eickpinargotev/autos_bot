@@ -34,6 +34,15 @@
   {% if m.event_type == 'group_join' %}
   <div class="nota-sistema" data-id="{{ m.id }}" data-dia="{{ m.created_at | dia_clave }}">Se unió al grupo · {{ m.created_at | hora }}</div>
 
+  {% elif m.event_type == 'group_leave' %}
+  <div class="nota-sistema" data-id="{{ m.id }}" data-dia="{{ m.created_at | dia_clave }}">Salió o fue retirado del grupo · {{ m.created_at | hora }}</div>
+
+  {% elif m.event_type == 'report_created' %}
+  <div class="nota-sistema reporte-creado" data-id="{{ m.id }}" data-dia="{{ m.created_at | dia_clave }}">
+    Se generó un reporte{% if m.text %} · {{ m.text }}{% endif %}
+    · <a href="/reportes">Ver reportes</a> · {{ m.created_at | hora }}
+  </div>
+
   {# Un sticker no se responde, pero sí se ve: quien lee el chat necesita
      saber que llegó algo y que el bot lo dejó pasar a propósito. #}
   {% elif m.event_type == 'sticker_ignorado' %}

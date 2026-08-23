@@ -5,21 +5,21 @@ from fastapi.responses import RedirectResponse
 
 from src.core import security
 from src.core.plantillas import render
-from src.services import facturacion
+from src.services import clientes_whatsapp, facturacion
 
 router = APIRouter()
 
 
-def _datos_periodo(periodo: dict) -> dict:
+def _datos_periodo(periodo: dict, proyecto_id: int | None = None) -> dict:
     return {
         "periodo": periodo,
-        "totales": facturacion.totales_de_periodo(periodo["id"]),
-        "categorias": facturacion.desglose_por_categoria(periodo["id"]),
-        "serie": facturacion.serie_diaria(periodo["id"]),
+        "totales": facturacion.totales_de_periodo(periodo["id"], proyecto_id),
+        "categorias": facturacion.desglose_por_categoria(periodo["id"], proyecto_id),
+        "serie": facturacion.serie_diaria(periodo["id"], proyecto_id=proyecto_id),
         # Solo se muestra en la vista del administrador: al negocio no le dice
         # nada un porcentaje de tokens reutilizados, y ya ve el efecto en su
         # total. A nosotros nos avisa si el prompt dejó de ser cacheable.
-        "cache": facturacion.ahorro_por_cache(periodo["id"]),
+        "cache": facturacion.ahorro_por_cache(periodo["id"], proyecto_id),
     }
 
 
@@ -31,7 +31,12 @@ def factura(request: Request, usuario=Depends(security.requiere_sesion)):
 
     Aquí NUNCA se muestra el costo real del proveedor: solo el precio de venta.
     """
-    return render(request, "factura.html", usuario, **_datos_periodo(facturacion.periodo_abierto()))
+    proyecto = clientes_whatsapp.por_usuario(usuario["id"])
+    proyecto_id = proyecto["id"] if proyecto else None
+    return render(
+        request, "factura.html", usuario,
+        **_datos_periodo(facturacion.periodo_abierto(), proyecto_id),
+    )
 
 
 @router.get("/factura/totales")
@@ -41,7 +46,12 @@ def factura_totales(request: Request, usuario=Depends(security.requiere_sesion))
     Es "tiempo real" sin websockets ni estado en el servidor: una consulta
     agregada por índice sobre `uso_eventos`, que es barata.
     """
-    return render(request, "_factura_totales.html", usuario, **_datos_periodo(facturacion.periodo_abierto()))
+    proyecto = clientes_whatsapp.por_usuario(usuario["id"])
+    proyecto_id = proyecto["id"] if proyecto else None
+    return render(
+        request, "_factura_totales.html", usuario,
+        **_datos_periodo(facturacion.periodo_abierto(), proyecto_id),
+    )
 
 
 # --- Vista del administrador -------------------------------------------------

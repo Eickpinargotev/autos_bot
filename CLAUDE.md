@@ -158,19 +158,15 @@ El **dashboard** (`services/dashboard/src/`) sigue la misma separación:
   último mensaje ya pintado (`?dia=`) o cada tanda repetiría el separador de fecha.
   Con `?antes=` (leyendo hacia atrás) la cola se APAGA: «lo posterior a lo que veo»
   sería media conversación de golpe.
-- El visor de conversaciones (`/admin/logs/{canal}/{client_id}`) **pagina por cursor**
+- El visor del dueño (`/conversaciones/{canal}/{client_id}`) **pagina por cursor**
   (`?antes=<id>`), no por OFFSET: el chat se lee desde el final y con OFFSET habría que
   descartar todas las filas nuevas en cada tanda, además de descolocarse si llega un
   mensaje mientras se lee. La búsqueda del listado es **solo por número** a propósito
   (buscar texto obliga a recorrer todo el historial). Las horas se muestran en
   `settings.ZONA_HORARIA` (Costa Rica), no en la del servidor.
-- Las conversaciones se ven **por negocio**, desde su perfil (`/admin/negocios/{id}`),
-  en una ventana flotante de dos columnas. No hay enlace en el menú lateral a
-  propósito: una lista con los clientes de todos los negocios mezclados no se puede
-  leer. El filtro se apoya en `conversacion_negocio`; las conversaciones sin
-  pertenencia anotada no se le atribuyen a ninguno. El hilo vive en
-  `_conversacion_hilo.html`, que usan LAS DOS vistas (página completa y ventana,
-  vía `?fragmento=1`) para que no se separen.
+- Las conversaciones se ven únicamente dentro de la cuenta del proyecto. La ruta
+  obtiene `proyecto_id` de la sesión y cualquier id ajeno responde 404. El administrador
+  entra mediante suplantación auditada; no hay listado ni visor global.
 - `core/navegacion.py` — el menú lateral por secciones y la miga de pan salen de ahí,
   no de la plantilla. Una página nueva del panel se declara en esa lista (con su
   icono, de `templates/_iconos.html`); ocultar un enlace NO restringe nada, el acceso
@@ -180,16 +176,12 @@ El **dashboard** (`services/dashboard/src/`) sigue la misma separación:
     y «Mi cuenta» viven en el menú de la cuenta (al pie del lateral) y se declaran
     en `SECCIONES_DE_CUENTA`. Estaban en los dos sitios: la misma lista dos veces
     en la misma pantalla.
-  - `"oculta": True` declara una página que existe pero no se dibuja en el menú
-    (`/admin/logs`, al que se entra por el perfil del cliente). Sirve para que esas
-    páginas tengan miga de pan y título, que es lo que se perdía al quitarlas del
-    menú.
   - `migas()` devuelve tramos CON enlace, y una página de detalle añade el suyo
     pasando `miga_final` al render (el perfil del cliente manda su nombre). La
     miga era texto muerto: decía «Operación › Clientes» y no llevaba a ninguna parte.
-- El perfil del cliente (`/admin/negocios/{id}`) es el centro del panel del
-  administrador: sus cifras, sus conversaciones, su configuración y la entrada a su
-  cuenta. Toda la configuración es UNA ventana con categorías
+- El perfil del proyecto (`/admin/negocios/{id}`) contiene cifras agregadas,
+  configuración técnica, facturación, usuario y la entrada auditada a su cuenta.
+  Toda la configuración es UNA ventana con categorías
   (`.dialogo-secciones`), no cuatro botones sueltos; el webhook y las credenciales
   de WasenderAPI van en la MISMA pestaña porque son un solo servicio, y la cuenta
   de acceso del cliente **se crea desde ahí** (`/cuenta/crear`), no dando la vuelta
@@ -353,12 +345,16 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
 - **Los prompts deben ser genéricos.** El test `tests/unit/test_prompt_contracts.py` prohíbe
   términos específicos del catálogo en `UNIFIED_AGENT_PROMPT` y `FOLLOWUP_AGENT_PROMPT`
   (p. ej. `casco`, `programar cita`, `qué pasa si pierde`). Usa ejemplos genéricos.
+- **El dueño edita capas comerciales, no estos contratos.** La pantalla «Prompts» guarda
+  `principal` y `recordatorio` en `proyecto_instrucciones`; se anexan al prompt fijo y su
+  rollback crea una versión nueva. El switch y el intervalo viven aparte en
+  `proyecto_recordatorios`.
 - Ese mismo test exige que ciertas frases clave **existan** en los prompts. Si reescribes un
   prompt, conserva esas frases o actualiza el test de forma deliberada.
 - **Invariantes de concurrencia** (garantizan cero duplicados/cruces; detalle en
   `docs/operacion_escala_y_trazabilidad.md`). No los debilites al tocar el pipeline:
-  - Todo estado por usuario en Redis usa `scoped_key(prefijo, canal, user_id)` —
-    nunca claves sin canal.
+  - Todo estado comercial en Redis usa `scoped_key(prefijo, canal, user_id)` y la
+    función incorpora obligatoriamente el proyecto activo.
   - El buffer se drena SOLO con los scripts Lua atómicos de `buffer_service.py` y el
     debounce por `seq`.
   - `process_buffered_messages` corre bajo el **candado por conversación**
@@ -367,9 +363,9 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
   - El `visibility_timeout` de Celery debe superar el countdown más largo agendado
     (`celery_app.py`); si agregas un delay mayor, inclúyelo en `_max_countdown_seconds`.
 - **Los endpoints con efectos se apagan si falta su secreto, nunca se abren.**
-  `POST /webhooks/wasender` exige `WASENDER_WEBHOOK_SECRET` (hace que el bot conteste y
-  gaste tokens); `POST /internal/rag/sync/{id}` exige `INTERNAL_API_TOKEN` (escribe en la
-  base de conocimiento) y `POST /internal/conversaciones/{canal}/{id}/olvidar` también
+  `POST /webhooks/wasender/{token}` resuelve el proyecto; los endpoints internos
+  `/internal/proyectos/{proyecto_id}/rag/sync/{id}` y
+  `/internal/proyectos/{proyecto_id}/conversaciones/{canal}/{id}/olvidar` exigen `INTERNAL_API_TOKEN`
   (borra estado). Sin el secreto responden **503**. No los "arregles" quitando el
   guardarraíl (ver `docs/seguridad.md`).
 - **Borrar una conversación son dos mitades, y una no es del panel.** El dashboard
@@ -381,12 +377,10 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
   callarlo haría creer que se borró algo que el bot sigue recordando. Lo que NUNCA se
   borra al eliminar un chat es `uso_eventos` (el libro mayor: el pasado no se recalcula)
   ni `seguimiento_clientes` (se borra el chat, no el cliente).
-- **`users_blocked` ya no es solo del bot: el panel la lee y la limpia.** La declaran
-  los DOS con `CREATE TABLE IF NOT EXISTS` y la misma forma —el bot en
-  `postgres_conn._crear_tablas_del_bot` y el dashboard en la migración 011— porque
-  cualquiera de los dos puede arrancar primero. Si cambia una columna, cámbiala en los
-  dos sitios. Los bloqueos se ponen solos (intervención del dueño, ingreso al grupo,
-  `/block`) y se levantan desde `/admin/bloqueos` o desde la cabecera del propio chat.
+- **Hay dos bloqueos distintos.** `users_blocked` contiene pausas automáticas
+  temporales y no tiene pantalla pública. `bloqueos_permanentes` pertenece al proyecto:
+  el dueño bloquea desde el hilo y administra la lista diferida en Configuración del
+  proyecto. El administrador no dispone de rutas directas de bloqueos.
 - **Un enlace de plantilla que apunte a una ruta inexistente rompe en silencio.**
   Pasó de verdad: al mover el conocimiento, los reportes y las preguntas al panel del
   negocio, las plantillas siguieron apuntando a `/admin/*` y tres botones daban 404 sin

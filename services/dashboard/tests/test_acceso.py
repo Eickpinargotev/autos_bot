@@ -11,15 +11,12 @@ RUTAS_SOLO_ADMIN = (
     "/admin/negocios",
     "/admin/periodos",
     "/admin/tarifas",
-    "/admin/logs",
     # El visor por negocio. Devuelve un fragmento para la ventana flotante, pero
     # sirve exactamente lo mismo que el listado completo: las conversaciones de
     # los clientes. Si se abriera al negocio, vería los chats de otros.
-    "/admin/negocios/1/conversaciones",
     # Las cifras del perfil, que se refrescan solas. Llevan el costo real y el
     # margen: servírselas a un negocio sería enseñarle lo que ganamos con él.
     "/admin/negocios/1/resumen",
-    "/admin/bloqueos",
     "/admin/incidencias",
     "/admin/usuarios",
     "/admin/configuracion",
@@ -27,16 +24,14 @@ RUTAS_SOLO_ADMIN = (
     # rutas como cualquier otra: devolver un trozo de HTML en vez de la página
     # entera no las hace menos sensibles, y sin esta línea una podría quedarse
     # sin `requiere_admin` sin que nada fallara.
-    "/admin/bloqueos/lista",
     "/admin/incidencias/lista",
-    "/admin/logs/lista",
 )
 
 # Páginas del panel del NEGOCIO. El administrador tampoco entra: no son su
 # trabajo, y para verlas suplanta al negocio desde su perfil.
 RUTAS_DEL_NEGOCIO = (
     "/factura",
-    "/clientes",
+    "/conversaciones",
     "/reportes",
     "/conocimiento",
     "/preguntas",
@@ -46,7 +41,7 @@ RUTAS_DEL_NEGOCIO = (
     # Los fragmentos que se refrescan solos, por el mismo motivo que arriba.
     "/reportes/lista",
     "/preguntas/lista",
-    "/clientes/lista",
+    "/conversaciones/lista",
 )
 
 RUTAS_DEL_CLIENTE = RUTAS_DEL_NEGOCIO

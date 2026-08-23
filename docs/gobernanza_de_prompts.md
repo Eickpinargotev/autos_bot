@@ -8,6 +8,13 @@ prompt se edita "al vuelo".**
 Los prompts vigentes y su rol (arquitectura supervisor/workers, ver
 `docs/modelo_unico.md` y `docs/diseno_especialistas.md`):
 
+La pantalla **Prompts** versiona de forma independiente el playbook editable de
+cada agente (`supervisor`, `general`, `curso_teorico`, `alquiler`, `clases`,
+`dictamen`, `tramites` y `recordatorio`). El playbook guardado reemplaza únicamente
+el cuerpo de ese rol. El contrato transversal, los esquemas JSON y el catálogo
+dinámico se ensamblan después desde código y no son editables desde el dashboard.
+Un rollback siempre crea otra versión; nunca reescribe el historial.
+
 | Prompt | Rol | Contrato de salida |
 | ------ | --- | ------------------ |
 | `AGENT_COMMON_CONTRACT` | Reglas transversales de TODOS los agentes (fragmentos literales, anti-invención, queja/pago→humano, estilo) | — (se ensambla con el resto) |

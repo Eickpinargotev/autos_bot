@@ -1,6 +1,7 @@
 """Preguntas que el RAG no supo responder, para alimentar la base de conocimiento."""
 
 from src.infrastructure.repositories.postgres_conn import ejecutar
+from src.application.project_context import proyecto_actual
 
 # Cuánto sobrevive una pregunta ya marcada como entendida, desde que se marcó.
 # Es corto porque lo único que hace falta después del clic es poder deshacerlo
@@ -13,10 +14,14 @@ PREGUNTAS_RETENCION_HORAS = 24
 class UnansweredQuestionRepository:
     @staticmethod
     def create(question: str) -> bool:
-        if not (question or "").strip():
+        proyecto_id = proyecto_actual()
+        if not proyecto_id or not (question or "").strip():
             return False
         try:
-            ejecutar("INSERT INTO preguntas_sin_respuesta (pregunta) VALUES (%s)", (question,))
+            ejecutar(
+                "INSERT INTO preguntas_sin_respuesta (proyecto_id, pregunta) VALUES (%s, %s)",
+                (proyecto_id, question),
+            )
             return True
         except Exception as e:
             print(f"Error guardando pregunta sin respuesta en Postgres: {e}")

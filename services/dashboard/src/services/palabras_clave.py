@@ -26,26 +26,32 @@ MAX_MINUTOS = 20160  # 14 días
 
 # --- Palabras -----------------------------------------------------------------
 
-def listar() -> list[dict[str, Any]]:
-    palabras = pool.consultar("SELECT * FROM palabras_clave ORDER BY palabra")
+def listar(proyecto_id: int) -> list[dict[str, Any]]:
+    palabras = pool.consultar(
+        "SELECT * FROM palabras_clave WHERE proyecto_id = %s ORDER BY palabra",
+        (int(proyecto_id),),
+    )
     for palabra in palabras:
-        _completar(palabra)
+        _completar(proyecto_id, palabra)
     return palabras
 
 
-def obtener(palabra_id: int) -> dict[str, Any] | None:
-    palabra = pool.consultar_uno("SELECT * FROM palabras_clave WHERE id = %s", (int(palabra_id),))
-    return _completar(palabra) if palabra else None
+def obtener(proyecto_id: int, palabra_id: int) -> dict[str, Any] | None:
+    palabra = pool.consultar_uno(
+        "SELECT * FROM palabras_clave WHERE proyecto_id = %s AND id = %s",
+        (int(proyecto_id), int(palabra_id)),
+    )
+    return _completar(proyecto_id, palabra) if palabra else None
 
 
-def _completar(palabra: dict[str, Any]) -> dict[str, Any]:
-    palabra["mensajes"] = piezas_de(palabra["id"], "mensaje")
-    palabra["recordatorios"] = piezas_de(palabra["id"], "recordatorio")
+def _completar(proyecto_id: int, palabra: dict[str, Any]) -> dict[str, Any]:
+    palabra["mensajes"] = piezas_de(proyecto_id, palabra["id"], "mensaje")
+    palabra["recordatorios"] = piezas_de(proyecto_id, palabra["id"], "recordatorio")
     palabra["problemas"] = problemas_de(palabra)
     return palabra
 
 
-def _palabra_valida(palabra: str, excepto_id: int | None = None) -> str:
+def _palabra_valida(proyecto_id: int, palabra: str, excepto_id: int | None = None) -> str:
     """Normaliza y comprueba que no la tenga ya otra.
 
     Se guarda en minúsculas y sin espacios porque así es como se compara con lo
@@ -59,50 +65,56 @@ def _palabra_valida(palabra: str, excepto_id: int | None = None) -> str:
         raise ValueError("La palabra clave es demasiado larga (máximo 60 caracteres).")
 
     otra = pool.consultar_uno(
-        "SELECT id FROM palabras_clave WHERE lower(palabra) = %s", (palabra,)
+        "SELECT id FROM palabras_clave WHERE proyecto_id = %s AND lower(palabra) = %s",
+        (int(proyecto_id), palabra),
     )
     if otra and otra["id"] != excepto_id:
         raise ValueError(f"Ya existe la palabra clave «{palabra}».")
     return palabra
 
 
-def crear(palabra: str, usuario: str) -> dict[str, Any]:
+def crear(proyecto_id: int, palabra: str, usuario: str) -> dict[str, Any]:
     fila = pool.consultar_uno(
-        "INSERT INTO palabras_clave (palabra, creado_por) VALUES (%s, %s) RETURNING *",
-        (_palabra_valida(palabra), usuario),
+        "INSERT INTO palabras_clave (proyecto_id, palabra, creado_por) VALUES (%s, %s, %s) RETURNING *",
+        (int(proyecto_id), _palabra_valida(proyecto_id, palabra), usuario),
     )
     # Nace con un mensaje vacío: una palabra clave sin nada que enviar no hace
     # nada, y así queda claro qué es lo siguiente que hay que rellenar.
-    agregar_pieza(fila["id"], "mensaje")
-    return obtener(fila["id"])
+    agregar_pieza(proyecto_id, fila["id"], "mensaje")
+    return obtener(proyecto_id, fila["id"])
 
 
-def renombrar(palabra_id: int, palabra: str) -> dict[str, Any] | None:
+def renombrar(proyecto_id: int, palabra_id: int, palabra: str) -> dict[str, Any] | None:
     return pool.consultar_uno(
-        "UPDATE palabras_clave SET palabra = %s, actualizado_en = NOW() WHERE id = %s RETURNING *",
-        (_palabra_valida(palabra, excepto_id=palabra_id), int(palabra_id)),
+        "UPDATE palabras_clave SET palabra = %s, actualizado_en = NOW() "
+        "WHERE proyecto_id = %s AND id = %s RETURNING *",
+        (_palabra_valida(proyecto_id, palabra, excepto_id=palabra_id), int(proyecto_id), int(palabra_id)),
     )
 
 
-def alternar_activa(palabra_id: int) -> dict[str, Any] | None:
+def alternar_activa(proyecto_id: int, palabra_id: int) -> dict[str, Any] | None:
     """Desactivarla la deja escrita pero el bot deja de reconocerla."""
     return pool.consultar_uno(
         "UPDATE palabras_clave SET activa = NOT activa, actualizado_en = NOW() "
-        "WHERE id = %s RETURNING *",
-        (int(palabra_id),),
+        "WHERE proyecto_id = %s AND id = %s RETURNING *",
+        (int(proyecto_id), int(palabra_id)),
     )
 
 
-def eliminar(palabra_id: int) -> int:
-    return pool.ejecutar("DELETE FROM palabras_clave WHERE id = %s", (int(palabra_id),))
+def eliminar(proyecto_id: int, palabra_id: int) -> int:
+    return pool.ejecutar(
+        "DELETE FROM palabras_clave WHERE proyecto_id = %s AND id = %s",
+        (int(proyecto_id), int(palabra_id)),
+    )
 
 
 # --- Piezas (mensajes y recordatorios) ----------------------------------------
 
-def piezas_de(palabra_id: int, tipo: str) -> list[dict[str, Any]]:
+def piezas_de(proyecto_id: int, palabra_id: int, tipo: str) -> list[dict[str, Any]]:
     piezas = pool.consultar(
-        "SELECT * FROM palabra_clave_piezas WHERE palabra_id = %s AND tipo = %s ORDER BY orden",
-        (int(palabra_id), tipo),
+        "SELECT * FROM palabra_clave_piezas WHERE proyecto_id = %s AND palabra_id = %s "
+        "AND tipo = %s ORDER BY orden",
+        (int(proyecto_id), int(palabra_id), tipo),
     )
     for pieza in piezas:
         pieza["problema"] = problema_de_pieza(pieza)
@@ -127,20 +139,22 @@ def problema_de_pieza(pieza: dict[str, Any]) -> str:
     return ""
 
 
-def agregar_pieza(palabra_id: int, tipo: str) -> dict[str, Any]:
+def agregar_pieza(proyecto_id: int, palabra_id: int, tipo: str) -> dict[str, Any]:
     """Añade un mensaje o un recordatorio al final.
 
     Un recordatorio nuevo se coloca DESPUÉS del último: los minutos tienen que
     ir creciendo, así que empezar por debajo del anterior sería crear algo
     inválido desde el primer momento.
     """
+    if not obtener(proyecto_id, palabra_id):
+        raise ValueError("Esa palabra clave ya no existe.")
     fila = pool.consultar_uno(
         """
         SELECT COALESCE(MAX(orden), 0) + 1     AS siguiente,
                COALESCE(MAX(minutos), 0)       AS ultimo_minuto
-        FROM palabra_clave_piezas WHERE palabra_id = %s AND tipo = %s
+        FROM palabra_clave_piezas WHERE proyecto_id = %s AND palabra_id = %s AND tipo = %s
         """,
-        (int(palabra_id), tipo),
+        (int(proyecto_id), int(palabra_id), tipo),
     )
     minutos = None
     if tipo == "recordatorio":
@@ -148,14 +162,15 @@ def agregar_pieza(palabra_id: int, tipo: str) -> dict[str, Any]:
 
     return pool.consultar_uno(
         """
-        INSERT INTO palabra_clave_piezas (palabra_id, tipo, orden, minutos)
-        VALUES (%s, %s, %s, %s) RETURNING *
+        INSERT INTO palabra_clave_piezas (proyecto_id, palabra_id, tipo, orden, minutos)
+        VALUES (%s, %s, %s, %s, %s) RETURNING *
         """,
-        (int(palabra_id), tipo, fila["siguiente"], minutos),
+        (int(proyecto_id), int(palabra_id), tipo, fila["siguiente"], minutos),
     )
 
 
 def guardar_pieza(
+    proyecto_id: int,
     pieza_id: int,
     *,
     texto: str,
@@ -170,7 +185,12 @@ def guardar_pieza(
     enviar. Se descarga solo para comprobar que existe y es público; no se
     guarda ninguna copia.
     """
-    actual = pool.consultar_uno("SELECT * FROM palabra_clave_piezas WHERE id = %s", (int(pieza_id),))
+    actual = pool.consultar_uno(
+        "SELECT x.* FROM palabra_clave_piezas x "
+        "JOIN palabras_clave p ON p.id = x.palabra_id "
+        "WHERE p.proyecto_id = %s AND x.proyecto_id = %s AND x.id = %s",
+        (int(proyecto_id), int(proyecto_id), int(pieza_id)),
+    )
     if not actual:
         raise ValueError("Esa pieza ya no existe.")
 
@@ -185,7 +205,7 @@ def guardar_pieza(
         UPDATE palabra_clave_piezas
         SET texto = %s, media_tipo = %s, media_ref = %s, media_ok = %s,
             media_error = %s, media_revisada_en = NOW(), minutos = %s, activo = %s
-        WHERE id = %s
+        WHERE proyecto_id = %s AND id = %s
         RETURNING *
         """,
         (
@@ -196,6 +216,7 @@ def guardar_pieza(
             revisado["media_error"],
             minutos,
             bool(activo),
+            int(proyecto_id),
             int(pieza_id),
         ),
     )
@@ -228,10 +249,11 @@ def _minutos_validos(pieza: dict[str, Any], minutos: int | None) -> int:
     vecinos = pool.consultar(
         """
         SELECT orden, minutos FROM palabra_clave_piezas
-        WHERE palabra_id = %s AND tipo = 'recordatorio' AND id <> %s
+        WHERE proyecto_id = %s AND palabra_id = %s
+          AND tipo = 'recordatorio' AND id <> %s
         ORDER BY orden
         """,
-        (pieza["palabra_id"], pieza["id"]),
+        (pieza["proyecto_id"], pieza["palabra_id"], pieza["id"]),
     )
     anterior = max(
         (v["minutos"] for v in vecinos if v["orden"] < pieza["orden"]), default=None
@@ -253,15 +275,21 @@ def _minutos_validos(pieza: dict[str, Any], minutos: int | None) -> int:
     return minutos
 
 
-def eliminar_pieza(pieza_id: int) -> int:
-    return pool.ejecutar("DELETE FROM palabra_clave_piezas WHERE id = %s", (int(pieza_id),))
+def eliminar_pieza(proyecto_id: int, pieza_id: int) -> int:
+    return pool.ejecutar(
+        "DELETE FROM palabra_clave_piezas x USING palabras_clave p "
+        "WHERE x.id = %s AND x.proyecto_id = %s AND x.palabra_id = p.id "
+        "AND p.proyecto_id = %s",
+        (int(pieza_id), int(proyecto_id), int(proyecto_id)),
+    )
 
 
-def revisar_media_de(palabra_id: int) -> None:
+def revisar_media_de(proyecto_id: int, palabra_id: int) -> None:
     """Vuelve a comprobar todos los adjuntos, por si cambió un permiso en Drive."""
     for tipo in ("mensaje", "recordatorio"):
-        for pieza in piezas_de(palabra_id, tipo):
+        for pieza in piezas_de(proyecto_id, palabra_id, tipo):
             guardar_pieza(
+                proyecto_id,
                 pieza["id"],
                 texto=pieza["texto"],
                 media_tipo=pieza["media_tipo"],

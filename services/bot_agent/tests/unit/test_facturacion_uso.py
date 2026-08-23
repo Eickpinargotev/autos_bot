@@ -17,8 +17,10 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.application import seguimiento_service as svc
+from src.application.project_context import ambito_proyecto
 from src.domain.entities import Channel
 from src.infrastructure.repositories import billing_repository
+from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
 _MODULO = "src.infrastructure.repositories.billing_repository"
 
@@ -29,6 +31,23 @@ def _usage(prompt=1000, cached=0, completion=200):
         completion_tokens=completion,
         prompt_tokens_details=SimpleNamespace(cached_tokens=cached),
     )
+
+
+class ReinicioDeChatTests(unittest.TestCase):
+    def test_d_solo_borra_el_chat_y_nunca_el_libro_mayor(self):
+        """`/d` usa este borrado; `uso_eventos` debe sobrevivir siempre."""
+        with ambito_proyecto(7), patch(
+            "src.infrastructure.repositories.conversation_log_repository.ejecutar",
+            return_value=1,
+        ) as ejecutar_mock:
+            self.assertTrue(
+                ConversationLogRepository.delete_conversation("5061", Channel.WHATSAPP)
+            )
+
+        sql, params = ejecutar_mock.call_args.args
+        self.assertIn("DELETE FROM conversation_messages", sql)
+        self.assertNotIn("uso_eventos", sql)
+        self.assertEqual(params, (7, "5061", "whatsapp"))
 
 
 class EventoLlmTests(unittest.TestCase):
@@ -58,10 +77,11 @@ class EventoLlmTests(unittest.TestCase):
         self.assertIn("vigente_desde <= NOW()", sql)
         # El costo de venta se deriva del real por el multiplicador de la tarifa.
         self.assertIn("ROUND(%s * COALESCE(t.multiplicador_llm, 1))", sql)
-        self.assertEqual(params[0], "5061")
-        self.assertEqual(params[1], "whatsapp")
-        self.assertEqual(params[2], "agente")
-        self.assertEqual(params[7], 1950)  # costo real congelado
+        self.assertEqual(params[0], 1)
+        self.assertEqual(params[1], "5061")
+        self.assertEqual(params[2], "whatsapp")
+        self.assertEqual(params[3], "agente")
+        self.assertEqual(params[8], 1950)  # costo real congelado
 
     def test_un_fallo_de_base_no_propaga(self):
         with patch(f"{_MODULO}.ejecutar", side_effect=RuntimeError("db caída")):
@@ -91,8 +111,8 @@ class EventoCodigoTests(unittest.TestCase):
         self.assertIn("'codigo'", sql)
         self.assertIn("%s * COALESCE(t.precio_mensaje_codigo_microusd, 0)", sql)
         self.assertIn(", 0,", sql)  # costo_real_microusd fijo en cero
-        self.assertEqual(params[3], 3)
         self.assertEqual(params[4], 3)
+        self.assertEqual(params[5], 3)
 
     def test_no_registra_nada_sin_mensajes(self):
         with patch(f"{_MODULO}.ejecutar") as ejecutar_mock:

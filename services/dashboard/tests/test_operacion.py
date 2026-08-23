@@ -5,6 +5,18 @@ import pytest
 from src.db import pool
 from src.services import mensajeria
 from src.services import envios as svc_envios
+from tests.conftest import ServicioDeProyecto
+
+mensajeria = ServicioDeProyecto(mensajeria, {
+    "listar_plantillas", "obtener_plantilla", "buscar_por_clave", "partes_de",
+    "crear_plantilla", "renombrar_plantilla", "eliminar_plantilla", "guardar_parte",
+    "agregar_parte", "eliminar_parte", "revisar_media_de", "revisar_todos_los_adjuntos",
+    "obtener_envio", "reintentar", "reportar",
+})
+svc_envios = ServicioDeProyecto(svc_envios, {
+    "opciones", "crear_lote", "listar_lotes", "obtener_lote", "destinos_de",
+    "cancelar", "eliminar_lote",
+})
 
 
 # --- Envíos ------------------------------------------------------------------

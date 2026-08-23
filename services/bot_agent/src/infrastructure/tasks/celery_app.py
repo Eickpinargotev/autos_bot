@@ -1,10 +1,12 @@
 import random
 import time
 
-from celery import Celery
+from celery import Celery, Task
+from celery.signals import before_task_publish
 from celery.schedules import crontab
 from src.core.config import settings
 from src.application.buffer_service import BufferService, redis_client, scoped_key
+from src.application.project_context import ambito_proyecto, proyecto_actual
 from src.application.message_catalog import get_node_data
 from src.application.reminder_service import ReminderService
 from src.application.runtime_context import (
@@ -23,6 +25,7 @@ from src.infrastructure.channels.senders import ChannelSenderRegistry
 from src.infrastructure.channels.wasender import WasenderNoConfigurado
 from src.infrastructure.repositories import envios_repository
 from src.infrastructure.repositories import palabras_clave_repository
+from src.infrastructure.repositories import instrucciones_repository
 from src.infrastructure.repositories.conversation_state_repo import ConversationStateRepo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
@@ -34,7 +37,23 @@ from src.infrastructure.evals.conversation_shots import (
 )
 from src.application.agent_pipeline import run_agent_turn
 
-celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL)
+class TareaDeProyecto(Task):
+    """Propaga el proyecto de la tarea que agenda a la tarea agendada."""
+
+    def __call__(self, *args, **kwargs):
+        headers = getattr(self.request, "headers", None) or {}
+        with ambito_proyecto(headers.get("proyecto_id", proyecto_actual())):
+            return self.run(*args, **kwargs)
+
+
+celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL, task_cls=TareaDeProyecto)
+
+
+@before_task_publish.connect
+def _propagar_proyecto(headers=None, **_kwargs):
+    """Añade el ámbito sin reemplazar `Task.apply_async` ni el aislamiento de tests."""
+    if headers is not None:
+        headers.setdefault("proyecto_id", proyecto_actual())
 
 # Con broker Redis, una tarea con countdown/ETA queda "sin ack" hasta que se
 # ejecuta. Si el countdown supera el visibility_timeout (1h por defecto), Redis
@@ -54,8 +73,6 @@ _max_countdown_seconds = max(
     settings.PUB_DELAY_1_SEC,
     settings.PUB_DELAY_2_SEC,
     settings.PUB_DELAY_3_SEC,
-    settings.FOLLOWUP_FIRST_DELAY_SECONDS,
-    settings.FOLLOWUP_NEXT_DELAY_SECONDS,
     MAX_RECORDATORIO_MINUTOS * 60,
     86400,
 )
@@ -312,7 +329,7 @@ def schedule_smart_reminder_for_result(channel: Channel | str, user_id: str, rem
     channel_value = Channel(channel).value if isinstance(channel, str) else channel.value
     task = send_smart_reminder.apply_async(
         (channel_value, user_id, reminder.get("level", 1)),
-        countdown=reminder.get("seconds", settings.FOLLOWUP_FIRST_DELAY_SECONDS),
+        countdown=reminder.get("seconds", 3600),
     )
     ReminderService.save_task(channel, user_id, task.id)
 
@@ -324,6 +341,10 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
     las medidas de seguridad duras (anti-bucle): buffer pendiente, cliente
     bloqueado, nada pendiente, tope de recordatorios o tarea obsoleta.
     """
+    config_recordatorios = instrucciones_repository.configuracion_recordatorios()
+    if not config_recordatorios.get("habilitado", True):
+        return
+
     # El usuario pudo responder justo cuando vence el recordatorio: su mensaje
     # sigue en el buffer (aún sin procesar), pero ya respondió. No enviamos el
     # recordatorio: el process_buffered_messages pendiente cancelará/reagendará
@@ -380,9 +401,10 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
     ConversationStateRepo.set(channel, user_id, state)
 
     if level < settings.FOLLOWUP_MAX_REMINDERS:
+        minutos = max(1, min(int(config_recordatorios.get("intervalo_minutos") or 60), 20160))
         task = send_smart_reminder.apply_async(
             (channel, user_id, level + 1),
-            countdown=settings.FOLLOWUP_NEXT_DELAY_SECONDS,
+            countdown=minutos * 60,
         )
         ReminderService.save_task(channel, user_id, task.id)
 
@@ -394,6 +416,7 @@ def create_flow_report_and_block(channel: str, user_id: str, report_reason: str)
         numero=user_id,
         problema=f"[{channel}] {report_reason}",
         link_whatsapp=f"https://wa.me/{user_id}",
+        canal=channel,
     )
     PostgresUserRepo().block_user(user_id, reason=report_reason, days=12, channel=channel)
     from src.application.runtime_context import clear_user_runtime_context
@@ -590,48 +613,60 @@ def procesar_envios_pendientes():
 
     procesados = {"enviados": 0, "errores": 0, "partes": 0}
     for envio in envios_repository.tomar_pendientes():
-        partes = envio.get("partes") or []
-        if not partes:
-            envios_repository.marcar_error(envio["id"], "El mensaje quedó sin contenido.", "sin partes")
-            procesados["errores"] += 1
-            continue
-
-        # Se retoma donde se quedó el intento anterior.
-        desde = int(envio.get("partes_enviadas") or 0)
-        fallo = None
-
-        for indice in range(desde, len(partes)):
-            if indice > desde:
-                time.sleep(_espera_entre_partes())
-            try:
-                ChannelSenderRegistry.send(
-                    envio["canal"],
-                    envio["destino_id"],
-                    _texto_de_la_parte(partes[indice]),
-                    log_conversation=False,
-                )
-            except Exception as exc:
-                fallo = (indice, exc)
-                break
-            envios_repository.marcar_parte_enviada(envio["id"], indice + 1)
-            procesados["partes"] += 1
-
-        if fallo is not None:
-            indice, exc = fallo
-            mensaje_cliente, detalle = _clasificar_error(exc)
-            if indice > 0:
-                mensaje_cliente = (
-                    f"Se enviaron las primeras {indice} parte(s) y falló la {indice + 1}. "
-                    f"{mensaje_cliente}"
-                ).strip()
-            envios_repository.marcar_error(envio["id"], mensaje_cliente, f"parte {indice + 1}: {detalle}")
-            procesados["errores"] += 1
-            continue
-
-        envios_repository.marcar_enviado(envio["id"])
-        seguimiento_service.registrar_uso_codigo(
-            envio["destino_id"], envio["canal"], origen="envio_manual", mensajes=len(partes)
-        )
-        procesados["enviados"] += 1
-
+        with ambito_proyecto(int(envio.get("proyecto_id") or 0)):
+            _procesar_envio_pendiente(envio, procesados)
     return procesados
+
+
+def _procesar_envio_pendiente(envio, procesados):
+    """Procesa una fila dentro del ámbito de las credenciales que la crearon."""
+    partes = envio.get("partes") or []
+    if not partes:
+        envios_repository.marcar_error(
+            envio["proyecto_id"], envio["id"], "El mensaje quedó sin contenido.", "sin partes"
+        )
+        procesados["errores"] += 1
+        return
+
+    # Se retoma donde se quedó el intento anterior.
+    desde = int(envio.get("partes_enviadas") or 0)
+    fallo = None
+
+    for indice in range(desde, len(partes)):
+        if indice > desde:
+            time.sleep(_espera_entre_partes())
+        try:
+            ChannelSenderRegistry.send(
+                envio["canal"],
+                envio["destino_id"],
+                _texto_de_la_parte(partes[indice]),
+                log_conversation=False,
+            )
+        except Exception as exc:
+            fallo = (indice, exc)
+            break
+        envios_repository.marcar_parte_enviada(
+            envio["proyecto_id"], envio["id"], indice + 1
+        )
+        procesados["partes"] += 1
+
+    if fallo is not None:
+        indice, exc = fallo
+        mensaje_cliente, detalle = _clasificar_error(exc)
+        if indice > 0:
+            mensaje_cliente = (
+                f"Se enviaron las primeras {indice} parte(s) y falló la {indice + 1}. "
+                f"{mensaje_cliente}"
+            ).strip()
+        envios_repository.marcar_error(
+            envio["proyecto_id"], envio["id"], mensaje_cliente,
+            f"parte {indice + 1}: {detalle}"
+        )
+        procesados["errores"] += 1
+        return
+
+    envios_repository.marcar_enviado(envio["proyecto_id"], envio["id"])
+    seguimiento_service.registrar_uso_codigo(
+        envio["destino_id"], envio["canal"], origen="envio_manual", mensajes=len(partes)
+    )
+    procesados["enviados"] += 1

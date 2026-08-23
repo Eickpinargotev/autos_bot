@@ -40,17 +40,17 @@ class RitmoTests(unittest.TestCase):
         """Se adelanta al TOMARLOS y no tras enviar: si el worker muere a mitad,
         la sesión ya tiene su pausa puesta y no se dispara una ráfaga al volver."""
         tomados = [
-            {"id": 1, "lote_id": 7},
-            {"id": 2, "lote_id": 9},
-            {"id": 3, "lote_id": None},  # de antes de que existieran las sesiones
+            {"id": 1, "proyecto_id": 11, "lote_id": 7},
+            {"id": 2, "proyecto_id": 22, "lote_id": 9},
+            {"id": 3, "proyecto_id": 11, "lote_id": None},  # histórico sin sesión
         ]
         with patch.object(envios_repository, "consultar", return_value=tomados), patch.object(
             envios_repository, "ejecutar"
         ) as escribir:
             envios_repository.tomar_pendientes()
 
-        lotes_tocados = [llamada.args[1][1] for llamada in escribir.call_args_list]
-        self.assertEqual(lotes_tocados, [7, 9])
+        lotes_tocados = [llamada.args[1][1:] for llamada in escribir.call_args_list]
+        self.assertEqual(lotes_tocados, [(11, 7), (22, 9)])
 
 
 if __name__ == "__main__":

@@ -18,18 +18,17 @@ import time
 from typing import Any
 
 from src.infrastructure.repositories.postgres_conn import consultar
+from src.application.project_context import proyecto_actual
 
 CACHE_TTL_SEGUNDOS = 30
 
 _cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
-_cache_claves: tuple[float, list[str]] | None = None
+_cache_claves: dict[int, tuple[float, list[str]]] = {}
 
 
 def limpiar_cache() -> None:
-    global _cache_claves
-
     _cache.clear()
-    _cache_claves = None
+    _cache_claves.clear()
 
 
 def claves() -> list[str]:
@@ -40,14 +39,19 @@ def claves() -> list[str]:
     LIBERIA», el texto completo tiene que ganarle al trozo, y buscando por
     subcadena gana el primero que se pruebe.
     """
-    global _cache_claves
-
+    proyecto_id = proyecto_actual()
+    if not proyecto_id:
+        return []
     ahora = time.monotonic()
-    if _cache_claves and (ahora - _cache_claves[0]) < CACHE_TTL_SEGUNDOS:
-        return _cache_claves[1]
+    guardado = _cache_claves.get(proyecto_id)
+    if guardado and (ahora - guardado[0]) < CACHE_TTL_SEGUNDOS:
+        return guardado[1]
 
     try:
-        filas = consultar("SELECT clave FROM plantillas_mensaje ORDER BY clave")
+        filas = consultar(
+            "SELECT clave FROM plantillas_mensaje WHERE proyecto_id = %s ORDER BY clave",
+            (proyecto_id,),
+        )
     except Exception as e:
         print(f"Error leyendo las claves de los mensajes del panel: {e}")
         return []
@@ -57,7 +61,7 @@ def claves() -> list[str]:
         key=len,
         reverse=True,
     )
-    _cache_claves = (ahora, encontradas)
+    _cache_claves[proyecto_id] = (ahora, encontradas)
     return encontradas
 
 
@@ -68,7 +72,11 @@ def partes_de(clave: str) -> list[dict[str, Any]]:
         return []
 
     ahora = time.monotonic()
-    guardado = _cache.get(clave)
+    proyecto_id = proyecto_actual()
+    if not proyecto_id:
+        return []
+    clave_cache = f"{proyecto_id}:{clave}"
+    guardado = _cache.get(clave_cache)
     if guardado and (ahora - guardado[0]) < CACHE_TTL_SEGUNDOS:
         return guardado[1]
 
@@ -77,17 +85,17 @@ def partes_de(clave: str) -> list[dict[str, Any]]:
             """
             SELECT pp.orden, pp.texto, pp.media_tipo, pp.media_ref
             FROM plantillas_mensaje p
-            JOIN plantilla_partes pp ON pp.plantilla_id = p.id
-            WHERE p.clave = %s
+            JOIN plantilla_partes pp ON pp.plantilla_id = p.id AND pp.proyecto_id = p.proyecto_id
+            WHERE p.proyecto_id = %s AND p.clave = %s
             ORDER BY pp.orden
             """,
-            (clave,),
+            (proyecto_id, clave),
         )
     except Exception as e:
         print(f"Error leyendo el mensaje '{clave}' del panel: {e}")
         return []
 
-    _cache[clave] = (ahora, filas)
+    _cache[clave_cache] = (ahora, filas)
     return filas
 
 

@@ -367,8 +367,19 @@ class ReminderSignalTests(unittest.TestCase):
         with PipelineHarness(ConversationState(active_agent="ALQUILER"), specialist=decision) as h:
             result = h.run(text="quiero alquilar una moto")
 
-        self.assertEqual(result.reminder, {"level": 1, "seconds": settings.FOLLOWUP_FIRST_DELAY_SECONDS})
+        self.assertEqual(result.reminder, {"level": 1, "seconds": 3600})
         self.assertEqual(h.saved_state.reminder_level, 0)
+
+    def test_disabled_project_does_not_schedule_smart_reminder(self):
+        decision = AgentDecision(action="reply", messages=["¿Dónde es su prueba?"], pending="La sede")
+        with patch(
+            "src.application.agent_pipeline.instrucciones_repository.configuracion_recordatorios",
+            return_value={"habilitado": False, "intervalo_minutos": 60},
+        ):
+            with PipelineHarness(ConversationState(active_agent="ALQUILER"), specialist=decision) as h:
+                result = h.run(text="quiero alquilar")
+
+        self.assertIsNone(result.reminder)
 
     def test_reply_without_pending_does_not_schedule_reminder(self):
         decision = AgentDecision(action="reply", messages=["Con gusto, aquí estamos"], pending="")

@@ -8,9 +8,17 @@ from fastapi.responses import RedirectResponse
 from src.core import security
 from src.core.plantillas import render
 from src.services import bot_interno
-from src.services import mensajeria, palabras_clave, trazabilidad
+from src.services import clientes_whatsapp, mensajeria, palabras_clave, trazabilidad
 
 router = APIRouter()
+
+
+def _proyecto_id(usuario: dict) -> int:
+    proyecto = clientes_whatsapp.por_usuario(usuario["id"])
+    if not proyecto:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Esta cuenta no está vinculada a un proyecto")
+    return int(proyecto["id"])
 
 
 # --- Mensajes (plantillas en cadena) ----------------------------------------
@@ -37,7 +45,7 @@ def listar_plantillas(request: Request, usuario=Depends(security.requiere_negoci
         request,
         "plantillas.html",
         usuario,
-        plantillas=mensajeria.listar_plantillas(),
+        plantillas=mensajeria.listar_plantillas(_proyecto_id(usuario)),
         abierto=int(abierto) if abierto.isdigit() else None,
         parte_abierta=int(parte) if parte.isdigit() else None,
     )
@@ -53,10 +61,11 @@ def crear_plantilla(
     """Un mensaje nace con su clave y un primer mensaje vacío que rellenar."""
     security.verificar_csrf(request, csrf)
     try:
-        plantilla = mensajeria.crear_plantilla(clave, usuario["usuario"])
+        proyecto_id = _proyecto_id(usuario)
+        plantilla = mensajeria.crear_plantilla(proyecto_id, clave, usuario["usuario"])
     except ValueError as e:
         return RedirectResponse(url=f"/mensajes?error={quote(str(e))}", status_code=303)
-    mensajeria.agregar_parte(plantilla["id"])
+    mensajeria.agregar_parte(proyecto_id, plantilla["id"])
     return RedirectResponse(url=f"/mensajes?abierto={plantilla['id']}", status_code=303)
 
 
@@ -71,7 +80,7 @@ def revisar_media_de_todos(
     no ser un número. FastAPI resuelve por orden de declaración.
     """
     security.verificar_csrf(request, csrf)
-    revisados, con_problema = mensajeria.revisar_todos_los_adjuntos()
+    revisados, con_problema = mensajeria.revisar_todos_los_adjuntos(_proyecto_id(usuario))
     if not revisados:
         aviso = "Ningún mensaje tiene adjuntos que revisar."
     elif con_problema:
@@ -91,7 +100,7 @@ def renombrar_plantilla(
 ):
     security.verificar_csrf(request, csrf)
     try:
-        mensajeria.renombrar_plantilla(plantilla_id, clave)
+        mensajeria.renombrar_plantilla(_proyecto_id(usuario), plantilla_id, clave)
     except ValueError as e:
         return RedirectResponse(
             url=f"/mensajes?abierto={plantilla_id}&error={quote(str(e))}", status_code=303
@@ -104,7 +113,7 @@ def eliminar_plantilla(
     request: Request, plantilla_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    mensajeria.eliminar_plantilla(plantilla_id)
+    mensajeria.eliminar_plantilla(_proyecto_id(usuario), plantilla_id)
     return RedirectResponse(url="/mensajes?aviso=Mensaje+eliminado", status_code=303)
 
 
@@ -113,7 +122,7 @@ def agregar_parte(
     request: Request, plantilla_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    mensajeria.agregar_parte(plantilla_id)
+    mensajeria.agregar_parte(_proyecto_id(usuario), plantilla_id)
     return RedirectResponse(url=f"/mensajes?abierto={plantilla_id}", status_code=303)
 
 
@@ -143,7 +152,9 @@ def guardar_parte(
     if con_media != "1":
         media_tipo, media_ref = "", ""
 
-    parte = mensajeria.guardar_parte(plantilla_id, orden, texto, media_tipo, media_ref)
+    parte = mensajeria.guardar_parte(
+        _proyecto_id(usuario), plantilla_id, orden, texto, media_tipo, media_ref
+    )
     destino = f"/mensajes?abierto={plantilla_id}&parte={orden}"
     if parte["media_ok"] is False:
         return RedirectResponse(url=f"{destino}&error={quote(parte['media_error'])}", status_code=303)
@@ -162,7 +173,7 @@ def eliminar_parte(
 ):
     """Borra un mensaje de la cadena y vuelve a la ventana de donde salió."""
     security.verificar_csrf(request, csrf)
-    mensajeria.eliminar_parte(parte_id)
+    mensajeria.eliminar_parte(_proyecto_id(usuario), parte_id)
     volver = f"?abierto={plantilla_id}&" if plantilla_id.isdigit() else "?"
     return RedirectResponse(url=f"/mensajes{volver}aviso=Mensaje+eliminado", status_code=303)
 
@@ -173,7 +184,7 @@ def revisar_media(
 ):
     """Vuelve a comprobar los adjuntos, por si el permiso del archivo cambió."""
     security.verificar_csrf(request, csrf)
-    mensajeria.revisar_media_de(plantilla_id)
+    mensajeria.revisar_media_de(_proyecto_id(usuario), plantilla_id)
     return RedirectResponse(url=f"/mensajes?abierto={plantilla_id}&aviso=Adjuntos+revisados", status_code=303)
 
 
@@ -193,7 +204,7 @@ def listar_palabras(request: Request, usuario=Depends(security.requiere_negocio)
         request,
         "palabras_clave.html",
         usuario,
-        palabras=palabras_clave.listar(),
+        palabras=palabras_clave.listar(_proyecto_id(usuario)),
         abierta=int(abierta) if abierta.isdigit() else None,
         pieza_abierta=int(pieza) if pieza.isdigit() else None,
         max_minutos=palabras_clave.MAX_MINUTOS,
@@ -209,7 +220,7 @@ def crear_palabra(
 ):
     security.verificar_csrf(request, csrf)
     try:
-        creada = palabras_clave.crear(palabra, usuario["usuario"])
+        creada = palabras_clave.crear(_proyecto_id(usuario), palabra, usuario["usuario"])
     except ValueError as e:
         return RedirectResponse(url=f"/palabras-clave?error={quote(str(e))}", status_code=303)
     return RedirectResponse(url=f"/palabras-clave?abierta={creada['id']}", status_code=303)
@@ -225,7 +236,7 @@ def renombrar_palabra(
 ):
     security.verificar_csrf(request, csrf)
     try:
-        palabras_clave.renombrar(palabra_id, palabra)
+        palabras_clave.renombrar(_proyecto_id(usuario), palabra_id, palabra)
     except ValueError as e:
         return _volver_a_palabra(palabra_id, error=str(e))
     return _volver_a_palabra(palabra_id, aviso="Palabra guardada")
@@ -236,7 +247,7 @@ def alternar_palabra(
     request: Request, palabra_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    fila = palabras_clave.alternar_activa(palabra_id)
+    fila = palabras_clave.alternar_activa(_proyecto_id(usuario), palabra_id)
     estado = "activada" if (fila or {}).get("activa") else "desactivada; el bot deja de reconocerla"
     return RedirectResponse(url=f"/palabras-clave?aviso={quote(f'Palabra {estado}')}", status_code=303)
 
@@ -246,7 +257,7 @@ def eliminar_palabra(
     request: Request, palabra_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    palabras_clave.eliminar(palabra_id)
+    palabras_clave.eliminar(_proyecto_id(usuario), palabra_id)
     return RedirectResponse(url="/palabras-clave?aviso=Palabra+clave+eliminada", status_code=303)
 
 
@@ -261,7 +272,7 @@ def agregar_pieza(
     security.verificar_csrf(request, csrf)
     if tipo not in ("mensaje", "recordatorio"):
         return _volver_a_palabra(palabra_id, error="Eso no es ni un mensaje ni un recordatorio.")
-    palabras_clave.agregar_pieza(palabra_id, tipo)
+    palabras_clave.agregar_pieza(_proyecto_id(usuario), palabra_id, tipo)
     return _volver_a_palabra(palabra_id)
 
 
@@ -291,7 +302,7 @@ def guardar_pieza(
 
     try:
         pieza = palabras_clave.guardar_pieza(
-            pieza_id,
+            _proyecto_id(usuario), pieza_id,
             texto=texto,
             media_tipo=media_tipo,
             media_ref=media_ref,
@@ -316,7 +327,7 @@ def eliminar_pieza(
     usuario=Depends(security.requiere_negocio),
 ):
     security.verificar_csrf(request, csrf)
-    palabras_clave.eliminar_pieza(pieza_id)
+    palabras_clave.eliminar_pieza(_proyecto_id(usuario), pieza_id)
     return _volver_a_palabra(palabra_id, aviso="Eliminado")
 
 
@@ -325,7 +336,7 @@ def revisar_media_palabra(
     request: Request, palabra_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    palabras_clave.revisar_media_de(palabra_id)
+    palabras_clave.revisar_media_de(_proyecto_id(usuario), palabra_id)
     return _volver_a_palabra(palabra_id, aviso="Adjuntos revisados")
 
 
@@ -355,10 +366,11 @@ def crear_chunk(
     """Un chunk es solo texto: ni tema ni título (ver migración 014)."""
     security.verificar_csrf(request, csrf)
     try:
-        fila = trazabilidad.crear_chunk(contenido)
+        proyecto_id = _proyecto_id(usuario)
+        fila = trazabilidad.crear_chunk(proyecto_id, contenido)
     except ValueError as e:
         return RedirectResponse(url=f"/conocimiento?error={quote(str(e))}", status_code=303)
-    _pedir_reindexado(fila["id"])
+    _pedir_reindexado(proyecto_id, fila["id"])
     return RedirectResponse(url="/conocimiento?aviso=Chunk agregado y enviado a vectorizar", status_code=303)
 
 
@@ -372,10 +384,11 @@ def actualizar_chunk(
 ):
     security.verificar_csrf(request, csrf)
     try:
-        trazabilidad.actualizar_chunk(chunk_id, contenido)
+        proyecto_id = _proyecto_id(usuario)
+        trazabilidad.actualizar_chunk(proyecto_id, chunk_id, contenido)
     except ValueError as e:
         return RedirectResponse(url=f"/conocimiento?error={quote(str(e))}", status_code=303)
-    _pedir_reindexado(chunk_id)
+    _pedir_reindexado(proyecto_id, chunk_id)
     return RedirectResponse(url="/conocimiento?aviso=Chunk actualizado y vuelto a vectorizar", status_code=303)
 
 
@@ -384,8 +397,9 @@ def alternar_chunk(
     request: Request, chunk_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    trazabilidad.alternar_chunk_activo(chunk_id)
-    _pedir_reindexado(chunk_id)
+    proyecto_id = _proyecto_id(usuario)
+    trazabilidad.alternar_chunk_activo(proyecto_id, chunk_id)
+    _pedir_reindexado(proyecto_id, chunk_id)
     return RedirectResponse(url="/conocimiento", status_code=303)
 
 
@@ -394,16 +408,17 @@ def eliminar_chunk(
     request: Request, chunk_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    trazabilidad.eliminar_chunk(chunk_id)
-    _pedir_reindexado(chunk_id)
+    proyecto_id = _proyecto_id(usuario)
+    trazabilidad.eliminar_chunk(proyecto_id, chunk_id)
+    _pedir_reindexado(proyecto_id, chunk_id)
     return RedirectResponse(url="/conocimiento?aviso=Contenido eliminado", status_code=303)
 
 
-def _pedir_reindexado(chunk_id: int) -> None:
+def _pedir_reindexado(proyecto_id: int, chunk_id: int) -> None:
     """Avisa al bot para que reindexe el chunk en Qdrant al instante.
 
     Es una optimización, no un requisito: si el bot no responde, el RAG se
     actualiza igual en la siguiente sincronización perezosa
     (RAG_SYNC_TTL_SECONDS). Por eso el fallo solo se registra y no se propaga.
     """
-    bot_interno.reindexar_chunk(chunk_id)
+    bot_interno.reindexar_chunk(proyecto_id, chunk_id)

@@ -93,37 +93,40 @@ def tomar_pendientes(limite: int = 20) -> list[dict[str, Any]]:
         if envio.get("lote_id"):
             ejecutar(
                 "UPDATE envios_lote SET proximo_en = NOW() + (%s || ' seconds')::interval "
-                "WHERE id = %s",
-                (str(_espera_hasta_el_siguiente()), envio["lote_id"]),
+                "WHERE proyecto_id = %s AND id = %s",
+                (str(_espera_hasta_el_siguiente()), envio["proyecto_id"], envio["lote_id"]),
             )
     return tomados
 
 
-def marcar_parte_enviada(envio_id: int, enviadas: int) -> None:
+def marcar_parte_enviada(proyecto_id: int, envio_id: int, enviadas: int) -> None:
     """Deja constancia de hasta dónde llegó la cadena.
 
     Si el envío falla en la parte 3 de 5, al reintentar se retoma desde la 3 y
     no se le repiten al cliente las dos que ya recibió.
     """
     ejecutar(
-        "UPDATE envios SET partes_enviadas = %s, actualizado_en = NOW() WHERE id = %s",
-        (int(enviadas), envio_id),
+        "UPDATE envios SET partes_enviadas = %s, actualizado_en = NOW() "
+        "WHERE proyecto_id = %s AND id = %s",
+        (int(enviadas), int(proyecto_id), envio_id),
     )
 
 
-def marcar_enviado(envio_id: int) -> None:
+def marcar_enviado(proyecto_id: int, envio_id: int) -> None:
     ejecutar(
         """
         UPDATE envios
         SET estado = 'enviado', enviado_en = NOW(), actualizado_en = NOW(),
             error_cliente = '', error_tecnico = ''
-        WHERE id = %s
+        WHERE proyecto_id = %s AND id = %s
         """,
-        (envio_id,),
+        (int(proyecto_id), envio_id),
     )
 
 
-def marcar_error(envio_id: int, mensaje_cliente: str, detalle_tecnico: str) -> None:
+def marcar_error(
+    proyecto_id: int, envio_id: int, mensaje_cliente: str, detalle_tecnico: str
+) -> None:
     """Registra el fallo separando lo accionable de la traza.
 
     `error_cliente` es lo que ve quien hizo el envío y puede arreglar solo
@@ -133,17 +136,18 @@ def marcar_error(envio_id: int, mensaje_cliente: str, detalle_tecnico: str) -> N
         """
         UPDATE envios
         SET estado = 'error', error_cliente = %s, error_tecnico = %s, actualizado_en = NOW()
-        WHERE id = %s
+        WHERE proyecto_id = %s AND id = %s
         """,
-        (mensaje_cliente[:500], detalle_tecnico[:4000], envio_id),
+        (mensaje_cliente[:500], detalle_tecnico[:4000], int(proyecto_id), envio_id),
     )
 
 
-def devolver_a_la_cola(envio_id: int) -> None:
+def devolver_a_la_cola(proyecto_id: int, envio_id: int) -> None:
     """Regresa a 'pendiente' un envío que quedó a medias (p. ej. el worker murió)."""
     ejecutar(
-        "UPDATE envios SET estado = 'pendiente', actualizado_en = NOW() WHERE id = %s AND estado = 'enviando'",
-        (envio_id,),
+        "UPDATE envios SET estado = 'pendiente', actualizado_en = NOW() "
+        "WHERE proyecto_id = %s AND id = %s AND estado = 'enviando'",
+        (int(proyecto_id), envio_id),
     )
 
 

@@ -1,8 +1,7 @@
 """Clientes (negocios) que conectan su WhatsApp, y la URL de webhook de cada uno.
 
-Ojo con la palabra: aquí "cliente" es el NEGOCIO al que le prestamos el
-servicio (hoy la escuela de manejo), no la persona que le escribe al bot. Esa
-otra acepción vive en `/admin/clientes` y en `seguimiento_clientes`.
+Esta tabla representa PROYECTOS, no a la persona que escribe al bot. El cliente
+final vive dentro de su proyecto, en conversaciones y `seguimiento_clientes`.
 
 Lo que se administra desde aquí es una credencial: el token de la URL es lo
 único que autentica los eventos que entran al bot. Por eso se puede rotar sin
@@ -13,6 +12,8 @@ import re
 import secrets
 import unicodedata
 from typing import Any
+
+import httpx
 
 from src.core.config import settings
 from src.db import pool
@@ -148,25 +149,19 @@ def por_usuario(usuario_id: int) -> dict[str, Any] | None:
     )
 
 
-def resumen_actividad() -> dict[str, Any]:
-    """Las cifras de cabecera del perfil: conversaciones, clientes y gasto.
-
-    Todavía no está partido por negocio: el bot atiende un solo número y las
-    tablas de actividad no llevan columna de negocio. Cuando haya un segundo,
-    hay que sellar el negocio en `conversation_messages` y `uso_eventos` y
-    filtrar aquí; hasta entonces, partirlo sería inventar una separación que la
-    base no tiene.
-    """
+def resumen_actividad(proyecto_id: int) -> dict[str, Any]:
+    """Las cifras agregadas de un único proyecto."""
     fila = pool.consultar_uno(
         """
         SELECT
-          (SELECT COUNT(DISTINCT (client_id, canal)) FROM conversation_messages) AS conversaciones,
-          (SELECT COUNT(*) FROM seguimiento_clientes)                            AS clientes,
-          (SELECT COALESCE(SUM(costo_cliente_microusd), 0) FROM uso_eventos)     AS facturado_microusd,
-          (SELECT COALESCE(SUM(costo_real_microusd), 0) FROM uso_eventos)        AS real_microusd,
-          (SELECT COUNT(*) FROM reportes WHERE NOT revisado)                     AS reportes_pendientes,
-          (SELECT MAX(created_at) FROM conversation_messages)                    AS ultima_actividad
-        """
+          (SELECT COUNT(DISTINCT (client_id, canal)) FROM conversation_messages WHERE proyecto_id = %s) AS conversaciones,
+          (SELECT COUNT(*) FROM seguimiento_clientes WHERE proyecto_id = %s) AS clientes,
+          (SELECT COALESCE(SUM(costo_cliente_microusd), 0) FROM uso_eventos WHERE proyecto_id = %s) AS facturado_microusd,
+          (SELECT COALESCE(SUM(costo_real_microusd), 0) FROM uso_eventos WHERE proyecto_id = %s) AS real_microusd,
+          (SELECT COUNT(*) FROM reportes WHERE proyecto_id = %s AND NOT revisado) AS reportes_pendientes,
+          (SELECT MAX(created_at) FROM conversation_messages WHERE proyecto_id = %s) AS ultima_actividad
+        """,
+        (int(proyecto_id),) * 6,
     )
     return fila or {}
 
@@ -264,6 +259,56 @@ def actualizar_credenciales(cliente_id: int, api_key: str = "", webhook_secret: 
             "UPDATE clientes_whatsapp SET wasender_webhook_secret = %s WHERE id = %s",
             (str(webhook_secret).strip(), int(cliente_id)),
         )
+
+
+def estado_wasender(api_key: str) -> dict[str, str]:
+    """Estado de la sesión sin devolver ni registrar la credencial.
+
+    Se usa únicamente en el perfil administrativo. Una caída del proveedor no
+    convierte la configuración en un error del dashboard: se distingue entre
+    token inválido, sesión desconectada y estado temporalmente no comprobable.
+    """
+    api_key = str(api_key or "").strip()
+    if not api_key:
+        return {
+            "codigo": "sin_configurar",
+            "texto": "Sin API Token",
+            "clase": "error",
+        }
+
+    try:
+        respuesta = httpx.get(
+            f"{settings.WASENDER_API_URL.rstrip('/')}/api/status",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=settings.WASENDER_STATUS_TIMEOUT_SECONDS,
+        )
+        if respuesta.status_code in (401, 403):
+            return {"codigo": "invalido", "texto": "Token rechazado", "clase": "error"}
+        respuesta.raise_for_status()
+        cuerpo = respuesta.json() or {}
+        estado = str(cuerpo.get("status") or "").strip().lower()
+        if not estado and isinstance(cuerpo.get("data"), dict):
+            estado = str(cuerpo["data"].get("status") or "").strip().lower()
+    except Exception:
+        return {
+            "codigo": "no_disponible",
+            "texto": "Estado no disponible",
+            "clase": "alerta",
+        }
+
+    if estado == "connected":
+        return {"codigo": "conectado", "texto": "Wasender conectado", "clase": "ok"}
+    if estado:
+        return {
+            "codigo": "desconectado",
+            "texto": f"Wasender: {estado}",
+            "clase": "alerta",
+        }
+    return {
+        "codigo": "desconocido",
+        "texto": "Estado no reconocido",
+        "clase": "alerta",
+    }
 
 
 def borrar_credenciales(cliente_id: int) -> int:

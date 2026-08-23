@@ -105,12 +105,9 @@ class Settings(BaseSettings):
     # como etiquetas [[frag:ID]] (no texto completo), así que cabe más contexto
     # sin inflar Redis ni el prompt.
     AGENT_HISTORY_LIMIT: int = 12
-    # Recordatorios inteligentes: tras responder, si el cliente no contesta en
-    # FOLLOWUP_FIRST_DELAY_SECONDS se evalúa un recordatorio con LLM; los
-    # siguientes niveles esperan FOLLOWUP_NEXT_DELAY_SECONDS. Nunca se envían
-    # más de FOLLOWUP_MAX_REMINDERS sin respuesta del cliente (anti-bucle).
-    FOLLOWUP_FIRST_DELAY_SECONDS: int = 40
-    FOLLOWUP_NEXT_DELAY_SECONDS: int = 7200
+    # El switch y el intervalo de los recordatorios viven por proyecto en
+    # Postgres (`proyecto_recordatorios`) y se administran desde el dashboard.
+    # El tope sí es una regla dura común: evita un bucle aunque el prompt cambie.
     FOLLOWUP_MAX_REMINDERS: int = 2
     RAG_EMBEDDING_MODEL: str = "text-embedding-3-small"
     RAG_SYNC_TTL_SECONDS: int = 300

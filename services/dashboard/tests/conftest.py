@@ -11,9 +11,38 @@ sola la primera vez.
 """
 
 import os
+import inspect
 
 import psycopg2
 import pytest
+
+
+class ServicioDeProyecto:
+    """Adapta llamadas unitarias al proyecto aislado de cada caso.
+
+    Las rutas no usan este adaptador: resuelven el proyecto desde la sesión. Es
+    solo una forma compacta de mantener explícito el ámbito en pruebas de
+    servicios con decenas de operaciones encadenadas.
+    """
+
+    def __init__(self, modulo, metodos: set[str], proyecto_id: int = 1):
+        self._modulo = modulo
+        self._metodos = metodos
+        self._proyecto_id = proyecto_id
+
+    def __getattr__(self, nombre):
+        atributo = getattr(self._modulo, nombre)
+        if nombre not in self._metodos or not callable(atributo):
+            return atributo
+
+        def en_proyecto(*args, **kwargs):
+            parametro = inspect.signature(atributo).parameters.get("proyecto_id")
+            if parametro and parametro.kind is inspect.Parameter.KEYWORD_ONLY:
+                kwargs.setdefault("proyecto_id", self._proyecto_id)
+                return atributo(*args, **kwargs)
+            return atributo(self._proyecto_id, *args, **kwargs)
+
+        return en_proyecto
 
 _BASE_DEV = os.environ.get(
     "POSTGRES_URL", "postgresql://mi_usuario_db:mi_password_seguro@postgres:5432/mi_base_de_datos"
@@ -52,6 +81,10 @@ from src.db.migrate import aplicar_migraciones  # noqa: E402
 
 # Orden importante: las hijas antes que las padres por las claves foráneas.
 _TABLAS = (
+    "proyecto_recordatorios",
+    "proyecto_instrucciones",
+    "bloqueos_permanentes",
+    "conversacion_negocio",
     "incidencias",
     "envios",
     # Las sesiones de envío. El CASCADE de `envios` no se las lleva (la clave
@@ -82,6 +115,8 @@ _TABLAS = (
     # la tabla de actividad del siguiente y desordenaba lo que se estaba
     # comprobando (quién fue el último en escribir).
     "seguimiento_clientes",
+    "resumen_mensual",
+    "keyword_registros",
     # El CASCADE se lleva sus piezas, pero la tabla de cabecera hay que
     # nombrarla: una palabra clave de un caso dispararía el flujo en el siguiente.
     "palabras_clave",
@@ -90,6 +125,27 @@ _TABLAS = (
 
 @pytest.fixture(scope="session", autouse=True)
 def _esquema():
+    # Una ejecución anterior puede haber quedado en el esquema 019 después de
+    # truncar el único proyecto. Para probar la migración del histórico se
+    # repone ese proyecto legado; nunca se toca la base de desarrollo.
+    try:
+        aplicada = pool.consultar_uno(
+            "SELECT 1 AS ok FROM schema_migrations WHERE nombre = %s",
+            ("020_aislamiento_completo_por_proyecto.sql",),
+        )
+        proyectos = pool.consultar_uno("SELECT COUNT(*) AS total FROM clientes_whatsapp")
+        if not aplicada and int((proyectos or {}).get("total") or 0) == 0:
+            pool.ejecutar(
+                """
+                INSERT INTO clientes_whatsapp (nombre, slug, webhook_token)
+                VALUES ('Proyecto legado de pruebas', 'proyecto-legado-pruebas',
+                        'token-proyecto-legado-pruebas')
+                """
+            )
+    except Exception:
+        # En una base completamente nueva las tablas todavía no existen; la
+        # migración 005 ya crea el único proyecto necesario.
+        pass
     aplicar_migraciones()
 
 
@@ -103,15 +159,37 @@ def _base_limpia():
     pool.ejecutar("DELETE FROM periodos_facturacion")
     pool.ejecutar("INSERT INTO periodos_facturacion (nota) VALUES ('periodo de pruebas')")
 
+    proyecto = pool.consultar_uno(
+        """
+        INSERT INTO clientes_whatsapp (nombre, slug, webhook_token)
+        VALUES ('Proyecto de pruebas', 'proyecto-de-pruebas', 'token-proyecto-de-pruebas')
+        RETURNING id
+        """
+    )
+    # Muchos tests de repositorio insertan filas crudas para preparar un caso.
+    # En producción los servicios exigen proyecto_id; aquí el default apunta al
+    # proyecto aislado recién creado y evita que esas semillas repitan ruido.
+    for tabla in (
+        "conversation_messages", "conversation_shots", "seguimiento_clientes",
+        "resumen_mensual", "users_blocked", "reportes", "keyword_registros",
+        "preguntas_sin_respuesta", "rag_chunks", "uso_eventos",
+        "plantillas_mensaje", "plantilla_partes", "palabras_clave",
+        "palabra_clave_piezas", "envios_lote", "envios",
+        "incidencias",
+    ):
+        pool.ejecutar(
+            f"ALTER TABLE {tabla} ALTER COLUMN proyecto_id SET DEFAULT {int(proyecto['id'])}"
+        )
+
     # Los mensajes del negocio (palabras clave, bienvenida) los siembra una
     # migración, y el TRUNCATE de arriba se los lleva. Se vuelven a insertar
     # porque el bot depende de que existan: probar contra una tabla vacía no
     # reflejaría el sistema real.
-    _sembrar_mensajes_del_negocio()
+    _sembrar_mensajes_del_negocio(proyecto["id"])
     yield
 
 
-def _sembrar_mensajes_del_negocio() -> None:
+def _sembrar_mensajes_del_negocio(proyecto_id: int) -> None:
     """Re-aplica la semilla de palabras clave y mensajes del negocio.
 
     Se replica la migración 016 y NO la 007, que fue la primera semilla: aquella
@@ -128,7 +206,21 @@ def _sembrar_mensajes_del_negocio() -> None:
     from src.db.migrate import DIRECTORIO_MIGRACIONES
 
     sql = (Path(DIRECTORIO_MIGRACIONES) / "016_palabras_clave.sql").read_text(encoding="utf-8")
-    pool.ejecutar(sql)
+    sql = sql.replace(
+        "ON CONFLICT (clave) DO NOTHING",
+        "ON CONFLICT (proyecto_id, clave) DO NOTHING",
+    )
+    # La migración histórica no conocía proyecto_id. Solo durante esta semilla
+    # de tests se da un default explícito y se retira en la misma transacción.
+    pool.ejecutar(
+        f"""
+        ALTER TABLE palabras_clave ALTER COLUMN proyecto_id SET DEFAULT {int(proyecto_id)};
+        ALTER TABLE plantillas_mensaje ALTER COLUMN proyecto_id SET DEFAULT {int(proyecto_id)};
+        ALTER TABLE palabra_clave_piezas ALTER COLUMN proyecto_id SET DEFAULT {int(proyecto_id)};
+        ALTER TABLE plantilla_partes ALTER COLUMN proyecto_id SET DEFAULT {int(proyecto_id)};
+        {sql}
+        """
+    )
 
 
 @pytest.fixture
@@ -154,9 +246,15 @@ def sesion_cliente(cliente_http):
 
 
 def _ingresar(cliente_http, usuario: str, password: str, rol: str):
-    from src.services import usuarios
+    from src.services import clientes_whatsapp, usuarios
 
-    usuarios.crear(usuario, password, rol, debe_cambiar=False)
+    cuenta = usuarios.crear(usuario, password, rol, debe_cambiar=False)
+    if rol == "cliente":
+        proyecto = pool.consultar_uno(
+            "SELECT id FROM clientes_whatsapp WHERE usuario_id IS NULL ORDER BY id LIMIT 1"
+        )
+        if proyecto:
+            clientes_whatsapp.vincular_cuenta(proyecto["id"], cuenta["id"])
     respuesta = cliente_http.post(
         "/login", data={"usuario": usuario, "password": password}, follow_redirects=False
     )

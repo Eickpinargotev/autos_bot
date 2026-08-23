@@ -63,10 +63,12 @@ def _crear_tablas_del_bot(conn):
     with conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users_blocked (
-                user_id VARCHAR(50) PRIMARY KEY,
+                proyecto_id INTEGER NOT NULL,
+                user_id VARCHAR(50) NOT NULL,
                 reason TEXT,
                 blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP
+                expires_at TIMESTAMP,
+                PRIMARY KEY (proyecto_id, user_id)
             )
         """)
         cur.execute("""

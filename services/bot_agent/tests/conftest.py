@@ -40,6 +40,8 @@ _MODULOS_CON_POSTGRES = (
     "src.infrastructure.repositories.unanswered_question_repository",
     "src.infrastructure.repositories.billing_repository",
     "src.infrastructure.repositories.postgres_user_repo",
+    "src.infrastructure.repositories.bloqueos_permanentes_repository",
+    "src.infrastructure.repositories.instrucciones_repository",
     "src.infrastructure.evals.conversation_shots",
     "src.application.rag_service",
     "src.application.seguimiento_service",
@@ -62,6 +64,7 @@ _MODULOS_CON_REDIS = (
     "src.application.conversation_reset",
     "src.infrastructure.repositories.conversation_state_repo",
     "src.infrastructure.tasks.celery_app",
+    "src.infrastructure.channels.inbound_registry",
     "src.infrastructure.channels.outbound_registry",
 )
 
@@ -76,6 +79,7 @@ _RETORNOS = {"ejecutar": 0, "consultar": [], "consultar_uno": None, "run_query":
 @pytest.fixture(autouse=True)
 def _aisla_servicios(monkeypatch):
     import importlib
+    from src.application.project_context import ambito_proyecto
 
     # Redis en memoria, UNO solo compartido por todos los módulos. Dos motivos
     # para que sea `fakeredis` y no un MagicMock:
@@ -113,4 +117,5 @@ def _aisla_servicios(monkeypatch):
             if hasattr(modulo, funcion):
                 monkeypatch.setattr(modulo, funcion, MagicMock(return_value=retorno))
 
-    yield
+    with ambito_proyecto(1):
+        yield

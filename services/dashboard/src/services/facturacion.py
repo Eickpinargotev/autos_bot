@@ -122,7 +122,7 @@ def listar_periodos() -> list[dict[str, Any]]:
 
 # --- Totales y desgloses -----------------------------------------------------
 
-def totales_de_periodo(periodo_id: int) -> dict[str, Any]:
+def totales_de_periodo(periodo_id: int, proyecto_id: int | None = None) -> dict[str, Any]:
     ids = ids_del_periodo(periodo_id)
     fila = pool.consultar_uno(
         """
@@ -133,9 +133,9 @@ def totales_de_periodo(periodo_id: int) -> dict[str, Any]:
                COALESCE(SUM(tokens_salida), 0)          AS tokens_salida,
                COUNT(*)                                 AS eventos
         FROM uso_eventos
-        WHERE periodo_id = ANY(%s)
+        WHERE periodo_id = ANY(%s) AND (%s IS NULL OR proyecto_id = %s)
         """,
-        (ids,),
+        (ids, proyecto_id, proyecto_id),
     ) or {}
     real = int(fila.get("real_microusd") or 0)
     cliente = int(fila.get("cliente_microusd") or 0)
@@ -166,7 +166,7 @@ ETIQUETAS_CATEGORIA = {
 _ORDEN_CATEGORIA = {"llm": 0, "audio": 1, "codigo": 2}
 
 
-def desglose_por_categoria(periodo_id: int) -> list[dict[str, Any]]:
+def desglose_por_categoria(periodo_id: int, proyecto_id: int | None = None) -> list[dict[str, Any]]:
     """Consumo separado por categoría: conversaciones, audios y automáticos.
 
     Las tres se cobran distinto y el negocio las quiere ver por separado: los
@@ -187,10 +187,10 @@ def desglose_por_categoria(periodo_id: int) -> list[dict[str, Any]]:
                COALESCE(SUM(costo_real_microusd), 0)    AS real_microusd,
                COALESCE(SUM(costo_cliente_microusd), 0) AS cliente_microusd
         FROM uso_eventos
-        WHERE periodo_id = ANY(%s)
+        WHERE periodo_id = ANY(%s) AND (%s IS NULL OR proyecto_id = %s)
         GROUP BY categoria
         """,
-        (ids,),
+        (ids, proyecto_id, proyecto_id),
     )
     resultado = [
         {
@@ -206,7 +206,7 @@ def desglose_por_categoria(periodo_id: int) -> list[dict[str, Any]]:
     return resultado
 
 
-def ahorro_por_cache(periodo_id: int) -> dict[str, Any]:
+def ahorro_por_cache(periodo_id: int, proyecto_id: int | None = None) -> dict[str, Any]:
     """Cuánto del prompt se reutilizó desde la caché del proveedor, y qué ahorró.
 
     El prompt del sistema es grande (>2900 tokens) y se repite en cada turno.
@@ -222,8 +222,9 @@ def ahorro_por_cache(periodo_id: int) -> dict[str, Any]:
                COALESCE(SUM(tokens_cacheados), 0) AS cacheados
         FROM uso_eventos
         WHERE periodo_id = ANY(%s) AND categoria = 'llm'
+          AND (%s IS NULL OR proyecto_id = %s)
         """,
-        (ids,),
+        (ids, proyecto_id, proyecto_id),
     ) or {}
     entrada = int(fila.get("entrada") or 0)
     cacheados = int(fila.get("cacheados") or 0)
@@ -261,7 +262,9 @@ def desglose_por_origen(periodo_id: int) -> list[dict[str, Any]]:
     ]
 
 
-def serie_diaria(periodo_id: int, dias: int = 30) -> list[dict[str, Any]]:
+def serie_diaria(
+    periodo_id: int, dias: int = 30, proyecto_id: int | None = None
+) -> list[dict[str, Any]]:
     """Consumo por día, para la gráfica de barras del panel."""
     ids = ids_del_periodo(periodo_id)
     filas = pool.consultar(
@@ -272,10 +275,11 @@ def serie_diaria(periodo_id: int, dias: int = 30) -> list[dict[str, Any]]:
                COALESCE(SUM(mensajes), 0)               AS mensajes
         FROM uso_eventos
         WHERE periodo_id = ANY(%s) AND ts >= NOW() - (%s || ' days')::interval
+          AND (%s IS NULL OR proyecto_id = %s)
         GROUP BY DATE(ts)
         ORDER BY dia
         """,
-        (ids, str(dias)),
+        (ids, str(dias), proyecto_id, proyecto_id),
     )
     return [
         {
@@ -325,7 +329,7 @@ def crear_tarifa(datos: dict[str, Any], usuario: str) -> dict[str, Any]:
 # --- Actividad por cliente ---------------------------------------------------
 
 def actividad_por_cliente(
-    periodo_id: int, limite: int = 200, incluir_costo_real: bool = False
+    proyecto_id: int, periodo_id: int, limite: int = 200, incluir_costo_real: bool = False
 ) -> list[dict[str, Any]]:
     """Una fila por conversación con la actividad y el consumo de cada cliente.
 
@@ -365,19 +369,20 @@ def actividad_por_cliente(
                COALESCE(u.mensajes_codigo, 0)           AS mensajes_codigo
         FROM seguimiento_clientes s
         FULL OUTER JOIN (
-            SELECT client_id, canal,
+            SELECT proyecto_id, client_id, canal,
                    SUM(costo_real_microusd)                                  AS real_microusd,
                    SUM(costo_cliente_microusd)                               AS cliente_microusd,
                    SUM(mensajes) FILTER (WHERE categoria = 'llm')            AS mensajes_llm,
                    SUM(mensajes) FILTER (WHERE categoria = 'codigo')         AS mensajes_codigo
             FROM uso_eventos
-            WHERE periodo_id = ANY(%s)
-            GROUP BY client_id, canal
-        ) u ON u.client_id = s.client_id AND u.canal = s.canal
+            WHERE proyecto_id = %s AND periodo_id = ANY(%s)
+            GROUP BY proyecto_id, client_id, canal
+        ) u ON u.proyecto_id = s.proyecto_id AND u.client_id = s.client_id AND u.canal = s.canal
+        WHERE COALESCE(s.proyecto_id, u.proyecto_id) = %s
         ORDER BY s.ultima_interaccion DESC NULLS LAST, COALESCE(u.cliente_microusd, 0) DESC
         LIMIT %s
         """,
-        (ids, int(limite)),
+        (int(proyecto_id), ids, int(proyecto_id), int(limite)),
     )
     return [
         {

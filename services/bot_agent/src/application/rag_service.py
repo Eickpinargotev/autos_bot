@@ -11,6 +11,7 @@ from src.core.config import settings
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from src.infrastructure.repositories.postgres_conn import consultar, consultar_uno
+from src.application.project_context import proyecto_actual
 
 
 # Structured Outputs (json_schema estricto): OpenAI garantiza la forma exacta
@@ -73,7 +74,7 @@ class RagService:
             else None
         )
         self.client = None
-        self._last_sync = 0.0
+        self._last_sync: dict[int, float] = {}
         try:
             from qdrant_client import QdrantClient
 
@@ -182,14 +183,18 @@ class RagService:
             return RagAnswer(has_answer=False)
 
     def sync_if_needed(self):
-        if time.time() - self._last_sync < settings.RAG_SYNC_TTL_SECONDS:
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return
+        ultima = self._last_sync.get(proyecto_id, 0.0)
+        if time.time() - ultima < settings.RAG_SYNC_TTL_SECONDS:
             return
         try:
             self.ensure_collection()
             count = self.client.count(collection_name=self.collection_name, exact=True).count
-            if count == 0 or time.time() - self._last_sync >= settings.RAG_SYNC_TTL_SECONDS:
+            if count == 0 or time.time() - ultima >= settings.RAG_SYNC_TTL_SECONDS:
                 self.sync_all_chunks()
-                self._last_sync = time.time()
+                self._last_sync[proyecto_id] = time.time()
         except Exception as e:
             print(f"Error sincronizando RAG lazy: {e}")
 
@@ -208,9 +213,13 @@ class RagService:
         Es la sustitución del antiguo webhook de NocoDB: ahora el disparo viene
         del propio dashboard, que es quien edita la base de conocimiento.
         """
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return {"upserted": 0, "deleted": 0, "ignored": 1}
         registro = consultar_uno(
-            "SELECT id, contenido FROM rag_chunks WHERE id = %s AND activo",
-            (int(chunk_id),),
+            "SELECT id, proyecto_id, contenido FROM rag_chunks "
+            "WHERE proyecto_id = %s AND id = %s AND activo",
+            (proyecto_id, int(chunk_id)),
         )
         if not registro:
             borrados = 1 if self.delete_record({"id": chunk_id}, self.chunks_table_id) else 0
@@ -227,7 +236,9 @@ class RagService:
         """
         try:
             return consultar(
-                "SELECT id, contenido FROM rag_chunks WHERE activo ORDER BY id"
+                "SELECT id, proyecto_id, contenido FROM rag_chunks "
+                "WHERE proyecto_id = %s AND activo ORDER BY id",
+                (proyecto_actual(),),
             )
         except Exception as e:
             print(f"Error leyendo chunks del RAG en Postgres: {e}")
@@ -258,7 +269,7 @@ class RagService:
             for chunk, vector in zip(chunks, vectors)
         ]
         self.client.upsert(collection_name=self.collection_name, points=points)
-        self._last_sync = time.time()
+        self._last_sync[proyecto_actual()] = time.time()
         return len(points)
 
     def delete_record(self, record: dict[str, Any], table_id: str) -> bool:
@@ -268,7 +279,7 @@ class RagService:
         try:
             self.ensure_collection()
             self.delete_point_ids([self.point_id(table_id, record_id)])
-            self._last_sync = time.time()
+            self._last_sync[proyecto_actual()] = time.time()
             return True
         except Exception as e:
             print(f"Error eliminando chunk RAG de Qdrant: {e}")
@@ -283,6 +294,13 @@ class RagService:
         de otro modo permanecerían para siempre contaminando las búsquedas.
         """
         try:
+            proyecto_id = proyecto_actual()
+            if not proyecto_id:
+                return 0
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+            filtro = Filter(
+                must=[FieldCondition(key="proyecto_id", match=MatchValue(value=proyecto_id))]
+            )
             deleted = 0
             offset = None
             while True:
@@ -292,6 +310,7 @@ class RagService:
                     offset=offset,
                     with_payload=True,
                     with_vectors=False,
+                    scroll_filter=filtro,
                 )
                 stale_point_ids = [
                     point.id
@@ -319,11 +338,19 @@ class RagService:
 
     def search(self, question: str) -> list[dict[str, Any]]:
         try:
+            proyecto_id = proyecto_actual()
+            if not proyecto_id:
+                return []
             vector = self.embed([question])[0]
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+            filtro = Filter(
+                must=[FieldCondition(key="proyecto_id", match=MatchValue(value=proyecto_id))]
+            )
             try:
                 result = self.client.query_points(
                     collection_name=self.collection_name,
                     query=vector,
+                    query_filter=filtro,
                     limit=3,
                     with_payload=True,
                 )
@@ -332,6 +359,7 @@ class RagService:
                 points = self.client.search(
                     collection_name=self.collection_name,
                     query_vector=vector,
+                    query_filter=filtro,
                     limit=3,
                     with_payload=True,
                 )
@@ -383,7 +411,7 @@ class RagService:
             record_id=record_id,
             table_id=table_id,
             text=text,
-            payload={"raw": record_data},
+            payload={"raw": record_data, "proyecto_id": int(record_data.get("proyecto_id") or 0)},
         )
 
     def record_id(self, record: dict[str, Any]) -> str:

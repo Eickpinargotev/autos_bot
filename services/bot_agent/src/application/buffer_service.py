@@ -1,6 +1,7 @@
 import redis
 from src.core.config import settings
 from src.domain.entities import Channel
+from src.application.project_context import proyecto_actual
 
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
@@ -39,7 +40,7 @@ _drain_if_current = redis_client.register_script(_DRAIN_IF_CURRENT_LUA)
 
 def scoped_key(prefix: str, channel: Channel | str, user_id: str) -> str:
     channel_value = channel.value if isinstance(channel, Channel) else channel
-    return f"{prefix}:{channel_value}:{user_id}"
+    return f"{prefix}:p{proyecto_actual()}:{channel_value}:{user_id}"
 
 class BufferService:
     @staticmethod

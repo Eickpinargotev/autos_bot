@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # El panel solo la usa para armar la URL que el administrador copia; si está
     # vacía se muestra la ruta sola y se avisa de que falta configurarla.
     PUBLIC_WEBHOOK_BASE_URL: str = ""
+    # El perfil administrativo comprueba el token contra WasenderAPI sin
+    # exponerlo al navegador. El timeout corto evita que una caída del proveedor
+    # deje bloqueada la página de configuración.
+    WASENDER_API_URL: str = "https://wasenderapi.com"
+    WASENDER_STATUS_TIMEOUT_SECONDS: float = 5.0
 
     class Config:
         env_file = ".env"

@@ -28,7 +28,7 @@ def inicio(request: Request):
         return RedirectResponse(url="/login", status_code=303)
     if usuario["debe_cambiar_password"]:
         return RedirectResponse(url="/password", status_code=303)
-    destino = "/admin/costos" if usuario["rol"] == security.ROL_ADMIN else "/factura"
+    destino = "/admin/negocios" if usuario["rol"] == security.ROL_ADMIN else "/conversaciones"
     return RedirectResponse(url=destino, status_code=303)
 
 

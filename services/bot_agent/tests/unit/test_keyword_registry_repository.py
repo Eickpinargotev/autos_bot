@@ -30,15 +30,15 @@ class KeywordRegistryRepositoryTests(unittest.TestCase):
         self.assertTrue(resultado)
         ejecutar_mock.assert_called_once()
         sql, params = ejecutar_mock.call_args.args
-        self.assertIn("ON CONFLICT (registro, canal) DO NOTHING", sql)
-        self.assertEqual(params, ("5061", "whatsapp", "Cliente", "tareas"))
+        self.assertIn("ON CONFLICT (proyecto_id, registro, canal) DO NOTHING", sql)
+        self.assertEqual(params, (1, "5061", "whatsapp", "Cliente", "tareas"))
 
     def test_register_if_missing_usa_nombre_por_defecto(self):
         with patch(f"{_MODULO}.ejecutar", return_value=1) as ejecutar_mock:
             KeywordRegistryRepository.register_if_missing("5061", "", Channel.TELEGRAM, "transporte")
 
         _, params = ejecutar_mock.call_args.args
-        self.assertEqual(params[2], "Desconocido")
+        self.assertEqual(params[3], "Desconocido")
 
     def test_register_if_missing_no_propaga_errores_de_base(self):
         """El registro es accesorio: no puede romper la atención al cliente."""
@@ -53,7 +53,7 @@ class KeywordRegistryRepositoryTests(unittest.TestCase):
 
         sql, params = ejecutar_mock.call_args.args
         self.assertIn("DELETE FROM keyword_registros", sql)
-        self.assertEqual(params, ("5061", "whatsapp"))
+        self.assertEqual(params, (1, "5061", "whatsapp"))
 
     def test_exists_devuelve_true_cuando_hay_fila(self):
         with patch(f"{_MODULO}.consultar_uno", return_value={"id": 1, "registro": "5061"}):

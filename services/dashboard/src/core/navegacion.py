@@ -21,14 +21,11 @@ Tres cosas distintas que antes se llamaban todas «cliente»:
 Son dos trabajos distintos:
 
 * **Administrador** (nosotros). Ve la lista de **proyectos**. Su trabajo es
-  facturarlos, ver qué falló y entrar a su perfil cuando reclaman algo. Por eso
-  ve incidencias técnicas y conversaciones —para resolver problemas—, y NO ve el
-  conocimiento, las preguntas ni los reportes: ese es el trabajo del proyecto,
-  no el nuestro.
+  facturarlos, ver qué falló y entrar a su cuenta mediante suplantación auditada
+  cuando necesita soporte. No abre conversaciones ni bloqueos directamente.
 * **Proyecto** (nuestro cliente). Administra su catálogo, su base de
-  conocimiento y sus mensajes. **No ve las conversaciones**: son de sus
-  clientes, y para lo que él necesita ya están los reportes y las preguntas sin
-  responder. Tampoco ve el costo real: eso es nuestro margen, no su factura.
+  conocimiento, mensajes, conversaciones y bloqueos permanentes. No ve el costo
+  real: eso es nuestro margen, no su factura.
 
 ## Lo de la cuenta no se repite en el lateral, ni es una página
 
@@ -60,29 +57,9 @@ SECCIONES_ADMIN: list[dict[str, Any]] = [
             # La URL sigue siendo `/admin/negocios`: cambiar la etiqueta no
             # obliga a romper los enlaces que ya existen ni el histórico.
             {"etiqueta": "Proyectos", "url": "/admin/negocios", "icono": "clientes", "prefijo": True},
-            # "Conversaciones" NO va aquí. Una lista con los clientes de todos
-            # los proyectos mezclados no se puede leer: un chat solo se entiende
-            # dentro del proyecto al que le escribieron. Se entra por el perfil
-            # del proyecto, que además es donde ya se estaba mirando su
-            # actividad. Las rutas `/admin/logs*` siguen existiendo (el enlace
-            # directo a un chat funciona), solo se quita el atajo del menú:
-            # ocultar un enlace no restringe nada — eso lo decide `requiere_admin`.
-            # Los bloqueos SÍ van en el menú, aunque las conversaciones no: son
-            # pocos, se buscan por número y la lista no pierde sentido al
-            # mezclar proyectos (además dice a cuál pertenece cada uno). Lo que
-            # no se podía hacer sin entrar a la base era levantarlos.
-            {"etiqueta": "Bloqueos", "url": "/admin/bloqueos", "icono": "candado"},
+            # Conversaciones y bloqueos solo existen dentro de una sesión de
+            # proyecto; soporte entra mediante la suplantación auditada.
             {"etiqueta": "Incidencias", "url": "/admin/incidencias", "icono": "alerta"},
-            # Oculta: se entra por el perfil del cliente, pero la página existe
-            # y necesita su miga de pan cuando se abre un chat a pantalla
-            # completa (por ejemplo desde un enlace directo).
-            {
-                "etiqueta": "Conversaciones",
-                "url": "/admin/logs",
-                "icono": "chat",
-                "prefijo": True,
-                "oculta": True,
-            },
         ],
     },
     {
@@ -125,7 +102,7 @@ SECCIONES_NEGOCIO: list[dict[str, Any]] = [
     {
         "titulo": "Mi proyecto",
         "paginas": [
-            {"etiqueta": "Clientes", "url": "/clientes", "icono": "clientes"},
+            {"etiqueta": "Conversaciones", "url": "/conversaciones", "icono": "chat", "prefijo": True},
             {"etiqueta": "Reportes", "url": "/reportes", "icono": "documento"},
             {"etiqueta": "Mi consumo", "url": "/factura", "icono": "dinero"},
         ],
@@ -133,6 +110,7 @@ SECCIONES_NEGOCIO: list[dict[str, Any]] = [
     {
         "titulo": "Agente IA",
         "paginas": [
+            {"etiqueta": "Prompts", "url": "/agente/instrucciones", "icono": "ajustes"},
             {"etiqueta": "Conocimiento", "url": "/conocimiento", "icono": "libro"},
             {"etiqueta": "Preguntas", "url": "/preguntas", "icono": "pregunta"},
         ],

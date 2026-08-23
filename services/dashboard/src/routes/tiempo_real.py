@@ -46,9 +46,10 @@ CABECERAS = {
 async def eventos_del_panel(usuario=Depends(security.requiere_sesion)):
     """Flujo SSE con los temas que van cambiando."""
     permitidos = eventos.topics_para(usuario)
+    ambito = eventos.ambito_para(usuario)
 
     async def flujo():
-        async with eventos.suscribirse() as cola:
+        async with eventos.suscribirse(ambito) as cola:
             # Un primer comentario cierra la negociación y le confirma al
             # navegador que la conexión está viva (algunos proxies no la dan por
             # establecida hasta el primer byte).

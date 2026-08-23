@@ -9,9 +9,17 @@ from fastapi.responses import RedirectResponse
 from src.core import security
 from src.core.plantillas import render
 from src.services import envios as svc_envios
-from src.services import mensajeria
+from src.services import clientes_whatsapp, mensajeria
 
 router = APIRouter()
+
+
+def _proyecto_id(usuario: dict) -> int:
+    proyecto = clientes_whatsapp.por_usuario(usuario["id"])
+    if not proyecto:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Esta cuenta no está vinculada a un proyecto")
+    return int(proyecto["id"])
 
 
 @router.get("/enviar")
@@ -27,7 +35,10 @@ def formulario(request: Request, usuario=Depends(security.requiere_negocio)):
         "enviar.html",
         usuario,
         categorias=svc_envios.CATEGORIAS,
-        opciones={clave: svc_envios.opciones(clave) for clave in svc_envios.CATEGORIAS},
+        opciones={
+            clave: svc_envios.opciones(_proyecto_id(usuario), clave)
+            for clave in svc_envios.CATEGORIAS
+        },
         canales=mensajeria.CANALES,
     )
 
@@ -57,6 +68,7 @@ def encolar(
 
     try:
         lote = svc_envios.crear_lote(
+            proyecto_id=_proyecto_id(usuario),
             categoria=categoria,
             referencia_id=referencia_id,
             canal=canal,
@@ -104,7 +116,10 @@ def sesiones(request: Request, usuario=Depends(security.requiere_negocio)):
 
 
 def _datos_de_envios(usuario: dict) -> dict:
-    lotes = [svc_envios.con_progreso(lote) for lote in svc_envios.listar_lotes()]
+    lotes = [
+        svc_envios.con_progreso(lote)
+        for lote in svc_envios.listar_lotes(_proyecto_id(usuario))
+    ]
     return {
         "lotes": lotes,
         "retencion_dias": svc_envios.RETENCION_DIAS,
@@ -128,8 +143,10 @@ def destinos(
         request,
         "_envio_destinos.html",
         usuario,
-        lote=svc_envios.obtener_lote(lote_id),
-        destinos=svc_envios.destinos_de(lote_id, solo_fallidos=solo_fallidos),
+        lote=svc_envios.obtener_lote(_proyecto_id(usuario), lote_id),
+        destinos=svc_envios.destinos_de(
+            _proyecto_id(usuario), lote_id, solo_fallidos=solo_fallidos
+        ),
         solo_fallidos=solo_fallidos,
         max_intentos=mensajeria.MAX_INTENTOS,
     )
@@ -140,7 +157,7 @@ def cancelar(
     request: Request, lote_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    quitados = svc_envios.cancelar(lote_id)
+    quitados = svc_envios.cancelar(_proyecto_id(usuario), lote_id)
     aviso = f"Sesión cancelada: {quitados} envío(s) no saldrán. Lo ya enviado no se puede deshacer."
     return RedirectResponse(url=f"/envios?aviso={quote(aviso)}", status_code=303)
 
@@ -150,7 +167,7 @@ def eliminar(
     request: Request, lote_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    svc_envios.eliminar_lote(lote_id)
+    svc_envios.eliminar_lote(_proyecto_id(usuario), lote_id)
     return RedirectResponse(url="/envios?aviso=Sesión+eliminada+del+historial", status_code=303)
 
 
@@ -161,7 +178,7 @@ def reintentar(
     request: Request, envio_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    ok, mensaje = mensajeria.reintentar(envio_id)
+    ok, mensaje = mensajeria.reintentar(_proyecto_id(usuario), envio_id)
     clave = "aviso" if ok else "error"
     return RedirectResponse(url=f"/envios?{clave}={quote(mensaje)}", status_code=303)
 
@@ -171,6 +188,6 @@ def reportar(
     request: Request, envio_id: int, csrf: str = Form(""), usuario=Depends(security.requiere_negocio)
 ):
     security.verificar_csrf(request, csrf)
-    ok, mensaje = mensajeria.reportar(envio_id, usuario["usuario"])
+    ok, mensaje = mensajeria.reportar(_proyecto_id(usuario), envio_id, usuario["usuario"])
     clave = "aviso" if ok else "error"
     return RedirectResponse(url=f"/envios?{clave}={quote(mensaje)}", status_code=303)

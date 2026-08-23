@@ -13,7 +13,12 @@ tarea y el cliente recibe el mismo recordatorio una y otra vez.
 import pytest
 
 from src.services import media, palabras_clave
-from tests.conftest import token_csrf
+from tests.conftest import ServicioDeProyecto, token_csrf
+
+palabras_clave = ServicioDeProyecto(palabras_clave, {
+    "listar", "obtener", "crear", "renombrar", "alternar_activa", "eliminar",
+    "piezas_de", "agregar_pieza", "guardar_pieza", "eliminar_pieza", "revisar_media_de",
+})
 
 
 # --- La palabra ---------------------------------------------------------------

@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from src.application.buffer_service import redis_client, scoped_key
+from src.application.project_context import ambito_proyecto, proyecto_actual
 from src.core.config import settings
 from src.domain.entities import Channel
 from src.infrastructure.repositories import billing_repository, precios_repository
@@ -259,15 +260,18 @@ def registrar_intervencion_humana(client_id: str, canal: Channel | str) -> None:
     poco frecuente, y el panel del administrador debe reflejarlo enseguida.
     """
     try:
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return
         ejecutar(
             """
-            INSERT INTO seguimiento_clientes (client_id, canal, intervenciones_humano, ultima_intervencion_humano)
-            VALUES (%s, %s, 1, NOW())
-            ON CONFLICT (client_id, canal) DO UPDATE SET
+            INSERT INTO seguimiento_clientes (proyecto_id, client_id, canal, intervenciones_humano, ultima_intervencion_humano)
+            VALUES (%s, %s, %s, 1, NOW())
+            ON CONFLICT (proyecto_id, client_id, canal) DO UPDATE SET
                 intervenciones_humano = seguimiento_clientes.intervenciones_humano + 1,
                 ultima_intervencion_humano = NOW()
             """,
-            (str(client_id), _canal_value(canal)),
+            (proyecto_id, str(client_id), _canal_value(canal)),
         )
     except Exception as e:
         print(f"Error registrando intervención humana: {e}")
@@ -348,7 +352,7 @@ def flush_cliente(client_id: str, canal: Channel | str) -> bool:
 
 def flush_mes(mes: str) -> bool:
     """Vuelca los deltas acumulados del mes a su fila de resumen_mensual."""
-    lock_key = f"{MES_LOCK_PREFIX}:{mes}"
+    lock_key = f"p{proyecto_actual()}:{MES_LOCK_PREFIX}:{mes}"
     if not redis_client.set(lock_key, "1", nx=True, ex=_LOCK_TTL_SECONDS):
         return False
     try:
@@ -388,21 +392,25 @@ def flush_pendientes() -> int:
     caídas de NocoDB. Devuelve cuántos buffers se intentaron volcar.
     """
     intentos = 0
-    vistos: set[tuple[str, str]] = set()
+    vistos: set[tuple[str, str, str]] = set()
     for prefix in (DELTAS_PREFIX, HISTORIAL_PREFIX):
-        for key in redis_client.scan_iter(match=f"{prefix}:*", count=200):
-            partes = str(key).split(":", 2)
-            if len(partes) != 3:
+        for key in redis_client.scan_iter(match=f"p*:{prefix}:*", count=200):
+            partes = str(key).split(":", 3)
+            if len(partes) != 4 or not partes[0].startswith("p"):
                 continue
-            canal, client_id = partes[1], partes[2]
-            if (canal, client_id) in vistos:
+            proyecto_id, canal, client_id = partes[0][1:], partes[2], partes[3]
+            if not proyecto_id.isdigit() or (proyecto_id, canal, client_id) in vistos:
                 continue
-            vistos.add((canal, client_id))
-            flush_cliente(client_id, canal)
+            vistos.add((proyecto_id, canal, client_id))
+            with ambito_proyecto(int(proyecto_id)):
+                flush_cliente(client_id, canal)
             intentos += 1
-    for key in redis_client.scan_iter(match=f"{MES_DELTAS_PREFIX}:*", count=200):
-        mes = str(key).split(":", 1)[1]
-        flush_mes(mes)
+    for key in redis_client.scan_iter(match=f"p*:{MES_DELTAS_PREFIX}:*", count=200):
+        partes = str(key).split(":", 2)
+        if len(partes) != 3 or not partes[0][1:].isdigit():
+            continue
+        with ambito_proyecto(int(partes[0][1:])):
+            flush_mes(partes[2])
         intentos += 1
     return intentos
 
@@ -516,7 +524,7 @@ def _mes_actual() -> str:
 
 
 def _mes_key(mes: str) -> str:
-    return f"{MES_DELTAS_PREFIX}:{mes}"
+    return f"p{proyecto_actual()}:{MES_DELTAS_PREFIX}:{mes}"
 
 
 def _now_iso() -> str:

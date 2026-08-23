@@ -1,39 +1,49 @@
-{# El hilo del chat, sin el armazón de la página.
-
-   Vive aparte porque se usa en DOS sitios y tiene que verse igual en los
-   dos: la página completa (`conversacion.html`) y la ventana flotante del
-   perfil del negocio, que lo pide por fetch. Duplicarlo garantizaría que un
-   día las dos vistas dejen de coincidir. #}
-{# El fragmento se sirve suelto (sin base.html), así que importa sus iconos: sin
-   esto, la ventana flotante fallaría al pintar el botón de eliminar. #}
+{# Hilo del dueño del proyecto. Las rutas resuelven el proyecto desde la sesión. #}
 {% import "_iconos.html" as iconos %}
 
 <div class="panel linea" style="justify-content:space-between">
-  {# El bloqueo se ve y se levanta AQUÍ, que es donde uno se da cuenta de que el
-     bot dejó de contestar. Buscarlo en otra pantalla sería el paso que nadie da. #}
-  {% if bloqueo %}
-  <span class="pastilla alerta">
-    bloqueado{% if bloqueo.permanente %} sin vencimiento{% else %} hasta {{ bloqueo.expires_at | fecha }}{% endif %}
-  </span>
-  <form method="post" action="/admin/bloqueos/{{ canal }}/{{ client_id }}/desbloquear">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="volver" value="{{ volver_tras_desbloquear }}">
-    <button class="mini">Desbloquear</button>
-  </form>
-  {% else %}
-  <span class="sub" style="margin:0">Las horas son las del negocio, no las del servidor.</span>
+  <span class="sub" style="margin:0">Las horas son las de tu proyecto.</span>
+  {% if canal == 'whatsapp' %}
+    {% if bloqueo_temporal %}
+    <span class="pastilla alerta" data-pausa-ia>
+      IA pausada{% if bloqueo_temporal.expires_at %} hasta {{ bloqueo_temporal.expires_at | fecha }}{% endif %}
+    </span>
+    {% endif %}
+    {% if bloqueo_permanente %}
+    <span class="pastilla alerta">la IA no responde a este número</span>
+    <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/bloqueo/eliminar"
+          data-conv-accion="bloqueo">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini">Permitir respuestas</button>
+    </form>
+    {% else %}
+    <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/bloqueo"
+          data-conv-accion="bloqueo">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini">No responder más</button>
+    </form>
+    {% endif %}
   {% endif %}
   <span style="flex:1"></span>
-  <a class="boton mini" href="/admin/logs/{{ canal }}/{{ client_id }}{{ '' if internos else '?internos=1' }}">
-    {{ 'Ocultar' if internos else 'Ver' }} eventos técnicos ({{ resumen.eventos or 0 }})
-  </a>
-  {# Eliminar se ofrece AQUÍ y no en la lista: así se borra el chat que se está
-     leyendo, no una fila de una lista que se puede confundir con la de al lado. #}
   <button class="icono-accion peligro" data-abre="borrar-conversacion"
           title="Eliminar esta conversación" aria-label="Eliminar esta conversación">
     {{ iconos.icono('basura') }}
   </button>
 </div>
+
+{% if canal == 'whatsapp' %}
+<form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/responder"
+      class="panel compositor-chat" data-conv-responder>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="respuesta-{{ client_id }}">Responder como dueño del negocio</label>
+  <textarea id="respuesta-{{ client_id }}" name="texto" rows="3" maxlength="4000"
+            required placeholder="Escribe tu respuesta…"></textarea>
+  <div class="linea" style="justify-content:space-between">
+    <span class="sub">Al enviar, la IA se pausará 12 días en este chat.</span>
+    <button class="primario">Enviar como dueño</button>
+  </div>
+</form>
+{% endif %}
 
 <dialog class="flotante" id="borrar-conversacion">
   <div class="cabecera">
@@ -42,48 +52,30 @@
   </div>
   <div class="cuerpo">
     <p style="margin-top:0">
-      Se borran los {{ resumen.mensajes or 0 }} mensajes y los
-      {{ resumen.eventos or 0 }} eventos técnicos de este chat, y el bot lo olvida:
-      si esta persona vuelve a escribir, empieza de cero. No se puede deshacer.
+      Se borran los {{ resumen.mensajes or 0 }} mensajes de este chat y el bot lo
+      olvida. Si esta persona vuelve a escribir, empieza de cero. No se puede deshacer.
     </p>
-    <p class="sub">
-      Lo facturado no cambia: el consumo ya registrado se cobra igual, aquí solo
-      desaparece la conversación.
-    </p>
-    <form method="post" action="/admin/logs/{{ canal }}/{{ client_id }}/eliminar"
-          class="linea" style="justify-content:flex-end">
+    <p class="sub">El consumo ya facturado no cambia.</p>
+    <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/eliminar"
+          class="linea" style="justify-content:flex-end" data-conv-accion="eliminar">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="volver" value="{{ volver_a }}">
       <button class="mini" type="button" data-cierra>Cancelar</button>
       <button class="primario">Sí, eliminar</button>
     </form>
   </div>
 </dialog>
 
-{# El chat en vivo se cuelga de aquí: `data-cola` dice a qué ruta pedir lo nuevo
-   y `data-ultimo-id` desde qué mensaje. Al llegar un aviso del tema
-   «conversaciones», el navegador pide solo lo posterior y lo AÑADE al final —
-   no repinta el hilo—, así que no se pierde el sitio en el que ibas leyendo ni
-   los mensajes anteriores que ya habías cargado.
-
-   `data-dia` guarda el día del último mensaje pintado, que es lo que el
-   servidor necesita para no repetir el separador de fecha en cada tanda. #}
-{# `en_el_final` importa: si estás leyendo una tanda ANTERIOR (llegaste por
-   «Cargar mensajes anteriores»), el último mensaje a la vista es viejo y pedir
-   «lo posterior a este» traería media conversación de golpe. Ahí la cola se
-   apaga; vuelve al entrar de nuevo al chat. #}
 <div class="panel chat"
      {% if en_el_final %}
-     data-cola="/admin/logs/{{ canal }}/{{ client_id }}?fragmento=1{{ '&internos=1' if internos }}"
+     data-cola="/conversaciones/{{ canal }}/{{ client_id }}?fragmento=1"
      data-ultimo-id="{{ mensajes[-1].id if mensajes else 0 }}"
      data-dia="{{ (mensajes[-1].created_at | dia_clave) if mensajes else '' }}"
      {% endif %}>
   {% if hay_mas %}
   <a class="boton mini mas-antiguos"
-     href="/admin/logs/{{ canal }}/{{ client_id }}?antes={{ cursor }}{{ '&internos=1' if internos }}">
+     href="/conversaciones/{{ canal }}/{{ client_id }}?antes={{ cursor }}">
     Cargar mensajes anteriores
   </a>
   {% endif %}
-
   {% include "_conversacion_burbujas.html" %}
 </div>

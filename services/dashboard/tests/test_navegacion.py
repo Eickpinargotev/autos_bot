@@ -28,13 +28,13 @@ def test_el_lateral_no_repite_lo_del_menu_de_la_cuenta():
     assert "/admin/configuracion" not in urls
     assert "/password" not in urls and "/cuenta" not in urls
     # …y lo del día a día sí sigue ahí.
-    assert {"/admin/negocios", "/admin/bloqueos", "/admin/costos"} <= urls
+    assert {"/admin/negocios", "/admin/incidencias", "/admin/costos"} <= urls
 
 
 def test_una_pagina_oculta_no_se_dibuja_en_el_lateral(sesion_admin):
     cuerpo = sesion_admin.get("/admin/costos").text
     assert 'href="/admin/logs"' not in cuerpo
-    assert 'href="/admin/bloqueos"' in cuerpo
+    assert 'href="/admin/bloqueos"' not in cuerpo
 
 
 # --- Miga de pan --------------------------------------------------------------
@@ -74,8 +74,8 @@ def test_la_marca_del_lateral_es_la_plataforma(sesion_admin):
 
 def test_el_lateral_de_un_proyecto_dice_en_cual_estas(sesion_cliente):
     cuenta = usuarios.buscar_por_usuario("cliente_test")
-    negocio = clientes_whatsapp.crear("Escuela de Manejo")
-    clientes_whatsapp.vincular_cuenta(negocio["id"], cuenta["id"])
+    negocio = clientes_whatsapp.por_usuario(cuenta["id"])
+    clientes_whatsapp.actualizar_config(negocio["id"], nombre="Escuela de Manejo")
 
     cuerpo = sesion_cliente.get("/factura").text
 

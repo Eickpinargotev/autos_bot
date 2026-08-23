@@ -27,9 +27,9 @@ Infraestructura de apoyo:
 
 | Servicio    | Uso                                                          |
 | ----------- | ------------------------------------------------------------ |
-| `postgres`  | **Fuente de verdad**: conversaciones, seguimiento, facturación, catálogos, envíos y usuarios del panel |
-| `redis`     | Estado/historial activo de la conversación, buffer de mensajes y broker/result backend de Celery |
-| `qdrant`    | Base vectorial para el RAG (`escuela_manejo_kb`)             |
+| `postgres`  | **Fuente de verdad**: datos operativos, todos con `proyecto_id`, y usuarios del panel |
+| `redis`     | Estado activo y colas; cada clave comercial incluye proyecto + canal + cliente final |
+| `qdrant`    | Base vectorial RAG con filtro obligatorio por proyecto       |
 
 El código del bot sigue una organización por capas en `services/bot_agent/src/`
 (`domain/`, `application/`, `infrastructure/`, `core/`).
@@ -90,9 +90,23 @@ lista completa.
 docker compose -f docker-compose.local.yml up --build
 ```
 
-Expone Postgres (5432), Redis (6379), Qdrant (6333/6334), el webhook (8010) y el
-**dashboard en http://localhost:8020**, y monta el código de ambos servicios para
-recarga en caliente.
+Publica Postgres, Redis, Qdrant, el webhook y el dashboard, y monta el código de
+ambos servicios para recarga en caliente.
+
+**Los puertos del host son automáticos**: Docker elige uno libre para cada
+servicio, así que esta pila no choca con otra que ya tenga ocupado el 5432 o el
+8020. Para saber en cuál quedó el panel:
+
+```bash
+docker compose -f docker-compose.local.yml port dashboard 8020
+```
+
+`docker compose -f docker-compose.local.yml ps` los lista todos. El puerto cambia
+cada vez que se recrea el contenedor; si quieres uno fijo, ponlo en el `.env`
+(`DASHBOARD_PORT=8020`, `POSTGRES_PORT=5432`, `REDIS_PORT=6379`, `QDRANT_PORT`,
+`QDRANT_GRPC_PORT`, `WEBHOOK_PORT`). Dentro de la red de Docker los servicios se
+siguen hablando por el puerto de siempre (`postgres:5432`), así que esto no toca
+ninguna configuración de la aplicación.
 
 La primera vez, el dashboard crea el usuario administrador y **imprime en los logs
 una contraseña temporal** (o usa `ADMIN_BOOTSTRAP_PASSWORD`). Se pide cambiarla al
@@ -130,8 +144,7 @@ datos es el mismo con una pestaña abierta que con veinte, y con el panel cerrad
 consulta nada. El chat es el único que no se repinta — se le añaden los mensajes nuevos
 al final, así que no se pierde el sitio en el que ibas leyendo.
 
-La navegación está organizada en un menú lateral por secciones —Facturación, Clientes,
-Agente IA, Mensajería y Configuración—, con una barra superior que indica dónde estás y
+La navegación está organizada por rol, con una barra superior que indica dónde estás y
 el menú de la cuenta. Las secciones y sus páginas se declaran en un solo sitio,
 `src/core/navegacion.py`: añadir una página al panel es añadir una línea ahí (y su ruta,
 que es quien decide de verdad el acceso). `/admin/configuracion` reúne en una pantalla
@@ -140,13 +153,19 @@ recuperación por Telegram y envíos— sin mostrar nunca el valor de un secreto
 
 ### Roles
 
-| | `cliente` | `admin` |
+| | Dueño (`cliente`) | Administrador |
 | --- | --- | --- |
-| Su consumo facturado, en vivo | ✅ | ✅ |
-| Mensajes, palabras clave, enviar, historial de envíos | ✅ | ✅ |
+| Conversaciones y bloqueos permanentes de su proyecto | ✅ | Solo mediante suplantación auditada |
+| Conocimiento, preguntas y prompts comerciales versionados | ✅ | Solo mediante suplantación auditada |
+| Mensajes, palabras clave, envíos e historial propios | ✅ | Solo mediante suplantación auditada |
+| Consumo facturado del proyecto | ✅ | Agregado global y desglose por proyecto |
 | **Costo real del proveedor y margen** | ❌ | ✅ |
-| Logs de conversación, reportes, incidencias | ❌ | ✅ |
-| Tarifas, cierre de periodos, usuarios, base de conocimiento | ❌ | ✅ |
+| Proyectos, incidencias, tarifas, periodos y cuentas | ❌ | ✅ |
+
+Cada entidad operativa pertenece explícitamente a un proyecto. El mismo número puede
+escribir a dos proyectos sin compartir historial, memoria Redis, bloqueo, consumo,
+contenido ni envíos. Las rutas del dueño resuelven el proyecto desde la sesión; no
+aceptan un `proyecto_id` enviado por el navegador y responden 404 ante ids ajenos.
 
 `security.requiere_admin` es la única puerta del rol administrador: un `cliente` recibe
 403 aunque escriba la URL a mano, y los tests recorren la lista completa de rutas

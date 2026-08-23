@@ -89,8 +89,9 @@ pregunta con las opciones de servicio si el LLM falla).
 
 ## Recordatorios inteligentes
 
-Tras cada respuesta con algo pendiente se agenda `send_smart_reminder`
-(Celery, countdown `FOLLOWUP_FIRST_DELAY_SECONDS`, default 40s). Al vencer:
+Tras cada respuesta con algo pendiente se agenda `send_smart_reminder` con el
+intervalo del proyecto (`proyecto_recordatorios`, una hora por defecto). El
+dueño puede apagarlo o cambiarlo desde **Prompts**. Al vencer:
 
 1. Guardas duras en código (anti-bucle): se omite si hay mensaje del cliente
    en buffer, si está bloqueado, si no hay nada pendiente, si ya se alcanzó
@@ -99,11 +100,13 @@ Tras cada respuesta con algo pendiente se agenda `send_smart_reminder`
    decide si conviene retomar y redacta UN mensaje corto con el estilo de la
    casa ("📌 Hola!!!"), personalizado al punto exacto donde quedó el chat.
    Puede decidir NO enviar (cliente se despidió, dio un plazo, está molesto).
-3. Si envía, sube `reminder_level` y agenda el siguiente nivel con
-   `FOLLOWUP_NEXT_DELAY_SECONDS` (default 2h).
+3. Si envía, sube `reminder_level` y agenda el siguiente nivel con el mismo
+   intervalo vigente del proyecto.
 
 Los recordatorios se cancelan solos cuando el cliente escribe
-(`ReminderService.cancel` al inicio de cada turno), igual que antes.
+(`ReminderService.cancel` al inicio de cada turno). Una tarea ya agendada
+también vuelve a leer el switch antes de enviar, así que apagarlo surte efecto
+sin recorrer la cola de Celery.
 
 ## Qué NO cambió
 

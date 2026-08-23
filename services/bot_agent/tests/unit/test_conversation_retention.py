@@ -82,7 +82,7 @@ class PurgeConversationsTests(unittest.TestCase):
             ConversationLogRepository.purge_older_than(20, now=NOW)
 
         sql, _ = consultar_mock.call_args.args
-        self.assertIn("GROUP BY client_id, canal", sql)
+        self.assertIn("GROUP BY proyecto_id, client_id, canal", sql)
         self.assertIn("MAX(created_at)", sql)
 
     def test_noop_when_days_is_zero(self):

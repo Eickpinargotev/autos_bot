@@ -18,32 +18,38 @@ import time
 from typing import Any
 
 from src.infrastructure.repositories.postgres_conn import consultar
+from src.application.project_context import proyecto_actual
 
 CACHE_TTL_SEGUNDOS = 30
 
-_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
+_cache: dict[int, tuple[float, dict[str, dict[str, Any]]]] = {}
 
 
 def limpiar_cache() -> None:
-    global _cache
-    _cache = None
+    _cache.clear()
 
 
 def _activas() -> dict[str, dict[str, Any]]:
     """Las palabras activas, indexadas por la palabra en minúsculas."""
-    global _cache
+    proyecto_id = proyecto_actual()
+    if not proyecto_id:
+        return {}
     ahora = time.monotonic()
-    if _cache and (ahora - _cache[0]) < CACHE_TTL_SEGUNDOS:
-        return _cache[1]
+    guardado = _cache.get(proyecto_id)
+    if guardado and (ahora - guardado[0]) < CACHE_TTL_SEGUNDOS:
+        return guardado[1]
 
     try:
-        filas = consultar("SELECT id, palabra FROM palabras_clave WHERE activa")
+        filas = consultar(
+            "SELECT id, palabra FROM palabras_clave WHERE proyecto_id = %s AND activa",
+            (proyecto_id,),
+        )
     except Exception as e:
         print(f"Error leyendo las palabras clave: {e}")
         return {}
 
     indice = {str(fila["palabra"]).strip().lower(): fila for fila in filas}
-    _cache = (ahora, indice)
+    _cache[proyecto_id] = (ahora, indice)
     return indice
 
 
@@ -69,15 +75,18 @@ def piezas_de(palabra_id: int, tipo: str) -> list[dict[str, Any]]:
     abrir) se filtran arriba, en quien envía.
     """
     condicion = "AND activo" if tipo == "recordatorio" else ""
+    proyecto_id = proyecto_actual()
+    if not proyecto_id:
+        return []
     try:
         return consultar(
             f"""
             SELECT id, orden, minutos, texto, media_tipo, media_ref, reporte
             FROM palabra_clave_piezas
-            WHERE palabra_id = %s AND tipo = %s {condicion}
+            WHERE proyecto_id = %s AND palabra_id = %s AND tipo = %s {condicion}
             ORDER BY orden
             """,
-            (int(palabra_id), tipo),
+            (proyecto_id, int(palabra_id), tipo),
         )
     except Exception as e:
         print(f"Error leyendo las piezas de la palabra clave {palabra_id}: {e}")
@@ -92,13 +101,16 @@ def pieza(pieza_id: int) -> dict[str, Any] | None:
     es lo que el negocio tenga escrito en ese momento, no lo que había cuando el
     cliente escribió la palabra.
     """
+    proyecto_id = proyecto_actual()
+    if not proyecto_id:
+        return None
     try:
         filas = consultar(
             """
             SELECT id, orden, minutos, activo, texto, media_tipo, media_ref, reporte
-            FROM palabra_clave_piezas WHERE id = %s
+            FROM palabra_clave_piezas WHERE proyecto_id = %s AND id = %s
             """,
-            (int(pieza_id),),
+            (proyecto_id, int(pieza_id)),
         )
     except Exception as e:
         print(f"Error leyendo la pieza {pieza_id}: {e}")

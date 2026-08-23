@@ -24,6 +24,7 @@ El costo se congela en la fila. Cambiar la tarifa mañana no reescribe lo de hoy
 
 from src.domain.entities import Channel
 from src.infrastructure.repositories.postgres_conn import ejecutar
+from src.application.project_context import proyecto_actual
 
 CATEGORIA_LLM = "llm"
 CATEGORIA_CODIGO = "codigo"
@@ -51,16 +52,19 @@ def registrar_evento_llm(
     que es la única fuente de esa fórmula. Aquí solo se le aplica el margen de
     venta de la tarifa vigente.
     """
+    proyecto_id = proyecto_actual()
+    if not proyecto_id:
+        return False
     try:
         ejecutar(
             """
             INSERT INTO uso_eventos (
-                periodo_id, tarifa_id, client_id, canal, categoria, origen, modelo,
+                proyecto_id, periodo_id, tarifa_id, client_id, canal, categoria, origen, modelo,
                 tokens_entrada, tokens_cacheados, tokens_salida, mensajes,
                 costo_real_microusd, costo_cliente_microusd
             )
             SELECT
-                p.id,
+                %s, p.id,
                 t.id,
                 %s, %s, 'llm', %s, %s,
                 %s, %s, %s, 1,
@@ -76,7 +80,7 @@ def registrar_evento_llm(
             ) t ON TRUE
             """,
             (
-                str(client_id or ""),
+                proyecto_id, str(client_id or ""),
                 _canal(canal),
                 origen or "",
                 modelo or "",
@@ -113,17 +117,18 @@ def registrar_evento_audio(
     Se le aplica el mismo margen que al LLM: es el margen del negocio sobre lo
     que le cuesta operar, no una tarifa por tecnología.
     """
-    if segundos <= 0 and costo_real_microusd <= 0:
+    proyecto_id = proyecto_actual()
+    if not proyecto_id or (segundos <= 0 and costo_real_microusd <= 0):
         return False
     try:
         ejecutar(
             """
             INSERT INTO uso_eventos (
-                periodo_id, tarifa_id, client_id, canal, categoria, origen, modelo,
+                proyecto_id, periodo_id, tarifa_id, client_id, canal, categoria, origen, modelo,
                 segundos_audio, mensajes, costo_real_microusd, costo_cliente_microusd
             )
             SELECT
-                p.id,
+                %s, p.id,
                 t.id,
                 %s, %s, 'audio', %s, %s,
                 %s, 1,
@@ -139,7 +144,7 @@ def registrar_evento_audio(
             ) t ON TRUE
             """,
             (
-                str(client_id or ""),
+                proyecto_id, str(client_id or ""),
                 _canal(canal),
                 origen or "",
                 modelo or "",
@@ -162,17 +167,18 @@ def registrar_evento_codigo(
     mensajes: int = 1,
 ) -> bool:
     """Anota mensajes entregados sin pasar por el modelo."""
-    if mensajes <= 0:
+    proyecto_id = proyecto_actual()
+    if not proyecto_id or mensajes <= 0:
         return False
     try:
         ejecutar(
             """
             INSERT INTO uso_eventos (
-                periodo_id, tarifa_id, client_id, canal, categoria, origen,
+                proyecto_id, periodo_id, tarifa_id, client_id, canal, categoria, origen,
                 mensajes, costo_real_microusd, costo_cliente_microusd
             )
             SELECT
-                p.id,
+                %s, p.id,
                 t.id,
                 %s, %s, 'codigo', %s,
                 %s, 0,
@@ -187,7 +193,7 @@ def registrar_evento_codigo(
             ) t ON TRUE
             """,
             (
-                str(client_id or ""),
+                proyecto_id, str(client_id or ""),
                 _canal(canal),
                 origen or "",
                 int(mensajes),

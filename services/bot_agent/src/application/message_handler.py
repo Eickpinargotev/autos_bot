@@ -1,6 +1,7 @@
 from src.domain.entities import Channel, InboundMessage, MessageType
 from src.application.conversation_orchestrator import ConversationOrchestrator
 from src.infrastructure.channels.senders import ChannelSenderRegistry
+from src.application.project_context import ambito_proyecto
 
 class MessageHandler:
     """Entrada de un mensaje para los canales que NO tienen bucle propio.
@@ -25,6 +26,7 @@ class MessageHandler:
         event_type: str = "message",
         message_id: str = "",
         raw_payload: dict | None = None,
+        proyecto_id: int = 0,
     ):
         channel_value = channel if isinstance(channel, Channel) else Channel(channel)
         inbound = InboundMessage(
@@ -40,11 +42,14 @@ class MessageHandler:
             # evento y hay que reenviarlo entero para que el proveedor la
             # descifre. Ninguna otra rama lo mira.
             raw_payload=raw_payload,
+            proyecto_id=int(proyecto_id or 0),
         )
-        actions = ConversationOrchestrator().handle(inbound)
-        enviado = None
-        for action in actions:
-            if action.action == "send_now" and action.text:
+        with ambito_proyecto(proyecto_id):
+            actions = ConversationOrchestrator().handle(inbound)
+            enviado = None
+            for action in actions:
+                if action.action != "send_now" or not action.text:
+                    continue
                 # Se recorren TODAS: un flujo de palabra clave devuelve varios
                 # mensajes seguidos y antes solo salía el primero.
                 # `ChannelSenderRegistry.send` ya registra el saliente.

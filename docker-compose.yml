@@ -93,6 +93,7 @@ services:
       ENVIO_DELAY_MAX_SEGUNDOS: ${ENVIO_DELAY_MAX_SEGUNDOS:-6}
       BOT_WEBHOOK_URL: http://whatsapp_webhook:8010
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      WASENDER_API_URL: ${WASENDER_API_URL:-https://wasenderapi.com}
       # Dominio público del servicio de webhooks. El panel lo usa para armar la
       # URL que se copia en WasenderAPI; sin él las URLs salen incompletas.
       PUBLIC_WEBHOOK_BASE_URL: ${PUBLIC_WEBHOOK_BASE_URL:-}
