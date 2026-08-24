@@ -2,13 +2,13 @@
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.responses import RedirectResponse, Response
 
 from src.core import security
 from src.core.plantillas import render
 from src.services import bot_interno
-from src.services import clientes_whatsapp, mensajeria, palabras_clave, trazabilidad
+from src.services import archivos_catalogo, clientes_whatsapp, mensajeria, palabras_clave, trazabilidad
 
 router = APIRouter()
 
@@ -87,6 +87,42 @@ def revisar_media_de_todos(
         aviso = f"{revisados} adjuntos revisados; {con_problema} con algo que arreglar."
     else:
         aviso = f"{revisados} adjuntos revisados: todos se abren bien."
+    return RedirectResponse(url=f"/mensajes?aviso={quote(aviso)}", status_code=303)
+
+
+@router.get("/mensajes/descargar")
+def descargar_mensajes(usuario=Depends(security.requiere_negocio)):
+    """Copia completa importable; por diseño no contiene enlaces de Facebook."""
+    contenido = archivos_catalogo.exportar_mensajes(_proyecto_id(usuario))
+    return Response(
+        contenido,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="mensajes.csv"'},
+    )
+
+
+@router.post("/mensajes/cargar")
+def cargar_mensajes(
+    request: Request,
+    archivo: UploadFile = File(...),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    """Acepta el HTML de Google Sheets o un CSV descargado desde este panel."""
+    security.verificar_csrf(request, csrf)
+    try:
+        datos = archivo.file.read(archivos_catalogo.MAX_ARCHIVO_BYTES + 1)
+        resultado = archivos_catalogo.importar_mensajes(
+            _proyecto_id(usuario), datos, archivo.filename or "", usuario["usuario"]
+        )
+    except ValueError as e:
+        return RedirectResponse(url=f"/mensajes?error={quote(str(e))}", status_code=303)
+    aviso = (
+        f"Carga terminada: {resultado['creadas']} claves nuevas, "
+        f"{resultado['actualizadas']} actualizadas y {resultado['partes']} mensajes."
+    )
+    if resultado["problemas"]:
+        aviso += f" {resultado['problemas']} adjuntos necesitan revisión."
     return RedirectResponse(url=f"/mensajes?aviso={quote(aviso)}", status_code=303)
 
 
@@ -372,6 +408,38 @@ def crear_chunk(
         return RedirectResponse(url=f"/conocimiento?error={quote(str(e))}", status_code=303)
     _pedir_reindexado(proyecto_id, fila["id"])
     return RedirectResponse(url="/conocimiento?aviso=Chunk agregado y enviado a vectorizar", status_code=303)
+
+
+@router.get("/conocimiento/descargar")
+def descargar_conocimiento(usuario=Depends(security.requiere_negocio)):
+    contenido = archivos_catalogo.exportar_conocimiento(_proyecto_id(usuario))
+    return Response(
+        contenido,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="base_conocimiento.csv"'},
+    )
+
+
+@router.post("/conocimiento/cargar")
+def cargar_conocimiento(
+    request: Request,
+    archivo: UploadFile = File(...),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    try:
+        datos = archivo.file.read(archivos_catalogo.MAX_ARCHIVO_BYTES + 1)
+        resultado = archivos_catalogo.importar_conocimiento(
+            _proyecto_id(usuario), datos, archivo.filename or ""
+        )
+    except ValueError as e:
+        return RedirectResponse(url=f"/conocimiento?error={quote(str(e))}", status_code=303)
+    aviso = (
+        f"Carga terminada: {resultado['creados']} contenidos nuevos y "
+        f"{resultado['actualizados']} actualizados."
+    )
+    return RedirectResponse(url=f"/conocimiento?aviso={quote(aviso)}", status_code=303)
 
 
 @router.post("/conocimiento/{chunk_id}")

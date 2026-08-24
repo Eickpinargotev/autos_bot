@@ -9,30 +9,18 @@
   <button class="mini">Filtrar</button>
 </form>
 
-<ul class="lista-conv">
+<ul class="lista-conv" data-conv-lista-scroll>
   {% for c in conversaciones %}
   <li>
     <button type="button" class="conv-item"
             data-conv="/conversaciones/{{ c.canal }}/{{ c.client_id }}?fragmento=1"
             data-conv-clave="{{ c.canal }}:{{ c.client_id }}">
       <span class="conv-id">{{ c.client_id }}</span>
-      <span class="conv-meta">
-        <span class="pastilla">{{ c.canal }}</span>
-        {{ c.mensajes }} elementos visibles · {{ c.ultima_actividad | fecha }}
-      </span>
       {% if c.nombre %}<span class="conv-nombre">{{ c.nombre }}</span>{% endif %}
       <span class="conv-meta">
-        Chat actual: {{ c.respuestas_bot or 0 }} del bot ·
-        {{ c.respuestas_dueno or 0 }} del dueño
+        <span class="pastilla">{{ c.canal }}</span>
+        <time>{{ c.ultima_actividad | fecha }}</time>
       </span>
-      {% if c.actividad %}
-      <span class="conv-meta">
-        Período de factura: {{ c.actividad.mensajes_llm or 0 }} usos de IA ·
-        {{ c.actividad.mensajes_codigo or 0 }} envíos automáticos ·
-        {{ c.actividad.derivaciones_asesor or 0 }} derivaciones ·
-        Facturado {{ c.actividad.cliente_microusd | usd }}
-      </span>
-      {% endif %}
     </button>
   </li>
   {% else %}

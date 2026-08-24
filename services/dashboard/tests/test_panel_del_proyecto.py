@@ -82,7 +82,8 @@ def test_la_pagina_de_conversaciones_no_menciona_el_costo_real(sesion_cliente):
     cuerpo = sesion_cliente.get("/conversaciones/lista").text
 
     assert "Costo real" not in cuerpo
-    assert "Facturado" in cuerpo
+    assert "Facturado" not in cuerpo
+    assert "50611110002" in cuerpo
 
 
 # --- El orden: lo reciente arriba --------------------------------------------

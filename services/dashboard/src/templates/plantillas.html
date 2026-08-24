@@ -25,6 +25,8 @@
     </p>
   </div>
   <div class="acciones-cabecera">
+    <a class="boton mini" href="/mensajes/descargar">Descargar</a>
+    <button class="boton mini" type="button" data-abre="cargar-mensajes">Cargar archivo</button>
     {# Revisar TODO de una vez: el permiso de un archivo de Drive puede cambiar
        sin que nadie toque el panel, y comprobarlo mensaje por mensaje son
        decenas de clics. Tarda unos segundos porque va a buscar cada archivo. #}
@@ -35,6 +37,30 @@
     <button class="boton primario mini" data-abre="nuevo-mensaje">Nuevo mensaje</button>
   </div>
 </div>
+
+<dialog class="flotante" id="cargar-mensajes">
+  <div class="cabecera">
+    <h2>Cargar mensajes</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/mensajes/cargar" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="archivo-mensajes">Archivo HTML o CSV</label>
+      <input id="archivo-mensajes" name="archivo" type="file" accept=".html,.htm,.csv,text/html,text/csv"
+             required style="width:100%">
+      <p class="sub" style="margin:10px 0 0">
+        Acepta el HTML descargado de Google Sheets y el CSV generado por
+        “Descargar”. Las claves incluidas se crean o actualizan; las demás no se
+        borran. La columna de Facebook se ignora por completo.
+      </p>
+      <div class="linea" style="justify-content:flex-end;margin-top:16px">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Cargar y actualizar</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 <div class="msgs">
   {% for p in plantillas %}

@@ -79,8 +79,22 @@ _ENLACE = re.compile(
 
 
 class ConversationOrchestrator:
+    @staticmethod
+    def _branch(message: InboundMessage, branch: str, data: dict | None = None) -> None:
+        ConversationLogRepository.log_tool_event(
+            client_id=message.user_id,
+            canal=message.channel,
+            tool_name=f"branch.{branch}",
+            status="selected",
+            input_data=data or {},
+            output_data={"branch": branch},
+            text=f"Rama automática: {branch}",
+            event_type="automatic_branch",
+        )
+
     def handle(self, message: InboundMessage) -> list[OrchestratorAction]:
         if message.from_me:
+            self._branch(message, "human_intervention")
             return self._handle_intervencion_humana(message)
 
         # El audio se registra MÁS TARDE, desde la tarea de transcripción y ya
@@ -104,6 +118,7 @@ class ConversationOrchestrator:
         # la cuota de envío del minuto, que dejaría sin contestar al mensaje que
         # sí importaba.
         if message.message_type == MessageType.STICKER:
+            self._branch(message, "sticker_ignored")
             return []
 
         if message.event_type == "group_join":
@@ -114,12 +129,14 @@ class ConversationOrchestrator:
         # pero el bot no responde por ningún camino.
         from src.infrastructure.repositories import bloqueos_permanentes_repository
         if bloqueos_permanentes_repository.esta_bloqueado(message.user_id, message.channel):
+            self._branch(message, "permanent_block")
             return []
 
         if message.message_type == MessageType.TEXT:
             return self._handle_text(message)
 
         if message.message_type in _NODO_POR_MEDIA:
+            self._branch(message, "media_auto_reply", {"message_type": message.message_type.value})
             return self._responder_por_media(message, _NODO_POR_MEDIA[message.message_type])
 
         if message.message_type == MessageType.AUDIO:
@@ -177,14 +194,17 @@ class ConversationOrchestrator:
         # entero, que es lo que hace que sea un disparador y no interpretación.
         palabra = palabras_clave_repository.buscar(text)
         if palabra:
+            self._branch(message, "keyword", {"keyword": palabra.get("palabra", "")})
             return self._handle_keyword_flow(message, palabra, repo)
 
         if repo.is_blocked(message.user_id, channel=message.channel, include_permanent=False):
+            self._branch(message, "temporary_block")
             self._handle_blocked_text(message)
             return []
 
         match_add = re.search(r'add\["(.*?)"\]', text, re.IGNORECASE)
         if match_add:
+            self._branch(message, "advertising", {"city": match_add.group(1)})
             from src.application.publicidad_service import PublicidadService
             PublicidadService.handle_publicidad_entry(message.user_id, match_add.group(1), message.user_name, message.channel)
             return []
@@ -193,6 +213,7 @@ class ConversationOrchestrator:
         is_in_ad_flow = redis_client.exists(scheduled_key)
 
         if is_in_ad_flow:
+            self._branch(message, "advertising_wait")
             return []
 
         # Un enlace es contenido que el bot tampoco puede abrir, así que se
@@ -204,9 +225,11 @@ class ConversationOrchestrator:
         # del negocio); si algún día se prefiere que la pregunta la conteste el
         # agente, la condición a cambiar es esta y solo esta.
         if _ENLACE.search(text):
+            self._branch(message, "link_auto_reply")
             return self._responder_por_media(message, "MEDIA_ENLACE")
 
         seq = BufferService.add_message(message.user_id, text, message.channel)
+        self._branch(message, "buffer_queued", {"sequence": seq})
         process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name, seq), countdown=settings.MESSAGE_BUFFER_SECONDS)
         return []
 

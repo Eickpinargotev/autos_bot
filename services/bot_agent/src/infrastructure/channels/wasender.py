@@ -20,6 +20,8 @@ import httpx
 from src.core.config import settings
 from src.domain.entities import Channel, InboundMessage, MessageType
 from src.infrastructure.channels import outbound_registry
+from src.infrastructure.logging.trace_sanitizer import MAX_PROVIDER_BYTES, sanitize
+from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
 
 class WasenderNoConfigurado(RuntimeError):
@@ -139,7 +141,33 @@ def _enviar_y_recordar(payload: dict[str, Any], destino: str, texto: str, api_ke
     """
     numero = numero_para_envio(destino, api_key)
     payload = {**payload, "to": numero}
-    respuesta = enviar(payload, api_key)
+    started = time.monotonic()
+    try:
+        respuesta = enviar(payload, api_key)
+    except Exception as exc:
+        ConversationLogRepository.log_tool_event(
+            client_id=numero,
+            canal=Channel.WHATSAPP,
+            tool_name="wasender.send",
+            status="error",
+            input_data=sanitize({"request": payload}, MAX_PROVIDER_BYTES),
+            error=str(exc)[:2000],
+            text="WasenderAPI rechazó el envío",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            event_type="provider_send",
+        )
+        raise
+    ConversationLogRepository.log_tool_event(
+        client_id=numero,
+        canal=Channel.WHATSAPP,
+        tool_name="wasender.send",
+        status="success",
+        input_data=sanitize({"request": payload}, MAX_PROVIDER_BYTES),
+        output_data=sanitize({"response": respuesta}, MAX_PROVIDER_BYTES),
+        text="WasenderAPI confirmó el envío",
+        duration_ms=int((time.monotonic() - started) * 1000),
+        event_type="provider_send",
+    )
     outbound_registry.recordar_envio(numero, texto, respuesta)
     return respuesta
 

@@ -118,6 +118,21 @@ class WasenderWebhookTests(unittest.TestCase):
         self.assertEqual(repetido["status"], "duplicate")
         handler_mock.assert_called_once()
 
+    def test_el_payload_original_se_guarda_sanitizado_como_evento_oculto(self):
+        evento = self._evento()
+        evento["authorization"] = "Bearer secreto"
+        with patch(
+            "src.infrastructure.webhooks.app.MessageHandler.handle_incoming_message"
+        ), patch(
+            "src.infrastructure.webhooks.app.ConversationLogRepository.log_tool_event"
+        ) as log:
+            webhook_app._procesar_evento(evento)
+
+        llamada = log.call_args.kwargs
+        self.assertEqual(llamada["tool_name"], "wasender.webhook")
+        self.assertEqual(llamada["event_type"], "provider_webhook")
+        self.assertEqual(llamada["input_data"]["authorization"], "[REDACTADO]")
+
     def test_sin_message_id_no_se_descartan_textos_repetidos(self):
         """Dos mensajes iguales pueden ser reales; solo el id permite deduplicar."""
         evento = self._evento()

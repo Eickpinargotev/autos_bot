@@ -134,7 +134,9 @@
       .then(function (html) {
         if (!html || !html.trim()) return;
 
-        var abajo = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+        var desplazador = chat.closest("[data-mensajes-scroll]") || chat;
+        var abajo = desplazador.scrollHeight - desplazador.scrollTop - desplazador.clientHeight < 80;
+        var antes = chat.querySelectorAll("[data-id]").length;
         chat.insertAdjacentHTML("beforeend", html);
 
         // El id y el día se releen del DOM recién insertado: es la única
@@ -146,7 +148,14 @@
           chat.dataset.dia = ultima.getAttribute("data-dia") || chat.dataset.dia;
         }
 
-        if (abajo) chat.scrollTop = chat.scrollHeight;
+        if (abajo || chat.dataset.forzarAbajo === "1") {
+          desplazador.scrollTop = desplazador.scrollHeight;
+          delete chat.dataset.forzarAbajo;
+          ocultarAvisoNuevos(desplazador);
+        } else {
+          var nuevos = Math.max(1, chat.querySelectorAll("[data-id]").length - antes);
+          mostrarAvisoNuevos(desplazador, nuevos);
+        }
       })
       .catch(function () { /* lo reintenta el flujo o el respaldo */ })
       .then(function () {
@@ -156,6 +165,22 @@
           estirarChat(chat);
         }
       });
+  }
+
+  function ocultarAvisoNuevos(desplazador) {
+    var boton = desplazador && desplazador.querySelector("[data-mensajes-nuevos]");
+    if (!boton) return;
+    boton.hidden = true;
+    boton.dataset.total = "0";
+  }
+
+  function mostrarAvisoNuevos(desplazador, cantidad) {
+    var boton = desplazador && desplazador.querySelector("[data-mensajes-nuevos]");
+    if (!boton) return;
+    var total = Number(boton.dataset.total || 0) + Number(cantidad || 0);
+    boton.dataset.total = String(total);
+    boton.textContent = total + (total === 1 ? " mensaje nuevo" : " mensajes nuevos");
+    boton.hidden = false;
   }
 
   function estirarChats() {
@@ -565,7 +590,7 @@
 
         No hay estado ni plantillas aquí: el HTML lo arma Jinja, igual que en la
         página completa. Este bloque solo decide QUÉ pedir y DÓNDE ponerlo. */
-  function traerA(url, destino) {
+  function traerA(url, destino, opciones) {
     if (!destino) return;
     fetch(url, { headers: { "X-Fragmento": "1" } })
       .then(function (r) { return r.ok ? r.text() : null; })
@@ -575,7 +600,13 @@
           return;
         }
         destino.innerHTML = html;
-        destino.scrollTop = destino.scrollHeight;
+        var desplazador = destino.querySelector("[data-mensajes-scroll]");
+        if (desplazador && (!opciones || opciones.alFinal !== false)) {
+          requestAnimationFrame(function () {
+            desplazador.scrollTop = desplazador.scrollHeight;
+            ocultarAvisoNuevos(desplazador);
+          });
+        }
       })
       .catch(function () {
         destino.innerHTML = '<p class="vacio">No se pudo cargar.</p>';
@@ -602,7 +633,8 @@
     }
 
     panel.dataset.enVuelo = "1";
-    var desplazado = panel.scrollTop;
+    var listaAnterior = panel.querySelector("[data-conv-lista-scroll]");
+    var desplazado = listaAnterior ? listaAnterior.scrollTop : 0;
     var activa = contenedor.dataset.convActiva || "";
     var url = base + (consulta ? "?q=" + encodeURIComponent(consulta) : "");
 
@@ -614,7 +646,8 @@
           return;
         }
         panel.innerHTML = html;
-        panel.scrollTop = desplazado;
+        var listaNueva = panel.querySelector("[data-conv-lista-scroll]");
+        if (listaNueva) listaNueva.scrollTop = desplazado;
 
         // Repintar la lista no debe borrar qué conversación está abierta.
         panel.querySelectorAll("[data-conv]").forEach(function (item) {
@@ -692,7 +725,61 @@
     });
     item.classList.add("activo");
     dialogo.dataset.convActiva = item.getAttribute("data-conv-clave") || item.getAttribute("data-conv");
+    dialogo.classList.add("chat-abierto");
     traerA(item.getAttribute("data-conv"), dialogo.querySelector("[data-conv-detalle]"));
+  });
+
+  document.addEventListener("click", function (e) {
+    var volver = e.target.closest && e.target.closest("[data-conv-volver]");
+    if (!volver) return;
+    var contenedor = volver.closest("[data-conv-inicio]");
+    if (contenedor) contenedor.classList.remove("chat-abierto");
+  });
+
+  document.addEventListener("click", function (e) {
+    var boton = e.target.closest && e.target.closest("[data-mensajes-nuevos]");
+    if (!boton) return;
+    var desplazador = boton.closest("[data-mensajes-scroll]");
+    desplazador.scrollTop = desplazador.scrollHeight;
+    ocultarAvisoNuevos(desplazador);
+  });
+
+  document.addEventListener("scroll", function (e) {
+    var desplazador = e.target.closest && e.target.closest("[data-mensajes-scroll]");
+    if (!desplazador) return;
+    if (desplazador.scrollHeight - desplazador.scrollTop - desplazador.clientHeight < 80) {
+      ocultarAvisoNuevos(desplazador);
+    }
+  }, true);
+
+  // El historial antiguo se antepone sin perder el mensaje que estaba arriba.
+  document.addEventListener("click", function (e) {
+    var boton = e.target.closest && e.target.closest("[data-mensajes-anteriores]");
+    if (!boton || boton.dataset.enVuelo === "1") return;
+    boton.dataset.enVuelo = "1";
+    var chat = boton.closest(".chat");
+    var desplazador = chat && chat.closest("[data-mensajes-scroll]");
+    var alturaAnterior = desplazador ? desplazador.scrollHeight : 0;
+    fetch(boton.getAttribute("data-mensajes-anteriores"), { headers: { "X-Fragmento": "1" } })
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+      .then(function (html) {
+        var temporal = document.createElement("div");
+        temporal.innerHTML = html;
+        var chatNuevo = temporal.querySelector(".chat");
+        if (!chatNuevo) throw new Error();
+        var siguienteBoton = chatNuevo.querySelector("[data-mensajes-anteriores]");
+        if (siguienteBoton) siguienteBoton.remove();
+        boton.remove();
+        var fragmento = document.createDocumentFragment();
+        Array.from(chatNuevo.childNodes).forEach(function (nodo) {
+          fragmento.appendChild(nodo);
+        });
+        chat.insertBefore(fragmento, chat.firstChild);
+        if (siguienteBoton) chat.insertBefore(siguienteBoton, chat.firstChild);
+        if (desplazador) desplazador.scrollTop += desplazador.scrollHeight - alturaAnterior;
+      })
+      .catch(function () { boton.textContent = "No se pudo cargar. Reintentar"; })
+      .then(function () { delete boton.dataset.enVuelo; });
   });
 
   document.addEventListener("submit", function (e) {
@@ -761,13 +848,16 @@
       .then(function (resultado) {
         if (!resultado.ok) throw new Error(resultado.json.error || "No se pudo enviar");
         form.querySelector("textarea[name=texto]").value = "";
-        var hilo = form.parentElement;
-        var cabecera = hilo && hilo.querySelector(".panel.linea");
+        var hilo = form.closest("[data-estructura-chat]");
+        var cabecera = hilo && hilo.querySelector(".cabecera-chat");
         if (cabecera && !cabecera.querySelector("[data-pausa-ia]")) {
           cabecera.insertAdjacentHTML("afterbegin", '<span class="pastilla alerta" data-pausa-ia>IA pausada durante 12 días</span>');
         }
         var chat = hilo && hilo.querySelector("[data-cola]");
-        if (chat) estirarChat(chat);
+        if (chat) {
+          chat.dataset.forzarAbajo = "1";
+          estirarChat(chat);
+        }
         actualizarListasConversaciones();
       })
       .catch(function (error) {

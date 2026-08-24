@@ -1,49 +1,82 @@
-{# Hilo del dueño del proyecto. Las rutas resuelven el proyecto desde la sesión. #}
+{# Visor de una conversación: cabecera y compositor quedan fijos; solo el
+   historial central se desplaza. #}
 {% import "_iconos.html" as iconos %}
 
-<div class="panel linea" style="justify-content:space-between">
-  <span class="sub" style="margin:0">Las horas son las de tu proyecto.</span>
-  {% if canal == 'whatsapp' %}
-    {% if bloqueo_temporal %}
-    <span class="pastilla alerta" data-pausa-ia>
-      IA pausada{% if bloqueo_temporal.expires_at %} hasta {{ bloqueo_temporal.expires_at | fecha }}{% endif %}
-    </span>
-    {% endif %}
-    {% if bloqueo_permanente %}
-    <span class="pastilla alerta">la IA no responde a este número</span>
-    <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/bloqueo/eliminar"
-          data-conv-accion="bloqueo">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="mini">Permitir respuestas</button>
-    </form>
-    {% else %}
-    <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/bloqueo"
-          data-conv-accion="bloqueo">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="mini">No responder más</button>
-    </form>
-    {% endif %}
-  {% endif %}
-  <span style="flex:1"></span>
-  <button class="icono-accion peligro" data-abre="borrar-conversacion"
-          title="Eliminar esta conversación" aria-label="Eliminar esta conversación">
-    {{ iconos.icono('basura') }}
-  </button>
-</div>
+<div class="estructura-chat" data-estructura-chat>
+  <header class="cabecera-chat">
+    <button type="button" class="mini volver-conversaciones" data-conv-volver>← Conversaciones</button>
+    <div class="identidad-chat">
+      <strong>{{ resumen.nombre or client_id }}</strong>
+      {% if resumen.nombre %}<span>{{ client_id }}</span>{% endif %}
+      <span class="pastilla">{{ canal }}</span>
+    </div>
+    <div class="estados-chat">
+      {% if canal == 'whatsapp' %}
+        {% if bloqueo_temporal %}
+        <span class="pastilla alerta" data-pausa-ia>
+          IA pausada{% if bloqueo_temporal.expires_at %} hasta {{ bloqueo_temporal.expires_at | fecha }}{% endif %}
+        </span>
+        {% endif %}
+        {% if bloqueo_permanente %}
+        <span class="pastilla alerta">IA bloqueada</span>
+        <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/bloqueo/eliminar"
+              data-conv-accion="bloqueo">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="mini">Permitir respuestas</button>
+        </form>
+        {% else %}
+        <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/bloqueo"
+              data-conv-accion="bloqueo">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="mini">No responder más</button>
+        </form>
+        {% endif %}
+      {% endif %}
+      {% if usuario.suplantado_por %}
+      <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/diagnostico">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="mini">Descargar diagnóstico</button>
+      </form>
+      {% endif %}
+      <button class="icono-accion peligro" data-abre="borrar-conversacion"
+              title="Eliminar esta conversación" aria-label="Eliminar esta conversación">
+        {{ iconos.icono('basura') }}
+      </button>
+    </div>
+  </header>
 
-{% if canal == 'whatsapp' %}
-<form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/responder"
-      class="panel compositor-chat" data-conv-responder>
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label for="respuesta-{{ client_id }}">Responder como dueño del negocio</label>
-  <textarea id="respuesta-{{ client_id }}" name="texto" rows="3" maxlength="4000"
-            required placeholder="Escribe tu respuesta…"></textarea>
-  <div class="linea" style="justify-content:space-between">
+  <section class="mensajes-chat" data-mensajes-scroll>
+    <div class="chat"
+         {% if en_el_final %}
+         data-cola="/conversaciones/{{ canal }}/{{ client_id }}?fragmento=1"
+         data-ultimo-id="{{ mensajes[-1].id if mensajes else 0 }}"
+         data-dia="{{ (mensajes[-1].created_at | dia_clave) if mensajes else '' }}"
+         {% endif %}>
+      {% if hay_mas %}
+      <button type="button" class="boton mini mas-antiguos"
+              data-mensajes-anteriores="/conversaciones/{{ canal }}/{{ client_id }}?fragmento=1&amp;antes={{ cursor }}">
+        Cargar mensajes anteriores
+      </button>
+      {% endif %}
+      {% include "_conversacion_burbujas.html" %}
+    </div>
+    <button type="button" class="nuevos-mensajes" data-mensajes-nuevos hidden>1 mensaje nuevo</button>
+  </section>
+
+  {% if canal == 'whatsapp' %}
+  <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/responder"
+        class="compositor-chat" data-conv-responder>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="respuesta-{{ client_id }}">Responder</label>
+    <div class="compositor-fila">
+      <textarea id="respuesta-{{ client_id }}" name="texto" rows="2" maxlength="4000"
+                required placeholder="Escribe tu respuesta…"></textarea>
+      <button class="primario">Enviar</button>
+    </div>
     <span class="sub">Al enviar, la IA se pausará 12 días en este chat.</span>
-    <button class="primario">Enviar como dueño</button>
-  </div>
-</form>
-{% endif %}
+  </form>
+  {% endif %}
+</div>
 
 <dialog class="flotante" id="borrar-conversacion">
   <div class="cabecera">
@@ -51,10 +84,7 @@
     <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
   </div>
   <div class="cuerpo">
-    <p style="margin-top:0">
-      Se borran los {{ resumen.mensajes or 0 }} mensajes de este chat y el bot lo
-      olvida. Si esta persona vuelve a escribir, empieza de cero. No se puede deshacer.
-    </p>
+    <p style="margin-top:0">Se borra el historial y el bot olvida esta conversación. No se puede deshacer.</p>
     <p class="sub">El consumo ya facturado no cambia.</p>
     <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/eliminar"
           class="linea" style="justify-content:flex-end" data-conv-accion="eliminar">
@@ -64,18 +94,3 @@
     </form>
   </div>
 </dialog>
-
-<div class="panel chat"
-     {% if en_el_final %}
-     data-cola="/conversaciones/{{ canal }}/{{ client_id }}?fragmento=1"
-     data-ultimo-id="{{ mensajes[-1].id if mensajes else 0 }}"
-     data-dia="{{ (mensajes[-1].created_at | dia_clave) if mensajes else '' }}"
-     {% endif %}>
-  {% if hay_mas %}
-  <a class="boton mini mas-antiguos"
-     href="/conversaciones/{{ canal }}/{{ client_id }}?antes={{ cursor }}">
-    Cargar mensajes anteriores
-  </a>
-  {% endif %}
-  {% include "_conversacion_burbujas.html" %}
-</div>

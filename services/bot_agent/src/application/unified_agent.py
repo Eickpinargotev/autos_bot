@@ -31,6 +31,9 @@ from src.core.prompts import (
 )
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
+from src.infrastructure.evals.conversation_shots import ShotTraceCollector
+from src.infrastructure.logging.trace_sanitizer import MAX_MODEL_BYTES, sanitize
+from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.repositories import instrucciones_repository
 
 
@@ -42,6 +45,31 @@ client = OpenAI(
 
 RAG_TOKEN = "[[rag]]"
 MAX_MESSAGES_PER_TURN = 4
+
+
+def _record_model_trace(
+    *, client_id: str, canal: Channel | str, agent: str, model: str,
+    request: dict, response=None, usage=None, status: str = "success",
+    error: Exception | str = "", duration_ms: int | None = None,
+) -> None:
+    """Registra la llamada real; nunca una cadena de pensamiento privada."""
+    ShotTraceCollector.record_model_event(
+        agent=agent, model=model, request=request, response=response, usage=usage,
+        status=status, error=error, duration_ms=duration_ms,
+    )
+    if client_id and canal:
+        ConversationLogRepository.log_tool_event(
+            client_id=client_id,
+            canal=canal,
+            tool_name=f"llm.{agent.lower()}",
+            status=status,
+            input_data=sanitize({"model": model, "request": request}, MAX_MODEL_BYTES),
+            output_data=sanitize({"response": response, "usage": usage}, MAX_MODEL_BYTES),
+            error=str(error or "")[:2000],
+            text=f"Llamada LLM {agent}: {status}",
+            duration_ms=duration_ms,
+            event_type="model_call",
+        )
 
 # Aclaración de seguridad cuando no hay modelo disponible o la llamada falla:
 # no adivinamos la intención con reglas; preguntamos con las opciones.
@@ -203,13 +231,15 @@ class _DecisionAgent:
             return decision
 
         try:
+            messages = [
+                {"role": "system", "content": _system_prompt_for(self.role)},
+                {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
+            ]
+            response_format = _decision_response_format(self._valid_actions())
             completion = client.chat.completions.create(
                 model=self.modelo,
-                response_format=_decision_response_format(self._valid_actions()),
-                messages=[
-                    {"role": "system", "content": _system_prompt_for(self.role)},
-                    {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
-                ],
+                response_format=response_format,
+                messages=messages,
                 **kwargs_de_decision(self.modelo),
             )
             seguimiento_service.registrar_uso_llm(
@@ -221,11 +251,22 @@ class _DecisionAgent:
             )
             data = json.loads(completion.choices[0].message.content or "{}")
             decision = self._validated_decision(data, text)
+            _record_model_trace(
+                client_id=client_id, canal=canal, agent=self.role, model=self.modelo,
+                request={"messages": messages, "response_format": response_format},
+                response=data, usage=getattr(completion, "usage", None),
+                duration_ms=ToolCallLogger._duration_ms(started),
+            )
             self._log_decision(client_id, canal, input_data, decision, started, "success")
             return decision
         except Exception as exc:
             decision = self._fallback_decision(text)
             decision.source = "fallback_after_error"
+            _record_model_trace(
+                client_id=client_id, canal=canal, agent=self.role, model=self.modelo,
+                request={"turn": turn_data}, status="error", error=exc,
+                duration_ms=ToolCallLogger._duration_ms(started),
+            )
             if client_id and canal:
                 ToolCallLogger.error(
                     client_id=client_id,
@@ -412,6 +453,18 @@ class FollowupAgent:
             data = json.loads(completion.choices[0].message.content or "{}")
             message = str(data.get("message") or "").strip()
             decision = FollowupDecision(send=bool(data.get("send")) and bool(message), message=message)
+            _record_model_trace(
+                client_id=client_id, canal=canal, agent="FOLLOWUP", model=modelo,
+                request={
+                    "messages": [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
+                    ],
+                    "response_format": FOLLOWUP_RESPONSE_FORMAT,
+                },
+                response=data, usage=getattr(completion, "usage", None),
+                duration_ms=ToolCallLogger._duration_ms(started),
+            )
             if client_id and canal:
                 ToolCallLogger.success(
                     client_id=client_id,
@@ -424,6 +477,11 @@ class FollowupAgent:
                 )
             return decision
         except Exception as exc:
+            _record_model_trace(
+                client_id=client_id, canal=canal, agent="FOLLOWUP", model=modelo,
+                request={"turn": turn_data}, status="error", error=exc,
+                duration_ms=ToolCallLogger._duration_ms(started),
+            )
             if client_id and canal:
                 ToolCallLogger.error(
                     client_id=client_id,

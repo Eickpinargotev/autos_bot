@@ -121,6 +121,11 @@ class RagService:
             return RagAnswer(has_answer=False)
 
         prompt = self._answer_prompt(question, context, last_question, conversation_history or [], chunks)
+        messages = [
+            {"role": "system", "content": "Devuelve JSON estricto. Responde solo con información respaldada por el contexto."},
+            {"role": "user", "content": prompt},
+        ]
+        model_recorded = False
         try:
             started = time.monotonic()
             # Redactar con el contexto ya recuperado no exige el modelo caro: lo
@@ -129,15 +134,20 @@ class RagService:
             completion = self.openai.chat.completions.create(
                 model=modelo,
                 response_format=ANSWER_RESPONSE_FORMAT,
-                messages=[
-                    {"role": "system", "content": "Devuelve JSON estricto. Responde solo con información respaldada por el contexto."},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
             )
             seguimiento_service.registrar_uso_llm(
                 client_id, canal, getattr(completion, "usage", None), origen="rag", modelo=modelo
             )
             data = json.loads(completion.choices[0].message.content or "{}")
+            from src.application.unified_agent import _record_model_trace
+            _record_model_trace(
+                client_id=client_id, canal=canal, agent="RAG", model=modelo,
+                request={"messages": messages, "response_format": ANSWER_RESPONSE_FORMAT},
+                response=data, usage=getattr(completion, "usage", None),
+                duration_ms=ToolCallLogger._duration_ms(started),
+            )
+            model_recorded = True
             has_answer = bool(data.get("has_answer"))
             answer = str(data.get("answer") or "").strip()
             if not has_answer or not answer:
@@ -167,6 +177,13 @@ class RagService:
             )
             return result
         except Exception as e:
+            if not model_recorded:
+                from src.application.unified_agent import _record_model_trace
+                _record_model_trace(
+                    client_id=client_id, canal=canal, agent="RAG", model=modelo,
+                    request={"messages": messages, "response_format": ANSWER_RESPONSE_FORMAT},
+                    status="error", error=e, duration_ms=ToolCallLogger._duration_ms(started),
+                )
             if client_id and canal:
                 ToolCallLogger.error(
                     client_id=client_id,

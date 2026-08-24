@@ -113,6 +113,27 @@ class ConversationShotTests(unittest.TestCase):
         self.assertEqual(event["input"]["token"], "[redacted]")
         self.assertTrue(event["input"]["question"].endswith("...[truncated]"))
 
+    def test_model_event_keeps_full_effective_request_without_secrets(self):
+        with ShotTraceCollector() as collector:
+            ShotTraceCollector.record_model_event(
+                agent="SUPERVISOR",
+                model="modelo-test",
+                request={
+                    "messages": [{"role": "system", "content": "prompt efectivo completo"}],
+                    "authorization": "Bearer secreto",
+                },
+                response={"action": "route", "target": "ALQUILER"},
+                usage={"prompt_tokens": 120, "completion_tokens": 15},
+                duration_ms=44,
+            )
+
+        event = collector.events[0]
+        self.assertEqual(event["type"], "model_call")
+        self.assertEqual(event["request"]["messages"][0]["content"], "prompt efectivo completo")
+        self.assertEqual(event["request"]["authorization"], "[REDACTADO]")
+        self.assertEqual(event["response"]["target"], "ALQUILER")
+        self.assertEqual(event["usage"]["prompt_tokens"], 120)
+
     def test_process_buffered_messages_saves_human_bot_shot(self):
         before = ConversationState(
             flow="GENERAL",

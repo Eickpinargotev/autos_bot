@@ -12,7 +12,7 @@ solo llega a ellas entrando a la cuenta del negocio, con la suplantación audita
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from src.core import security
 from src.core.plantillas import render
@@ -21,7 +21,7 @@ from src.services import (
     bloqueos_permanentes,
     bot_interno,
     clientes_whatsapp,
-    facturacion,
+    diagnostico_conversacion,
     instrucciones,
     trazabilidad,
 )
@@ -133,17 +133,6 @@ def _datos_lista_conversaciones(request: Request, usuario: dict) -> dict:
     proyecto = _proyecto_del_usuario(usuario)
     busqueda = request.query_params.get("q", "")
     conversaciones = trazabilidad.listar_conversaciones(proyecto["id"], busqueda)
-    periodo = facturacion.periodo_abierto()
-    actividad = {
-        (fila["client_id"], fila["canal"]): fila
-        for fila in facturacion.actividad_por_cliente(
-            proyecto["id"], periodo["id"], incluir_costo_real=False
-        )
-    }
-    for conversacion in conversaciones:
-        conversacion["actividad"] = actividad.get(
-            (conversacion["client_id"], conversacion["canal"]), {}
-        )
     return {
         "proyecto": proyecto,
         "negocio_id": proyecto["id"],
@@ -246,6 +235,37 @@ def responder_conversacion(
     if error:
         return RedirectResponse(f"/conversaciones?error={quote(error)}", status_code=303)
     return RedirectResponse("/conversaciones?aviso=Mensaje+enviado", status_code=303)
+
+
+@router.post("/conversaciones/{canal}/{client_id}/diagnostico")
+def descargar_diagnostico(
+    request: Request,
+    canal: str,
+    client_id: str,
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    """Exporta trazas solo para el administrador que está suplantando."""
+    security.verificar_csrf(request, csrf)
+    if not usuario.get("suplantado_por") or not usuario.get("admin_real_id"):
+        raise HTTPException(status_code=403, detail="Esta descarga es exclusiva de administración")
+    proyecto = _proyecto_del_usuario(usuario)
+    archivo = diagnostico_conversacion.crear_zip(proyecto, client_id, canal)
+    if archivo is None:
+        raise HTTPException(status_code=404, detail="Esa conversación no pertenece a tu proyecto")
+    diagnostico_conversacion.auditar(
+        proyecto["id"],
+        usuario["admin_real_id"],
+        client_id,
+        canal,
+        request.client.host if request.client else "",
+    )
+    nombre = "".join(c for c in f"diagnostico-{canal}-{client_id}" if c.isalnum() or c in "-_")
+    return StreamingResponse(
+        diagnostico_conversacion.transmitir(archivo),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}.zip"'},
+    )
 
 
 @router.post("/conversaciones/{canal}/{client_id}/bloqueo")

@@ -100,18 +100,20 @@ class PublicidadService:
         
         # 2. Extraer informacion con LLM para programar siguientes
         primer_mensaje = messages_to_send[0]
+        model_recorded = False
         try:
             started = time.monotonic()
             # Extraer día/valor/hora de un texto ya conocido es la tarea más
             # mecánica del sistema: va al modelo auxiliar.
             modelo = settings.OPENAI_MODEL_AUXILIAR
+            messages = [
+                {"role": "system", "content": EXTRACT_AD_INFO_PROMPT},
+                {"role": "user", "content": json.dumps({"mensaje": primer_mensaje}, ensure_ascii=False)},
+            ]
             completion = client.chat.completions.create(
                 model=modelo,
                 response_format={ "type": "json_object" },
-                messages=[
-                    {"role": "system", "content": EXTRACT_AD_INFO_PROMPT},
-                    {"role": "user", "content": json.dumps({"mensaje": primer_mensaje}, ensure_ascii=False)}
-                ]
+                messages=messages,
             )
             from src.application import seguimiento_service
 
@@ -120,6 +122,14 @@ class PublicidadService:
                 origen="publicidad", modelo=modelo,
             )
             extracted = json.loads(completion.choices[0].message.content)
+            from src.application.unified_agent import _record_model_trace
+            _record_model_trace(
+                client_id=user_id, canal=channel_value, agent="PUBLICIDAD", model=modelo,
+                request={"messages": messages, "response_format": {"type": "json_object"}},
+                response=extracted, usage=getattr(completion, "usage", None),
+                duration_ms=ToolCallLogger._duration_ms(started),
+            )
+            model_recorded = True
             dia = extracted.get("dia")
             valor = extracted.get("valor")
             hora = extracted.get("hora")
@@ -152,6 +162,14 @@ class PublicidadService:
             return True
             
         except Exception as e:
+            if "started" in locals() and not model_recorded:
+                from src.application.unified_agent import _record_model_trace
+                _record_model_trace(
+                    client_id=user_id, canal=channel_value, agent="PUBLICIDAD",
+                    model=locals().get("modelo", settings.OPENAI_MODEL_AUXILIAR),
+                    request={"messages": locals().get("messages", [])}, status="error", error=e,
+                    duration_ms=ToolCallLogger._duration_ms(started),
+                )
             ToolCallLogger.error(
                 client_id=user_id,
                 canal=channel_value,

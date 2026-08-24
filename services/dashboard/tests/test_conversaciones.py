@@ -7,6 +7,9 @@ voces del chat (cliente, bot, dueño) se distingan.
 """
 
 from datetime import datetime, timedelta, timezone
+import io
+import json
+import zipfile
 
 import pytest
 
@@ -136,8 +139,7 @@ def test_el_listado_cuenta_solo_lo_que_el_hilo_muestra():
     assert conversacion["respuestas_bot"] == 1
 
 
-def test_el_listado_separa_chat_actual_del_periodo_facturado(sesion_cliente):
-    """`/d` puede vaciar el chat, pero el libro mayor sigue siendo del período."""
+def test_el_listado_omite_metricas_y_facturacion(sesion_cliente):
     _mensaje("50677770007", "hola")
     pool.ejecutar(
         """
@@ -151,9 +153,10 @@ def test_el_listado_separa_chat_actual_del_periodo_facturado(sesion_cliente):
 
     cuerpo = sesion_cliente.get("/conversaciones/lista").text
 
-    assert "1 elementos visibles" in cuerpo
-    assert "Período de factura: 4 usos de IA" in cuerpo
-    assert "Facturado" in cuerpo
+    assert "50677770007" in cuerpo
+    assert "elementos visibles" not in cuerpo
+    assert "Período de factura" not in cuerpo
+    assert "Facturado" not in cuerpo
 
 
 # --- Búsqueda por número -----------------------------------------------------
@@ -267,7 +270,8 @@ def test_un_fallo_de_envio_devuelve_error_y_el_hilo_tiene_compositor(sesion_clie
     _mensaje("50688888888", "hola")
     monkeypatch.setattr(bot_interno, "responder_como_dueno", lambda *_: "Wasender no respondió")
     hilo = sesion_cliente.get("/conversaciones/whatsapp/50688888888").text
-    assert "Enviar como dueño" in hilo
+    assert ">Responder<" in hilo
+    assert ">Enviar<" in hilo
 
     respuesta = sesion_cliente.post(
         "/conversaciones/whatsapp/50688888888/responder",
@@ -285,6 +289,73 @@ def test_no_se_acepta_responder_un_canal_distinto_de_whatsapp(sesion_cliente):
         headers={"X-Fragmento": "1"},
     )
     assert respuesta.status_code == 400
+
+
+def test_el_dueno_normal_no_puede_descargar_diagnostico(sesion_cliente):
+    _mensaje("50688888888", "hola")
+    hilo = sesion_cliente.get("/conversaciones/whatsapp/50688888888").text
+    assert "Descargar diagnóstico" not in hilo
+    respuesta = sesion_cliente.post(
+        "/conversaciones/whatsapp/50688888888/diagnostico",
+        data={"csrf": token_csrf(sesion_cliente)},
+    )
+    assert respuesta.status_code == 403
+
+
+def test_el_admin_suplantando_descarga_zip_sanitizado_y_deja_auditoria(sesion_admin):
+    from src.services import usuarios
+
+    cuenta = usuarios.crear("negocio_diagnostico", "clave-segura-123", "cliente", debe_cambiar=False)
+    clientes_whatsapp.vincular_cuenta(1, cuenta["id"])
+    _mensaje("50688888888", "hola")
+    pool.ejecutar(
+        """INSERT INTO conversation_messages
+           (proyecto_id, client_id, canal, direction, author, message_type, event_type,
+            tool_name, status, entrada, salida)
+           VALUES (1, '50688888888', 'whatsapp', 'internal', 'tool', 'tool_event',
+                   'provider_webhook', 'wasender.webhook', 'success', %s::jsonb, %s::jsonb)""",
+        (
+            json.dumps({"authorization": "Bearer secreto", "url": "https://x.test/media?a=1&signature=privada"}),
+            json.dumps({"ok": True, "blob": "A" * 800}),
+        ),
+    )
+    pool.ejecutar(
+        """INSERT INTO conversation_shots (proyecto_id, id_user, canal, shot)
+           VALUES (1, '50688888888', 'whatsapp', %s::jsonb)""",
+        (json.dumps({"turn": {"events": [{"type": "model_call", "request": {"messages": ["prompt efectivo"]}}]}}),),
+    )
+    entrar = sesion_admin.post(
+        f"/admin/usuarios/{cuenta['id']}/entrar",
+        data={"csrf": token_csrf(sesion_admin)},
+        follow_redirects=False,
+    )
+    assert entrar.status_code == 303
+    hilo = sesion_admin.get("/conversaciones/whatsapp/50688888888").text
+    assert "Descargar diagnóstico" in hilo
+
+    respuesta = sesion_admin.post(
+        "/conversaciones/whatsapp/50688888888/diagnostico",
+        data={"csrf": token_csrf(sesion_admin)},
+    )
+    assert respuesta.status_code == 200
+    assert respuesta.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(respuesta.content)) as archivo:
+        assert set(archivo.namelist()) == {"reporte.html", "diagnostico.json", "README.txt"}
+        diagnostico = archivo.read("diagnostico.json").decode()
+        datos = json.loads(diagnostico)
+        assert datos["schema_version"] == "1.0"
+        assert datos["project"]["id"] == 1
+        assert datos["conversation"]["client_id"] == "50688888888"
+        assert "prompt efectivo" in diagnostico
+        assert "Bearer secreto" not in diagnostico
+        assert "signature=privada" not in diagnostico
+        assert "[REDACTADO]" in diagnostico
+
+    auditoria = pool.consultar_uno("SELECT * FROM diagnostico_descargas")
+    administrador = pool.consultar_uno("SELECT id FROM dashboard_usuarios WHERE usuario = 'admin_test'")
+    assert auditoria["proyecto_id"] == 1
+    assert auditoria["administrador_id"] == administrador["id"]
+    assert auditoria["client_id"] == "50688888888"
 
 
 def test_las_horas_se_muestran_en_la_zona_del_negocio(sesion_cliente):

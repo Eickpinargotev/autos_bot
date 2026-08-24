@@ -21,6 +21,8 @@
     </p>
   </div>
   <div class="acciones-cabecera">
+    <a class="boton mini" href="/conocimiento/descargar">Descargar</a>
+    <button class="boton mini" type="button" data-abre="cargar-conocimiento">Cargar archivo</button>
     <form class="linea" method="get" action="/conocimiento">
       <input name="q" value="{{ busqueda }}" placeholder="Buscar…" autocomplete="off">
       <button class="mini">Buscar</button>
@@ -28,6 +30,30 @@
     <button class="boton primario mini" data-abre="nuevo-chunk">Agregar</button>
   </div>
 </div>
+
+<dialog class="flotante" id="cargar-conocimiento">
+  <div class="cabecera">
+    <h2>Cargar base de conocimiento</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/conocimiento/cargar" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="archivo-conocimiento">Archivo HTML o CSV</label>
+      <input id="archivo-conocimiento" name="archivo" type="file"
+             accept=".html,.htm,.csv,text/html,text/csv" required style="width:100%">
+      <p class="sub" style="margin:10px 0 0">
+        El archivo debe tener una columna CONTENIDO y, opcionalmente, ACTIVO.
+        También puedes volver a cargar directamente el CSV de “Descargar”. Los
+        contenidos que ya existen no se duplican.
+      </p>
+      <div class="linea" style="justify-content:flex-end;margin-top:16px">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Cargar</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 {% set largos = chunks | selectattr('demasiado_largo') | list | length %}
 {% if largos %}

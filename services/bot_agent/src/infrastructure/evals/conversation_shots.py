@@ -6,6 +6,7 @@ from typing import Any
 
 from src.domain.entities import Channel
 from src.infrastructure.repositories.postgres_conn import ejecutar
+from src.infrastructure.logging.trace_sanitizer import MAX_MODEL_BYTES, sanitize
 
 
 _active_collector: ContextVar["ShotTraceCollector | None"] = ContextVar("active_shot_collector", default=None)
@@ -51,6 +52,37 @@ class ShotTraceCollector:
                 "input": input_data if input_data is not None else {},
                 "output": output_data if output_data is not None else {},
                 "error": error or "",
+                "duration_ms": duration_ms,
+            }
+        )
+
+    @classmethod
+    def record_model_event(
+        cls,
+        *,
+        agent: str,
+        model: str,
+        request: Any,
+        response: Any = None,
+        status: str = "success",
+        error: str = "",
+        duration_ms: int | None = None,
+        usage: Any = None,
+    ):
+        collector = cls.current()
+        if not collector:
+            return
+        collector.events.append(
+            {
+                "type": "model_call",
+                "order": collector.next_order(),
+                "agent": agent,
+                "model": model,
+                "status": status,
+                "request": sanitize(request, MAX_MODEL_BYTES),
+                "response": sanitize(response, MAX_MODEL_BYTES),
+                "usage": sanitize(usage, MAX_MODEL_BYTES),
+                "error": str(error or "")[:2000],
                 "duration_ms": duration_ms,
             }
         )

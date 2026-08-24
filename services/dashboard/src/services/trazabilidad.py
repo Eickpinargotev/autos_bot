@@ -59,12 +59,8 @@ def listar_conversaciones(
                m.canal,
                MAX(m.created_at) AS ultima_actividad,
                COUNT(*) FILTER (WHERE m.direction <> 'internal') AS mensajes,
-               COUNT(*) FILTER (
-                   WHERE m.direction <> 'internal' AND m.author = 'ia'
-               ) AS respuestas_bot,
-               COUNT(*) FILTER (
-                   WHERE m.direction <> 'internal' AND m.author = 'dueño'
-               ) AS respuestas_dueno,
+               COUNT(*) FILTER (WHERE m.direction <> 'internal' AND m.author = 'ia') AS respuestas_bot,
+               COUNT(*) FILTER (WHERE m.direction <> 'internal' AND m.author = 'dueño') AS respuestas_dueno,
                MAX(m.sender_name) FILTER (WHERE m.direction = 'inbound') AS nombre
         FROM conversation_messages m
         {where}

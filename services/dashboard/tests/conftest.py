@@ -81,6 +81,7 @@ from src.db.migrate import aplicar_migraciones  # noqa: E402
 
 # Orden importante: las hijas antes que las padres por las claves foráneas.
 _TABLAS = (
+    "diagnostico_descargas",
     "proyecto_recordatorios",
     "proyecto_instrucciones",
     "bloqueos_permanentes",

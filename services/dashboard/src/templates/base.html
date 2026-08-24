@@ -6,7 +6,7 @@
   <title>{% block titulo %}Panel{% endblock %} · Base de Control</title>
   {# El ?v= se sube al cambiar el CSS o el JS: sin él, un navegador con la
      versión anterior en caché mezclaría estilos viejos con el marcado nuevo. #}
-  <link rel="stylesheet" href="/static/app.css?v=23">
+  <link rel="stylesheet" href="/static/app.css?v=24">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14'>📊</text></svg>">
 </head>
 {% import "_iconos.html" as iconos %}
@@ -185,7 +185,7 @@
   </div>
   {% endif %}
 
-  <main>
+  <main class="{% block clase_main %}{% endblock %}">
     {% block contenido %}{% endblock %}
   </main>
 </div>
@@ -199,6 +199,6 @@
   {% if error %}<div class="toast malo">{{ error }}<button class="cerrar" aria-label="Cerrar">×</button></div>{% endif %}
 </div>
 
-<script src="/static/app.js?v=24"></script>
+<script src="/static/app.js?v=26"></script>
 </body>
 </html>

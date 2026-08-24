@@ -64,6 +64,20 @@ class WhatsAppSenderTests(unittest.TestCase):
 
 
 class RegistroDeSalidasTests(unittest.TestCase):
+    def test_el_envio_guarda_solicitud_y_respuesta_del_proveedor_sin_credencial(self):
+        with patch("src.infrastructure.channels.wasender.enviar", return_value={"id": "MSG-1"}), patch(
+            "src.infrastructure.channels.wasender.ConversationLogRepository.log_tool_event"
+        ) as log, patch(
+            "src.infrastructure.channels.wasender.outbound_registry.recordar_envio"
+        ):
+            wasender.enviar_texto("50688888888", "Hola", "clave-secreta")
+
+        llamada = log.call_args.kwargs
+        self.assertEqual(llamada["tool_name"], "wasender.send")
+        self.assertEqual(llamada["input_data"]["request"], {"to": "50688888888", "text": "Hola"})
+        self.assertEqual(llamada["output_data"]["response"], {"id": "MSG-1"})
+        self.assertNotIn("clave-secreta", str(llamada))
+
     def test_el_eco_consume_la_ficha_y_el_mismo_texto_del_dueno_ya_no_se_ignora(self):
         """El caso real: el bot manda algo y después el dueño escribe lo mismo."""
         outbound_registry.recordar_envio(

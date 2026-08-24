@@ -12,6 +12,8 @@ from src.domain.entities import Channel, MessageType
 from src.infrastructure.channels import inbound_registry, outbound_registry, wasender
 from src.infrastructure.channels.senders import ChannelSenderRegistry
 from src.infrastructure.repositories import clientes_whatsapp_repo
+from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
+from src.infrastructure.logging.trace_sanitizer import MAX_PROVIDER_BYTES, sanitize
 
 app = FastAPI(title="Bot Agent Webhooks")
 rag_service = RagService()
@@ -103,6 +105,22 @@ def _vincular(cliente_id: int | None, user_id: str) -> None:
         )
 
 
+def _trazar_webhook(user_id: str, payload: dict[str, Any], status: str) -> None:
+    """Guarda el evento original sanitizado como traza invisible del chat."""
+    if not user_id:
+        return
+    ConversationLogRepository.log_tool_event(
+        client_id=user_id,
+        canal=Channel.WHATSAPP,
+        tool_name="wasender.webhook",
+        status=status,
+        input_data=sanitize(payload, MAX_PROVIDER_BYTES),
+        output_data={"branch": status},
+        text=f"Webhook WasenderAPI: {status}",
+        event_type="provider_webhook",
+    )
+
+
 def _procesar_evento(
     payload: dict[str, Any],
     cliente_id: int | None = None,
@@ -136,6 +154,7 @@ def _procesar_evento(
                 event_type="group_join",
                 proyecto_id=int(cliente_id or 0),
             )
+            _trazar_webhook(numero, payload, "group_join")
         return {"status": "group_join", "procesados": str(len(ingresos))}
 
     # 2. Una salida no cambia el flujo ni envía nada, pero debe quedar visible
@@ -154,6 +173,7 @@ def _procesar_evento(
                 event_type="group_leave",
                 proyecto_id=int(cliente_id or 0),
             )
+            _trazar_webhook(numero, payload, "group_leave")
         return {"status": "group_leave", "procesados": str(len(salidas))}
 
     mensaje = wasender.mensaje_entrante(payload)
@@ -177,6 +197,8 @@ def _procesar_evento(
     # Se reclama antes de cualquier efecto para que un comando inmediato como
     # `/d` no conteste dos veces y un texto normal no entre dos veces al buffer.
     if not inbound_registry.reclamar(mensaje.user_id, mensaje.message_id):
+        _vincular(cliente_id, mensaje.user_id)
+        _trazar_webhook(mensaje.user_id, payload, "duplicate")
         return {"status": "duplicate"}
 
     _vincular(cliente_id, mensaje.user_id)
@@ -188,6 +210,7 @@ def _procesar_evento(
         if outbound_registry.es_envio_del_bot(
             mensaje.user_id, mensaje_id=mensaje.message_id, texto=mensaje.text
         ):
+            _trazar_webhook(mensaje.user_id, payload, "bot_echo")
             return {"status": "ignored"}
 
         MessageHandler.handle_incoming_message(
@@ -200,6 +223,7 @@ def _procesar_evento(
             message_id=mensaje.message_id,
             proyecto_id=int(cliente_id or 0),
         )
+        _trazar_webhook(mensaje.user_id, payload, "human_intervention")
         return {"status": "intervencion_humana"}
 
     # 4. Mensaje del cliente: el camino normal.
@@ -215,6 +239,7 @@ def _procesar_evento(
         raw_payload=payload,
         proyecto_id=int(cliente_id or 0),
     )
+    _trazar_webhook(mensaje.user_id, payload, "accepted")
     return {"status": "ok"}
 
 
