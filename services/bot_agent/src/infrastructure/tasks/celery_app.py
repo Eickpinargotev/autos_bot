@@ -1,4 +1,3 @@
-import random
 import time
 
 from celery import Celery, Task
@@ -172,7 +171,9 @@ def _process_buffered_messages_locked(channel_value: Channel, user_id: str, user
     )
 
     if result.replies:
-        for msg in result.replies:
+        for indice, msg in enumerate(result.replies):
+            if indice:
+                time.sleep(instrucciones_repository.intervalo_entre_mensajes())
             ChannelSenderRegistry.send(channel_value, user_id, msg)
 
     if result.reminder:
@@ -269,10 +270,11 @@ def transcribir_nota_de_voz(channel: str, user_id: str, user_name: str, payload:
 
 @celery_app.task
 def send_delayed_message_sequence(channel: str, user_id: str, messages: list[str]):
-    for msg in messages:
+    intervalo = instrucciones_repository.intervalo_entre_mensajes()
+    for indice, msg in enumerate(messages):
+        if indice:
+            time.sleep(intervalo)
         ChannelSenderRegistry.send(channel, user_id, msg)
-        # Wait randomly between configured seconds before sending next message
-        time.sleep(random.uniform(settings.MSG_DELAY_MIN, settings.MSG_DELAY_MAX))
 
 @celery_app.task
 def send_single_message(channel: str, user_id: str, message: str):
@@ -430,10 +432,16 @@ def schedule_ad_programmed_messages(channel: str, user_id: str, dia: str, valor:
     msg2 = "👋🏻Vi que no se unió al grupo👋🏻\n\n*¿¿¿Tiene alguna duda duda antes de unirse al grupo???"
     msg3 = f"📌Hola!!!\n\nLe comparto la información de nuestro curso.\n\nFecha: {dia}\n\nHora: {hora}\nValor: {valor} colones\n\nUnirse al grupo: {enlace}\n\nLe esperamos"
     
-    # Schedule with Celery Countdown
-    t1 = send_ad_reminder.apply_async((channel, user_id, msg1, 1), countdown=settings.PUB_DELAY_1_SEC)
-    t2 = send_ad_reminder.apply_async((channel, user_id, msg2, 2), countdown=settings.PUB_DELAY_2_SEC)
-    t3 = send_ad_reminder.apply_async((channel, user_id, msg3, 3), countdown=settings.PUB_DELAY_3_SEC)
+    # El countdown se toma del proyecto al crear la conversación. Cambiarlo en
+    # el panel afecta los anuncios nuevos, no mueve tareas que ya estaban en Redis.
+    config = instrucciones_repository.configuracion_tiempos_mensajes()
+    tiempos = [
+        max(5, min(int(config.get(f"publicidad_recordatorio_{i}_segundos") or respaldo), 1209600))
+        for i, respaldo in ((1, 7200), (2, 72000), (3, 82800))
+    ]
+    t1 = send_ad_reminder.apply_async((channel, user_id, msg1, 1), countdown=tiempos[0])
+    t2 = send_ad_reminder.apply_async((channel, user_id, msg2, 2), countdown=tiempos[1])
+    t3 = send_ad_reminder.apply_async((channel, user_id, msg3, 3), countdown=tiempos[2])
     
     # Store IDs to allow cancellation
     key = scoped_key("scheduled_tasks", channel, user_id)
@@ -550,14 +558,8 @@ def _texto_de_la_parte(parte: dict) -> str:
 
 
 def _espera_entre_partes() -> float:
-    """Pausa aleatoria antes de la siguiente parte.
-
-    Una cadena de mensajes a intervalos exactos es la firma más obvia de un bot.
-    El intervalo variable la disimula sin necesidad de nada más.
-    """
-    minimo = settings.ENVIO_DELAY_MIN_SEGUNDOS
-    maximo = max(settings.ENVIO_DELAY_MAX_SEGUNDOS, minimo)
-    return random.uniform(minimo, maximo)
+    """Pausa elegida por el negocio antes de la siguiente parte."""
+    return float(instrucciones_repository.intervalo_entre_mensajes())
 
 
 def _clasificar_error(exc: Exception) -> tuple[str, str]:

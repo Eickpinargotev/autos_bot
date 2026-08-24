@@ -8,7 +8,15 @@ from fastapi.responses import RedirectResponse, Response
 from src.core import security
 from src.core.plantillas import render
 from src.services import bot_interno
-from src.services import archivos_catalogo, clientes_whatsapp, mensajeria, palabras_clave, trazabilidad
+from src.services import (
+    archivos_catalogo,
+    clientes_whatsapp,
+    instrucciones,
+    mensajeria,
+    palabras_clave,
+    tiempos_mensajes,
+    trazabilidad,
+)
 
 router = APIRouter()
 
@@ -41,13 +49,81 @@ def listar_plantillas(request: Request, usuario=Depends(security.requiere_negoci
     """
     abierto = request.query_params.get("abierto", "")
     parte = request.query_params.get("parte", "")
+    proyecto_id = _proyecto_id(usuario)
+    tiempos = tiempos_mensajes.configuracion(proyecto_id)
+    publicidad = [
+        tiempos_mensajes.para_formulario(
+            tiempos[f"publicidad_recordatorio_{indice}_segundos"]
+        )
+        for indice in range(1, 4)
+    ]
+    recordatorios = instrucciones.configuracion_recordatorios(proyecto_id)
+    minutos = int(recordatorios.get("intervalo_minutos") or 60)
+    recordatorios["cantidad"] = minutos // 60 if minutos % 60 == 0 else minutos
+    recordatorios["unidad"] = "horas" if minutos % 60 == 0 else "minutos"
     return render(
         request,
         "plantillas.html",
         usuario,
-        plantillas=mensajeria.listar_plantillas(_proyecto_id(usuario)),
+        plantillas=mensajeria.listar_plantillas(proyecto_id),
+        tiempos=tiempos,
+        tiempos_publicidad=publicidad,
+        config_recordatorios=recordatorios,
         abierto=int(abierto) if abierto.isdigit() else None,
         parte_abierta=int(parte) if parte.isdigit() else None,
+    )
+
+
+@router.post("/mensajes/configuracion")
+def guardar_configuracion_de_tiempos(
+    request: Request,
+    intervalo_mensajes_segundos: str = Form(""),
+    recordatorio_habilitado: str = Form(""),
+    recordatorio_cantidad: str = Form(""),
+    recordatorio_unidad: str = Form(""),
+    publicidad_1_cantidad: str = Form(""),
+    publicidad_1_unidad: str = Form(""),
+    publicidad_2_cantidad: str = Form(""),
+    publicidad_2_unidad: str = Form(""),
+    publicidad_3_cantidad: str = Form(""),
+    publicidad_3_unidad: str = Form(""),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    """Guarda en una sola acción todos los tiempos visibles en Mensajes."""
+    security.verificar_csrf(request, csrf)
+    proyecto_id = _proyecto_id(usuario)
+    recordatorios_publicidad = [
+        (publicidad_1_cantidad, publicidad_1_unidad),
+        (publicidad_2_cantidad, publicidad_2_unidad),
+        (publicidad_3_cantidad, publicidad_3_unidad),
+    ]
+    try:
+        # Se valida todo antes de escribir: un error en el último campo no debe
+        # guardar silenciosamente la primera mitad del formulario.
+        tiempos_mensajes.validar(intervalo_mensajes_segundos, recordatorios_publicidad)
+        instrucciones.validar_configuracion_recordatorios(
+            recordatorio_cantidad, recordatorio_unidad
+        )
+        tiempos_mensajes.guardar(
+            proyecto_id,
+            intervalo_mensajes_segundos,
+            recordatorios_publicidad,
+            usuario["usuario"],
+        )
+        instrucciones.guardar_configuracion_recordatorios(
+            proyecto_id,
+            bool(recordatorio_habilitado),
+            recordatorio_cantidad,
+            recordatorio_unidad,
+            usuario["usuario"],
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/mensajes?configuracion=1&error={quote(str(exc))}", status_code=303
+        )
+    return RedirectResponse(
+        url="/mensajes?aviso=Configuración+de+tiempos+guardada", status_code=303
     )
 
 

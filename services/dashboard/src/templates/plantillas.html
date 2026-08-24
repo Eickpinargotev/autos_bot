@@ -25,6 +25,7 @@
     </p>
   </div>
   <div class="acciones-cabecera">
+    <button class="boton mini" type="button" data-abre="configuracion-tiempos">Configuración</button>
     <a class="boton mini" href="/mensajes/descargar">Descargar</a>
     <button class="boton mini" type="button" data-abre="cargar-mensajes">Cargar archivo</button>
     {# Revisar TODO de una vez: el permiso de un archivo de Drive puede cambiar
@@ -37,6 +38,70 @@
     <button class="boton primario mini" data-abre="nuevo-mensaje">Nuevo mensaje</button>
   </div>
 </div>
+
+<dialog class="flotante" id="configuracion-tiempos" {{ 'data-abrir-al-cargar' if request.query_params.get('configuracion') == '1' }}>
+  <div class="cabecera">
+    <h2>Tiempos de los mensajes</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/mensajes/configuracion">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+
+      <h3 style="margin-top:0">Mensajes automáticos</h3>
+      <label for="intervalo-mensajes">Pausa entre un mensaje y el siguiente</label>
+      <div class="linea">
+        <input id="intervalo-mensajes" name="intervalo_mensajes_segundos" type="number"
+               min="1" max="60" required value="{{ tiempos.intervalo_mensajes_segundos }}" style="width:120px">
+        <span>segundos</span>
+      </div>
+      <p class="sub" style="margin:6px 0 0">
+        Se usa cuando el sistema, el agente o una publicidad envían varios mensajes seguidos.
+      </p>
+
+      <hr class="separador">
+      <h3>Recordatorio inteligente</h3>
+      <label class="switch">
+        <input type="checkbox" name="recordatorio_habilitado" value="1"
+               {{ 'checked' if config_recordatorios.habilitado }}>
+        <span class="switch-pista"><span class="switch-bola"></span></span>
+        <span>Enviar seguimiento cuando el cliente deja una respuesta pendiente</span>
+      </label>
+      <div class="linea" style="margin-top:12px">
+        <input name="recordatorio_cantidad" type="number" min="1" required
+               value="{{ config_recordatorios.cantidad }}" style="width:120px">
+        <select name="recordatorio_unidad">
+          <option value="minutos" {{ 'selected' if config_recordatorios.unidad == 'minutos' }}>minutos</option>
+          <option value="horas" {{ 'selected' if config_recordatorios.unidad == 'horas' }}>horas</option>
+        </select>
+      </div>
+
+      <hr class="separador">
+      <h3>Recordatorios de publicidad</h3>
+      <p class="sub">Se cuentan desde que entra el cliente por el anuncio. Cada uno debe salir después del anterior.</p>
+      {% for valor in tiempos_publicidad %}
+      <label for="publicidad-{{ loop.index }}">Recordatorio {{ loop.index }}</label>
+      <div class="linea" style="margin-bottom:12px">
+        <input id="publicidad-{{ loop.index }}" name="publicidad_{{ loop.index }}_cantidad"
+               type="number" min="1" required value="{{ valor.cantidad }}" style="width:120px">
+        <select name="publicidad_{{ loop.index }}_unidad">
+          {% for unidad, etiqueta in [('segundos', 'segundos'), ('minutos', 'minutos'), ('horas', 'horas'), ('dias', 'días')] %}
+          <option value="{{ unidad }}" {{ 'selected' if valor.unidad == unidad }}>{{ etiqueta }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+
+      <p class="sub" style="margin:4px 0 0">
+        Los cambios se aplican a las conversaciones nuevas; los recordatorios ya programados conservan su hora.
+      </p>
+      <div class="linea" style="justify-content:flex-end;margin-top:16px">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Guardar configuración</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 <dialog class="flotante" id="cargar-mensajes">
   <div class="cabecera">

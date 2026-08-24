@@ -93,8 +93,12 @@ class TelegramChannel(BaseChannel):
         # El orquestador hace I/O bloqueante (NocoDB, Postgres, Redis); se corre
         # en un hilo para no congelar el event loop del bot con otros clientes.
         actions = await asyncio.to_thread(self.orchestrator.handle, inbound)
+        enviados = 0
         for action in actions:
             if action.action == "send_now" and action.text:
+                if enviados:
+                    from src.infrastructure.repositories import instrucciones_repository
+                    await asyncio.sleep(instrucciones_repository.intervalo_entre_mensajes())
                 await update.message.reply_text(action.text)
                 if not action.skip_conversation_log:
                     await asyncio.to_thread(
@@ -103,6 +107,7 @@ class TelegramChannel(BaseChannel):
                         canal=action.channel,
                         text=action.text,
                     )
+                enviados += 1
 
     def send_message_sync(self, user_id: str, text: str):
         TelegramSender().send_message_sync(user_id, text)

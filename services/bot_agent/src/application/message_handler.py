@@ -1,6 +1,9 @@
 from src.domain.entities import Channel, InboundMessage, MessageType
 from src.application.conversation_orchestrator import ConversationOrchestrator
+import time
+
 from src.infrastructure.channels.senders import ChannelSenderRegistry
+from src.infrastructure.repositories import instrucciones_repository
 from src.application.project_context import ambito_proyecto
 
 class MessageHandler:
@@ -49,9 +52,12 @@ class MessageHandler:
         with ambito_proyecto(proyecto_id):
             actions = ConversationOrchestrator().handle(inbound)
             enviado = None
+            enviados = 0
             for action in actions:
                 if action.action != "send_now" or not action.text:
                     continue
+                if enviados:
+                    time.sleep(instrucciones_repository.intervalo_entre_mensajes())
                 # Se recorren TODAS: un flujo de palabra clave devuelve varios
                 # mensajes seguidos y antes solo salía el primero.
                 # `ChannelSenderRegistry.send` ya registra el saliente.
@@ -63,6 +69,7 @@ class MessageHandler:
                 )
                 if enviado is None:
                     enviado = action.text
+                enviados += 1
         if enviado is not None:
             return enviado
         if is_command:

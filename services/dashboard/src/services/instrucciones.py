@@ -191,16 +191,7 @@ def configuracion_recordatorios(proyecto_id: int) -> dict[str, Any]:
 def guardar_configuracion_recordatorios(
     proyecto_id: int, habilitado: bool, cantidad: int, unidad: str, usuario: str
 ) -> dict[str, Any]:
-    try:
-        cantidad = int(cantidad)
-    except (TypeError, ValueError):
-        raise ValueError("El intervalo tiene que ser un número entero.") from None
-    unidad = str(unidad or "").strip().lower()
-    if unidad not in {"minutos", "horas"}:
-        raise ValueError("La unidad del intervalo no es válida.")
-    minutos = cantidad * (60 if unidad == "horas" else 1)
-    if minutos < 1 or minutos > MAX_INTERVALO_MINUTOS:
-        raise ValueError("El intervalo debe estar entre 1 minuto y 14 días.")
+    minutos = validar_configuracion_recordatorios(cantidad, unidad)
     return pool.consultar_uno(
         """
         INSERT INTO proyecto_recordatorios
@@ -215,3 +206,17 @@ def guardar_configuracion_recordatorios(
         """,
         (int(proyecto_id), bool(habilitado), minutos, str(usuario)[:120]),
     )
+
+
+def validar_configuracion_recordatorios(cantidad: int, unidad: str) -> int:
+    try:
+        cantidad = int(cantidad)
+    except (TypeError, ValueError):
+        raise ValueError("El intervalo tiene que ser un número entero.") from None
+    unidad = str(unidad or "").strip().lower()
+    if unidad not in {"minutos", "horas"}:
+        raise ValueError("La unidad del intervalo no es válida.")
+    minutos = cantidad * (60 if unidad == "horas" else 1)
+    if minutos < 1 or minutos > MAX_INTERVALO_MINUTOS:
+        raise ValueError("El intervalo debe estar entre 1 minuto y 14 días.")
+    return minutos

@@ -12,7 +12,7 @@ cual» y no «alguien lo escribió».
 
 import pytest
 
-from src.services import media, mensajeria
+from src.services import media, mensajeria, tiempos_mensajes
 from tests.conftest import ServicioDeProyecto, token_csrf
 
 mensajeria = ServicioDeProyecto(mensajeria, {
@@ -301,3 +301,64 @@ def test_el_boton_de_revisar_no_se_confunde_con_el_id_de_un_mensaje(sesion_clien
     assert "1%20adjuntos%20revisados" in respuesta.headers["location"]
     # Y la clave sigue siendo la que era: no se renombró ningún mensaje.
     assert mensajeria.obtener_plantilla(plantilla["id"])["clave"] == "ALAJUELA"
+
+
+# --- Configuración del ritmo -------------------------------------------------
+
+def test_mensajes_muestra_la_configuracion_en_una_ventana(sesion_cliente):
+    cuerpo = sesion_cliente.get("/mensajes").text
+
+    assert 'data-abre="configuracion-tiempos"' in cuerpo
+    assert 'id="configuracion-tiempos"' in cuerpo
+    assert 'name="intervalo_mensajes_segundos"' in cuerpo
+    assert 'name="publicidad_3_cantidad"' in cuerpo
+
+
+def test_guarda_todos_los_tiempos_por_proyecto(sesion_cliente):
+    respuesta = sesion_cliente.post(
+        "/mensajes/configuracion",
+        data={
+            "csrf": token_csrf(sesion_cliente),
+            "intervalo_mensajes_segundos": "5",
+            "recordatorio_habilitado": "1",
+            "recordatorio_cantidad": "2",
+            "recordatorio_unidad": "horas",
+            "publicidad_1_cantidad": "10",
+            "publicidad_1_unidad": "minutos",
+            "publicidad_2_cantidad": "2",
+            "publicidad_2_unidad": "horas",
+            "publicidad_3_cantidad": "1",
+            "publicidad_3_unidad": "dias",
+        },
+        follow_redirects=False,
+    )
+
+    assert respuesta.status_code == 303
+    guardada = tiempos_mensajes.configuracion(1)
+    assert guardada["intervalo_mensajes_segundos"] == 5
+    assert guardada["publicidad_recordatorio_1_segundos"] == 600
+    assert guardada["publicidad_recordatorio_2_segundos"] == 7200
+    assert guardada["publicidad_recordatorio_3_segundos"] == 86400
+
+
+def test_rechaza_recordatorios_de_publicidad_fuera_de_orden(sesion_cliente):
+    respuesta = sesion_cliente.post(
+        "/mensajes/configuracion",
+        data={
+            "csrf": token_csrf(sesion_cliente),
+            "intervalo_mensajes_segundos": "5",
+            "recordatorio_cantidad": "1",
+            "recordatorio_unidad": "horas",
+            "publicidad_1_cantidad": "3",
+            "publicidad_1_unidad": "horas",
+            "publicidad_2_cantidad": "2",
+            "publicidad_2_unidad": "horas",
+            "publicidad_3_cantidad": "1",
+            "publicidad_3_unidad": "dias",
+        },
+        follow_redirects=False,
+    )
+
+    assert respuesta.status_code == 303
+    assert "configuracion=1" in respuesta.headers["location"]
+    assert tiempos_mensajes.configuracion(1)["publicidad_recordatorio_1_segundos"] == 7200

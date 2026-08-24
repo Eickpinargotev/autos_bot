@@ -43,3 +43,34 @@ def configuracion_recordatorios() -> dict:
         print(f"Error leyendo configuración de recordatorios: {exc}")
         return {"habilitado": True, "intervalo_minutos": 60}
     return fila or {"habilitado": True, "intervalo_minutos": 60}
+
+
+def configuracion_tiempos_mensajes() -> dict:
+    """Ritmo editable del proyecto; los respaldos conservan el contrato anterior."""
+    proyecto_id = proyecto_actual()
+    respaldo = {
+        "intervalo_mensajes_segundos": 5,
+        "publicidad_recordatorio_1_segundos": 7200,
+        "publicidad_recordatorio_2_segundos": 72000,
+        "publicidad_recordatorio_3_segundos": 82800,
+    }
+    if not proyecto_id:
+        return respaldo
+    try:
+        fila = consultar_uno(
+            "SELECT intervalo_mensajes_segundos, "
+            "publicidad_recordatorio_1_segundos, "
+            "publicidad_recordatorio_2_segundos, "
+            "publicidad_recordatorio_3_segundos "
+            "FROM proyecto_tiempos_mensajes WHERE proyecto_id = %s",
+            (proyecto_id,),
+        )
+    except Exception as exc:
+        print(f"Error leyendo tiempos de mensajes: {exc}")
+        return respaldo
+    return fila or respaldo
+
+
+def intervalo_entre_mensajes() -> int:
+    config = configuracion_tiempos_mensajes()
+    return max(1, min(int(config.get("intervalo_mensajes_segundos") or 5), 60))
