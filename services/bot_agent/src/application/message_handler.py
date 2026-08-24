@@ -26,6 +26,7 @@ class MessageHandler:
         event_type: str = "message",
         message_id: str = "",
         raw_payload: dict | None = None,
+        advertisement_text: str = "",
         proyecto_id: int = 0,
     ):
         channel_value = channel if isinstance(channel, Channel) else Channel(channel)
@@ -42,6 +43,7 @@ class MessageHandler:
             # evento y hay que reenviarlo entero para que el proveedor la
             # descifre. Ninguna otra rama lo mira.
             raw_payload=raw_payload,
+            advertisement_text=advertisement_text,
             proyecto_id=int(proyecto_id or 0),
         )
         with ambito_proyecto(proyecto_id):

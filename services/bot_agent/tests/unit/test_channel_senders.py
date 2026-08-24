@@ -260,6 +260,32 @@ class EventosEntrantesTests(unittest.TestCase):
 
         self.assertEqual(mensaje.text, "aquí va mi cédula")
 
+    def test_separa_el_saludo_del_texto_del_anuncio_de_facebook(self):
+        """Caso real: la ciudad no está en `text`, sino en externalAdReply."""
+        mensaje = wasender.mensaje_entrante(
+            {
+                "data": {
+                    "messages": {
+                        "key": {"remoteJid": "593983512981@s.whatsapp.net"},
+                        "message": {
+                            "extendedTextMessage": {
+                                "text": "¡Hola! Quiero más información",
+                                "contextInfo": {
+                                    "externalAdReply": {
+                                        "body": "🚔🚔 LAUREL 🚔🚔\n\nCURSO TEÓRICO PARA LICENCIAS",
+                                        "sourceApp": "facebook",
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(mensaje.text, "¡Hola! Quiero más información")
+        self.assertIn("LAUREL", mensaje.advertisement_text)
+
     def test_usa_el_telefono_cuando_el_remoteJid_viene_como_lid(self):
         """Un LID no sirve para responder: WasenderAPI lo rechaza con 422.
 

@@ -186,6 +186,65 @@ class SiSeCobraTests(unittest.TestCase):
         self.assertEqual(cobro.call_args.kwargs["origen"], "keyword")
 
 
+class PublicidadDeFacebookTests(unittest.TestCase):
+    def test_la_ciudad_del_anuncio_dispara_publicidad_sin_preguntarla(self):
+        mensaje = _entrante(MessageType.TEXT, "¡Hola! Quiero más información")
+        mensaje.advertisement_text = "🚔🚔 LAUREL 🚔🚔\n\nCURSO TEÓRICO PARA LICENCIAS"
+
+        with patch(
+            "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+        ), patch(
+            "src.application.conversation_orchestrator.palabras_clave_repository.buscar",
+            return_value=None,
+        ), patch(
+            "src.application.conversation_orchestrator.PostgresUserRepo"
+        ) as repo, patch(
+            "src.application.publicidad_service.PublicidadService._buscar_clave",
+            return_value="LAUREL",
+        ), patch(
+            "src.application.publicidad_service.PublicidadService.handle_publicidad_entry"
+        ) as publicidad, patch(
+            "src.application.conversation_orchestrator.BufferService.add_message"
+        ) as buffer:
+            repo.return_value.is_blocked.return_value = False
+            acciones = ConversationOrchestrator().handle(mensaje)
+
+        self.assertEqual(acciones, [])
+        publicidad.assert_called_once_with(
+            "50688888888", "LAUREL", "Ana", Channel.WHATSAPP
+        )
+        buffer.assert_not_called()
+
+    def test_un_anuncio_sin_clave_del_catalogo_sigue_el_flujo_normal(self):
+        mensaje = _entrante(MessageType.TEXT, "¡Hola! Quiero más información")
+        mensaje.advertisement_text = "Promoción general sin una ciudad conocida"
+
+        with patch(
+            "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+        ), patch(
+            "src.application.conversation_orchestrator.palabras_clave_repository.buscar",
+            return_value=None,
+        ), patch(
+            "src.application.conversation_orchestrator.PostgresUserRepo"
+        ) as repo, patch(
+            "src.application.publicidad_service.PublicidadService._buscar_clave",
+            return_value="",
+        ), patch(
+            "src.application.publicidad_service.PublicidadService.handle_publicidad_entry"
+        ) as publicidad, patch(
+            "src.application.conversation_orchestrator.BufferService.add_message",
+            return_value=4,
+        ) as buffer, patch(
+            "src.application.conversation_orchestrator.process_buffered_messages.apply_async"
+        ):
+            repo.return_value.is_blocked.return_value = False
+            acciones = ConversationOrchestrator().handle(mensaje)
+
+        self.assertEqual(acciones, [])
+        publicidad.assert_not_called()
+        buffer.assert_called_once()
+
+
 class MensajesEditablesTests(unittest.TestCase):
     """El negocio edita sus mensajes en el panel; el archivo es el respaldo."""
 

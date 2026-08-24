@@ -226,6 +226,30 @@ def es_lid(jid: Any) -> bool:
     return "@lid" in str(jid or "")
 
 
+def _texto_de_publicidad(contenido: dict[str, Any]) -> str:
+    """Contenido del anuncio citado por un mensaje Click-to-WhatsApp.
+
+    Wasender pone el saludo del cliente en ``text`` (normalmente «Quiero más
+    información») y la publicación real en
+    ``contextInfo.externalAdReply.body``. Son datos distintos y no se deben
+    concatenar: el saludo queda como mensaje visible; el anuncio solo se usa
+    para reconocer una clave existente del catálogo.
+    """
+    for valor in contenido.values():
+        if not isinstance(valor, dict):
+            continue
+        contexto = valor.get("contextInfo") or {}
+        anuncio = contexto.get("externalAdReply") or {}
+        if not isinstance(anuncio, dict) or not anuncio:
+            continue
+        return str(
+            _primero(anuncio, "body", "title")
+            or _primero(valor, "description")
+            or ""
+        ).strip()
+    return ""
+
+
 # LID -> número, resuelto contra la libreta de la sesión. Se cachea porque la
 # libreta entera son cientos de contactos y no cambia de un mensaje al otro.
 _CONTACTOS_TTL_SEGUNDOS = 600
@@ -387,7 +411,9 @@ def mensaje_entrante(evento: dict[str, Any]) -> InboundMessage | None:
     contenido = mensaje.get("message") or {}
     tipo = MessageType.OTHER
     texto = ""
+    texto_publicidad = ""
     if isinstance(contenido, dict):
+        texto_publicidad = _texto_de_publicidad(contenido)
         for nombre, valor in contenido.items():
             if nombre in _TIPOS:
                 tipo = _TIPOS[nombre]
@@ -410,6 +436,7 @@ def mensaje_entrante(evento: dict[str, Any]) -> InboundMessage | None:
         message_type=tipo,
         text=texto,
         raw_payload=evento,
+        advertisement_text=texto_publicidad,
         from_me=from_me,
         message_id=mensaje_id,
     )

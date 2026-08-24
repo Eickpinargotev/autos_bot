@@ -105,6 +105,28 @@ class WasenderWebhookTests(unittest.TestCase):
         self.assertEqual(kwargs["msg_type"], MessageType.TEXT)
         self.assertEqual(kwargs["channel"], Channel.WHATSAPP)
 
+    def test_el_webhook_entrega_el_anuncio_separado_del_saludo(self):
+        evento = self._evento()
+        evento["data"]["messages"]["message"] = {
+            "extendedTextMessage": {
+                "text": "¡Hola! Quiero más información",
+                "contextInfo": {
+                    "externalAdReply": {
+                        "body": "🚔🚔 LAUREL 🚔🚔\n\nCURSO TEÓRICO PARA LICENCIAS",
+                        "sourceApp": "facebook",
+                    }
+                },
+            }
+        }
+        with patch(
+            "src.infrastructure.webhooks.app.MessageHandler.handle_incoming_message"
+        ) as handler_mock:
+            webhook_app._procesar_evento(evento)
+
+        kwargs = handler_mock.call_args.kwargs
+        self.assertEqual(kwargs["content"], "¡Hola! Quiero más información")
+        self.assertIn("LAUREL", kwargs["advertisement_text"])
+
     def test_el_mismo_message_id_se_procesa_una_sola_vez(self):
         """Una reentrega del proveedor no puede repetir comandos ni respuestas."""
         evento = self._evento()

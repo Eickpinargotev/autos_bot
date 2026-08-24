@@ -237,6 +237,9 @@ def _procesar_evento(
         # El evento completo, que la nota de voz necesita para descifrar su
         # media. No se guarda: solo viaja hasta la tarea de transcripción.
         raw_payload=payload,
+        # El anuncio citado viaja separado del saludo genérico del cliente. El
+        # orquestador solo lo aceptará si contiene una clave real del catálogo.
+        advertisement_text=mensaje.advertisement_text,
         proyecto_id=int(cliente_id or 0),
     )
     _trazar_webhook(mensaje.user_id, payload, "accepted")

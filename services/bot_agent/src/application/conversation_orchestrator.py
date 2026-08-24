@@ -202,6 +202,26 @@ class ConversationOrchestrator:
             self._handle_blocked_text(message)
             return []
 
+        # En los anuncios Click-to-WhatsApp el texto visible suele ser el mismo
+        # para todas las campañas («Quiero más información»). La ciudad está en
+        # `externalAdReply.body`, traducida por Wasender a este campo separado.
+        # Solo se dispara si coincide con una CLAVE que ya existe en Mensajes:
+        # nunca se ejecuta una instrucción arbitraria incluida en el anuncio.
+        if message.advertisement_text:
+            from src.application.publicidad_service import PublicidadService
+
+            clave_publicidad = PublicidadService._buscar_clave(message.advertisement_text)
+            if clave_publicidad:
+                self._branch(
+                    message,
+                    "advertising",
+                    {"city": clave_publicidad, "source": "external_ad_reply"},
+                )
+                PublicidadService.handle_publicidad_entry(
+                    message.user_id, clave_publicidad, message.user_name, message.channel
+                )
+                return []
+
         match_add = re.search(r'add\["(.*?)"\]', text, re.IGNORECASE)
         if match_add:
             self._branch(message, "advertising", {"city": match_add.group(1)})

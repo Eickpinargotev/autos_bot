@@ -40,6 +40,11 @@ class InboundMessage:
     message_type: MessageType
     text: str = ""
     raw_payload: Optional[dict[str, Any]] = None
+    # Texto del anuncio desde el que abrió WhatsApp. Se mantiene separado del
+    # mensaje visible (que suele ser el genérico «Quiero más información»): el
+    # primero sirve para reconocer la ciudad y el segundo es lo que debe verse
+    # en la conversación.
+    advertisement_text: str = ""
     from_me: bool = False
     event_type: str = "message"
     # Id del mensaje en el proveedor. En WhatsApp sirve para saber si un mensaje
