@@ -286,6 +286,32 @@ class EventosEntrantesTests(unittest.TestCase):
         self.assertEqual(mensaje.text, "¡Hola! Quiero más información")
         self.assertIn("LAUREL", mensaje.advertisement_text)
 
+    def test_conserva_el_mensaje_citado_como_contexto(self):
+        mensaje = wasender.mensaje_entrante(
+            {
+                "data": {
+                    "messages": {
+                        "key": {"remoteJid": "50688888888@s.whatsapp.net"},
+                        "message": {
+                            "extendedTextMessage": {
+                                "text": "¿Cuánto duran en enviarme ese correo?",
+                                "contextInfo": {
+                                    "quotedMessage": {
+                                        "conversation": "Recibirá un correo con una clave temporal."
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(mensaje.text, "¿Cuánto duran en enviarme ese correo?")
+        self.assertEqual(
+            mensaje.quoted_text, "Recibirá un correo con una clave temporal."
+        )
+
     def test_usa_el_telefono_cuando_el_remoteJid_viene_como_lid(self):
         """Un LID no sirve para responder: WasenderAPI lo rechaza con 422.
 

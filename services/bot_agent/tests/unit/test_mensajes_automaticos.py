@@ -322,6 +322,31 @@ class PublicidadDeFacebookTests(unittest.TestCase):
         publicidad.assert_not_called()
         buffer.assert_called_once()
 
+    def test_el_mensaje_citado_llega_al_buffer_como_contexto(self):
+        mensaje = _entrante(MessageType.TEXT, "¿Vuelvo a llenar este?")
+        mensaje.quoted_text = "Formulario para solicitar la cita teórica"
+
+        with patch(
+            "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+        ), patch(
+            "src.application.conversation_orchestrator.palabras_clave_repository.buscar",
+            return_value=None,
+        ), patch(
+            "src.application.conversation_orchestrator.PostgresUserRepo"
+        ) as repo, patch(
+            "src.application.conversation_orchestrator.BufferService.add_message",
+            return_value=5,
+        ) as buffer, patch(
+            "src.application.conversation_orchestrator.process_buffered_messages.apply_async"
+        ):
+            repo.return_value.is_blocked.return_value = False
+            ConversationOrchestrator().handle(mensaje)
+
+        texto_enviado = buffer.call_args.args[1]
+        self.assertIn("¿Vuelvo a llenar este?", texto_enviado)
+        self.assertIn("Mensaje citado por el cliente", texto_enviado)
+        self.assertIn("Formulario para solicitar la cita teórica", texto_enviado)
+
 
 class MensajesEditablesTests(unittest.TestCase):
     """El negocio edita sus mensajes en el panel; el archivo es el respaldo."""

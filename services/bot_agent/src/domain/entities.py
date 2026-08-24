@@ -45,6 +45,10 @@ class InboundMessage:
     # primero sirve para reconocer la ciudad y el segundo es lo que debe verse
     # en la conversación.
     advertisement_text: str = ""
+    # Contenido del mensaje al que el cliente responde. WhatsApp lo entrega en
+    # contextInfo.quotedMessage; se conserva como contexto para entender
+    # referencias naturales como "esto" o "ese formulario".
+    quoted_text: str = ""
     from_me: bool = False
     event_type: str = "message"
     # Id del mensaje en el proveedor. En WhatsApp sirve para saber si un mensaje

@@ -273,7 +273,17 @@ class ConversationOrchestrator:
             self._branch(message, "link_auto_reply")
             return self._responder_por_media(message, "MEDIA_ENLACE")
 
-        seq = BufferService.add_message(message.user_id, text, message.channel)
+        # El texto citado es contexto, no otro mensaje ni una instrucción. Se
+        # incorpora al mismo elemento del buffer para que sobreviva al debounce
+        # sin crear estado adicional ni un flujo especial por proveedor.
+        agent_text = text
+        if message.quoted_text:
+            agent_text = (
+                f"Mensaje actual:\n{text}\n\n"
+                f"[Mensaje citado por el cliente; úselo solo como contexto]:\n"
+                f"{message.quoted_text}"
+            )
+        seq = BufferService.add_message(message.user_id, agent_text, message.channel)
         self._branch(message, "buffer_queued", {"sequence": seq})
         process_buffered_messages.apply_async((message.channel.value, message.user_id, message.user_name, seq), countdown=settings.MESSAGE_BUFFER_SECONDS)
         return []

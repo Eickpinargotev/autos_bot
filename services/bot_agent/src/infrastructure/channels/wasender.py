@@ -250,6 +250,32 @@ def _texto_de_publicidad(contenido: dict[str, Any]) -> str:
     return ""
 
 
+def _texto_de_contenido(contenido: dict[str, Any]) -> str:
+    """Texto legible de un bloque ``message`` de WhatsApp."""
+    for nombre, valor in contenido.items():
+        if nombre not in _TIPOS:
+            continue
+        if isinstance(valor, str):
+            return valor.strip()
+        if isinstance(valor, dict):
+            return str(_primero(valor, "text", "caption", "conversation") or "").strip()
+    return ""
+
+
+def _texto_citado(contenido: dict[str, Any]) -> str:
+    """Extrae de forma genérica el mensaje al que el cliente respondió."""
+    for valor in contenido.values():
+        if not isinstance(valor, dict):
+            continue
+        contexto = valor.get("contextInfo") or {}
+        citado = contexto.get("quotedMessage") or {}
+        if isinstance(citado, dict):
+            texto = _texto_de_contenido(citado)
+            if texto:
+                return texto
+    return ""
+
+
 # LID -> número, resuelto contra la libreta de la sesión. Se cachea porque la
 # libreta entera son cientos de contactos y no cambia de un mensaje al otro.
 _CONTACTOS_TTL_SEGUNDOS = 600
@@ -412,8 +438,10 @@ def mensaje_entrante(evento: dict[str, Any]) -> InboundMessage | None:
     tipo = MessageType.OTHER
     texto = ""
     texto_publicidad = ""
+    texto_citado = ""
     if isinstance(contenido, dict):
         texto_publicidad = _texto_de_publicidad(contenido)
+        texto_citado = _texto_citado(contenido)
         for nombre, valor in contenido.items():
             if nombre in _TIPOS:
                 tipo = _TIPOS[nombre]
@@ -437,6 +465,7 @@ def mensaje_entrante(evento: dict[str, Any]) -> InboundMessage | None:
         text=texto,
         raw_payload=evento,
         advertisement_text=texto_publicidad,
+        quoted_text=texto_citado,
         from_me=from_me,
         message_id=mensaje_id,
     )

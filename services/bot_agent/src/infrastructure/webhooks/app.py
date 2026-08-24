@@ -240,6 +240,7 @@ def _procesar_evento(
         # El anuncio citado viaja separado del saludo genérico del cliente. El
         # orquestador solo lo aceptará si contiene una clave real del catálogo.
         advertisement_text=mensaje.advertisement_text,
+        quoted_text=mensaje.quoted_text,
         proyecto_id=int(cliente_id or 0),
     )
     _trazar_webhook(mensaje.user_id, payload, "accepted")
