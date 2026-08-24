@@ -57,6 +57,19 @@ class ProcessingLockTests(unittest.TestCase):
 
         delete_mock.assert_called_once_with(scoped_key("processing", Channel.WHATSAPP, "5061"))
 
+    def test_a_queued_turn_cannot_reply_after_a_report_blocks_the_chat(self):
+        """El bloqueo puede aparecer entre el webhook y la ejecución Celery."""
+        with patch.object(tasks.redis_client, "set", return_value=True), patch.object(
+            tasks.redis_client, "delete"
+        ), patch.object(tasks, "PostgresUserRepo") as repo, patch.object(
+            tasks.BufferService, "get_and_clear_buffer"
+        ) as clear_buffer, patch.object(tasks, "run_agent_turn") as turn_mock:
+            repo.return_value.is_blocked.return_value = True
+            tasks.process_buffered_messages("whatsapp", "5061", "Cliente", 3)
+
+        clear_buffer.assert_called_once_with("5061", Channel.WHATSAPP)
+        turn_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

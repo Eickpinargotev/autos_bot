@@ -81,6 +81,28 @@ class NoSeCobraTests(unittest.TestCase):
         self.assertIn("video", acciones[0].text.lower())
         cobro.assert_not_called()
 
+    def test_despues_de_un_reporte_la_media_no_recibe_ninguna_respuesta(self):
+        """Regresión del diagnóstico 50671404012: una imagen entraba por la
+        rama automática antes de que se comprobara la pausa del handoff."""
+        for tipo in (MessageType.IMAGE, MessageType.DOCUMENT, MessageType.VIDEO):
+            with self.subTest(tipo=tipo), patch(
+                "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+            ), patch(
+                "src.application.conversation_orchestrator.ConversationLogRepository.log_tool_event"
+            ), patch(
+                "src.infrastructure.repositories.bloqueos_permanentes_repository.esta_bloqueado",
+                return_value=False,
+            ), patch(
+                "src.application.conversation_orchestrator.PostgresUserRepo"
+            ) as repo, patch.object(
+                ConversationOrchestrator, "_responder_por_media"
+            ) as responder:
+                repo.return_value.is_blocked.return_value = True
+                acciones = ConversationOrchestrator().handle(_entrante(tipo))
+
+            self.assertEqual(acciones, [])
+            responder.assert_not_called()
+
     def test_un_enlace_recibe_el_aviso_sin_gastar_un_turno_del_modelo(self):
         acciones, cobro, _ = self._procesar(_entrante(MessageType.TEXT, "mira esto https://ejemplo.com/x"))
 

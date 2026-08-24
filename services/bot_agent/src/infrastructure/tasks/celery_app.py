@@ -141,6 +141,14 @@ def process_buffered_messages(channel: str, user_id: str, user_name: str = "Desc
 
 
 def _process_buffered_messages_locked(channel_value: Channel, user_id: str, user_name: str, seq: int | None):
+    # La pausa puede haberse creado después de encolar este turno (por ejemplo,
+    # otro mensaje del mismo cliente generó un reporte mientras este esperaba
+    # el debounce). No basta con comprobarla en el webhook: una tarea vieja no
+    # debe hacer hablar al agente después del handoff.
+    if PostgresUserRepo().is_blocked(user_id, channel=channel_value):
+        BufferService.get_and_clear_buffer(user_id, channel_value)
+        return
+
     if seq is None:
         # Compatibilidad con tareas agendadas por versiones anteriores.
         text = BufferService.get_and_clear_buffer(user_id, channel_value)
@@ -224,6 +232,18 @@ def transcribir_nota_de_voz(channel: str, user_id: str, user_name: str, payload:
     transcripción, que entra al historial como texto del cliente.
     """
     canal = Channel(channel)
+    repo = PostgresUserRepo()
+    if repo.is_blocked(user_id, channel=canal):
+        ConversationLogRepository.log_inbound(
+            client_id=user_id,
+            canal=canal,
+            sender_name=user_name,
+            message_type=MessageType.AUDIO,
+            text="",
+            event_type="audio_bloqueado",
+        )
+        return {"transcrito": False, "segundos": 0, "bloqueado": True}
+
     api_key = clientes_whatsapp_repo.api_key_de_envio(canal.value, user_id)
     resultado = transcripcion_service.transcribir(payload, api_key)
 
@@ -233,6 +253,24 @@ def transcribir_nota_de_voz(channel: str, user_id: str, user_name: str, payload:
         seguimiento_service.registrar_uso_audio(
             user_id, canal, resultado.segundos, resultado.modelo
         )
+
+    # El bloqueo pudo aparecer mientras el proveedor transcribía. Guardamos lo
+    # recibido para que el asesor lo vea, pero no enviamos acuse ni lo pasamos
+    # al agente.
+    if repo.is_blocked(user_id, channel=canal):
+        ConversationLogRepository.log_inbound(
+            client_id=user_id,
+            canal=canal,
+            sender_name=user_name,
+            message_type=MessageType.AUDIO,
+            text=resultado.texto if resultado.hay_texto else "",
+            event_type="audio_bloqueado",
+        )
+        return {
+            "transcrito": bool(resultado.hay_texto),
+            "segundos": resultado.segundos,
+            "bloqueado": True,
+        }
 
     if not resultado.hay_texto:
         # No se pudo entender. Se acusa con el texto fijo del negocio en vez de

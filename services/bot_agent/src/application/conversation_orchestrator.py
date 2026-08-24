@@ -132,6 +132,22 @@ class ConversationOrchestrator:
             self._branch(message, "permanent_block")
             return []
 
+        # Los textos comprueban el bloqueo dentro de `_handle_text` porque los
+        # comandos de operación y algunos disparadores tienen reglas propias.
+        # La media no tenía ninguna comprobación: después de crear un reporte
+        # el chat quedaba bloqueado para texto, pero una imagen todavía recibía
+        # el aviso automático «no puedo revisarla». Un handoff significa
+        # silencio completo de la IA, también para imagen, documento, video y
+        # audio, hasta que el equipo levante la pausa.
+        if (
+            message.message_type != MessageType.TEXT
+            and PostgresUserRepo().is_blocked(
+                message.user_id, channel=message.channel, include_permanent=False
+            )
+        ):
+            self._branch(message, "temporary_block")
+            return []
+
         if message.message_type == MessageType.TEXT:
             return self._handle_text(message)
 
