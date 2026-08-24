@@ -10,6 +10,10 @@ from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 import logging
 
 logging.basicConfig(level=logging.INFO)
+# httpx registra la URL completa de cada llamada. En Telegram esa URL contiene
+# el token del bot dentro de la ruta, así que sus mensajes INFO nunca deben
+# llegar a los logs del contenedor.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 def main():
     logging.info("Iniciando Bot Agent FSM...")
