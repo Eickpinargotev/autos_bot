@@ -86,7 +86,7 @@ class PipelineHarness(ExitStack):
         )
 
         self.pipeline = AgentPipeline()
-        self.enter_context(
+        self.rag_mock = self.enter_context(
             patch.object(self.pipeline.rag, "answer_question", return_value=self.rag_answer)
         )
         return self
@@ -402,6 +402,21 @@ class AgentRagTests(unittest.TestCase):
             result = h.run(text="¿cuánto dura la prueba?")
 
         self.assertEqual(result.replies, ["La prueba dura 25 minutos.", "¿Seguimos con su reservación?"])
+
+    def test_rag_receives_the_current_client_message(self):
+        decision = AgentDecision(
+            action="reply",
+            messages=["[[rag]]"],
+            rag_query="qué sigue si no aprobó el examen teórico",
+        )
+        rag_answer = MagicMock(has_answer=True, answer="Puede prepararse nuevamente.", sources=[])
+        with PipelineHarness(ConversationState(), supervisor=decision, rag_answer=rag_answer) as h:
+            h.run(text="Es el teórico que no pasé")
+
+        self.assertEqual(
+            h.rag_mock.call_args.kwargs["current_message"],
+            "Es el teórico que no pasé",
+        )
 
     def test_rag_miss_registers_question_and_does_not_push_the_flow(self):
         decision = AgentDecision(

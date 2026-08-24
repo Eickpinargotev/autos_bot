@@ -91,6 +91,7 @@ class RagService:
         conversation_history: list[dict] | None = None,
         client_id: str = "",
         canal: Channel | str = "",
+        current_message: str = "",
     ) -> RagAnswer:
         if not self.client or not self.openai:
             return RagAnswer(has_answer=False)
@@ -120,7 +121,10 @@ class RagService:
         if not chunks:
             return RagAnswer(has_answer=False)
 
-        prompt = self._answer_prompt(question, context, last_question, conversation_history or [], chunks)
+        prompt = self._answer_prompt(
+            question, context, last_question, conversation_history or [], chunks,
+            current_message=current_message,
+        )
         messages = [
             {"role": "system", "content": "Devuelve JSON estricto. Responde solo con información respaldada por el contexto."},
             {"role": "user", "content": prompt},
@@ -474,6 +478,7 @@ class RagService:
         last_question: str,
         conversation_history: list[dict],
         chunks: list[dict[str, Any]],
+        current_message: str = "",
     ) -> str:
         return f"""
 Eres la recepcionista de una escuela de manejo y estás redactando la respuesta que se
@@ -492,9 +497,19 @@ Reglas:
   directamente qué sigue o qué necesitas de él.
 - Si hay una lista de requisitos o pasos, sepárala con saltos de línea (\\n) para que sea
   fácil de leer.
+- El mensaje actual tiene prioridad sobre la pregunta pendiente. Si ya la respondió, no
+  repitas esa pregunta.
+- Responde únicamente la duda actual. No agregues información relacionada que el cliente
+  no solicitó.
+- No muestres nombres, cuentas, números SINPE ni datos de pago salvo que el mensaje actual
+  los solicite explícitamente.
+- Mantén el trato de usted.
 
 Flujo y nodo actual (contexto interno, no lo menciones): {context}
-Última pregunta del flujo que se debe retomar después: {last_question}
+Pregunta pendiente antes del mensaje actual (solo contexto): {last_question}
+
+Mensaje actual literal del cliente:
+{current_message}
 
 Historial reciente cliente-bot:
 {json.dumps(conversation_history[-settings.RAG_CONVERSATION_HISTORY_LIMIT:], ensure_ascii=False)}
@@ -502,7 +517,7 @@ Historial reciente cliente-bot:
 Base de conocimiento (contexto interno, no la menciones):
 {json.dumps(chunks, ensure_ascii=False)}
 
-Pregunta actual del cliente:
+Consulta informativa formulada para buscar la respuesta:
 {question}
 
 Devuelve JSON estricto:

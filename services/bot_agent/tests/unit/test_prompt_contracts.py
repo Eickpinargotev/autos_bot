@@ -63,6 +63,10 @@ class CommonContractTests(unittest.TestCase):
         self.assertIn("No respondas esos datos de memoria", AGENT_COMMON_CONTRACT)
         self.assertIn('Solo llena "pending"', AGENT_COMMON_CONTRACT)
 
+    def test_contract_does_not_invent_rag_questions_from_status_updates(self):
+        self.assertIn("no inventes una pregunta informativa", AGENT_COMMON_CONTRACT)
+        self.assertIn("informa su estado", AGENT_COMMON_CONTRACT)
+
     def test_contract_infers_state_from_requests_and_respects_branches(self):
         # Lecciones generales del transcript 2026-07-16: pedir OBTENER algo
         # implica no tenerlo, y la respuesta a una pregunta sí/no elige la

@@ -269,7 +269,14 @@ class AgentPipeline:
     def _expand(self, state: AgentGraphState) -> AgentGraphState:
         decision = state["decision"]
         allowed = allowed_fragments(state.get("decider", SUPERVISOR_ROLE))
-        turn = self._expand_messages(decision, state["stored"], state["user_id"], state["channel"], allowed)
+        turn = self._expand_messages(
+            decision,
+            state["stored"],
+            state["user_id"],
+            state["channel"],
+            allowed,
+            current_message=state["text"],
+        )
 
         # Anti-bucle determinista: si el turno reproduce exactamente lo que el
         # bot ya dijo en un turno reciente, no lo repetimos una tercera vez;
@@ -289,6 +296,7 @@ class AgentPipeline:
         user_id: str,
         channel_value: str,
         allowed: set[str],
+        current_message: str = "",
     ) -> _ExpandedTurn:
         turn = _ExpandedTurn()
         for message in decision.messages:
@@ -297,7 +305,10 @@ class AgentPipeline:
                 # más pasos del proceso mientras su duda sigue abierta.
                 break
             if RAG_TOKEN in message:
-                self._expand_rag(message, decision, stored, user_id, channel_value, turn)
+                self._expand_rag(
+                    message, decision, stored, user_id, channel_value, turn,
+                    current_message=current_message,
+                )
                 continue
             self._expand_fragments(message, user_id, channel_value, turn, allowed)
         self._dedupe_turn(turn)
@@ -418,9 +429,13 @@ class AgentPipeline:
         user_id: str,
         channel_value: str,
         turn: _ExpandedTurn,
+        current_message: str = "",
     ):
         question = decision.rag_query or message.replace(RAG_TOKEN, "").strip()
-        answer = self._answer_rag(user_id, channel_value, question, stored)
+        answer = self._answer_rag(
+            user_id, channel_value, question, stored,
+            current_message=current_message,
+        )
         if answer.has_answer:
             turn.replies.append(answer.answer)
             turn.history_messages.append(answer.answer)
@@ -430,7 +445,10 @@ class AgentPipeline:
         turn.history_messages.append(self.RAG_FALLBACK_MESSAGE)
         turn.rag_missed = True
 
-    def _answer_rag(self, user_id: str, channel_value: str, question: str, stored: ConversationState):
+    def _answer_rag(
+        self, user_id: str, channel_value: str, question: str,
+        stored: ConversationState, current_message: str = "",
+    ):
         call = lambda: self.rag.answer_question(
             question,
             context=f"{AGENT_FLOW}",
@@ -438,6 +456,7 @@ class AgentPipeline:
             conversation_history=stored.conversation_history,
             client_id=user_id,
             canal=channel_value,
+            current_message=current_message,
         )
         if not user_id or not channel_value:
             return call()
@@ -450,6 +469,7 @@ class AgentPipeline:
                 "context": AGENT_FLOW,
                 "last_question": stored.last_question,
                 "history_turns": len(stored.conversation_history),
+                "current_message": current_message,
             },
             output_mapper=lambda answer: {
                 "has_answer": bool(answer.has_answer),

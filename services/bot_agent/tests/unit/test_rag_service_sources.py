@@ -47,6 +47,7 @@ class RagAnswerPromptContractTests(unittest.TestCase):
             last_question="",
             conversation_history=[],
             chunks=[{"external_id": "kb:1", "score": 0.9, "text": "Requisitos: ..."}],
+            current_message="Teórico",
         )
 
     def test_declara_que_answer_se_envia_literal(self):
@@ -65,6 +66,15 @@ class RagAnswerPromptContractTests(unittest.TestCase):
         prompt = self._prompt()
         self.assertIn("Base de conocimiento (contexto interno, no la menciones):", prompt)
         self.assertNotIn("Chunks recuperados", prompt)
+
+    def test_prioriza_el_mensaje_actual_y_no_expone_pagos_no_solicitados(self):
+        prompt = self._prompt()
+        self.assertIn("Mensaje actual literal del cliente:\nTeórico", prompt)
+        self.assertIn("Si ya la respondió, no", prompt)
+        self.assertIn("No agregues información relacionada", prompt)
+        self.assertIn("números SINPE ni datos de pago", prompt)
+        self.assertIn("Mantén el trato de usted", prompt)
+        self.assertNotIn("se debe retomar después", prompt)
 
 
 if __name__ == "__main__":
