@@ -312,6 +312,20 @@ class EventosEntrantesTests(unittest.TestCase):
             mensaje.quoted_text, "Recibirá un correo con una clave temporal."
         )
 
+    def test_ignora_el_contenedor_de_album_y_no_crea_una_burbuja_vacia(self):
+        mensaje = wasender.mensaje_entrante(
+            {
+                "data": {
+                    "messages": {
+                        "key": {"remoteJid": "50688888888@s.whatsapp.net"},
+                        "message": {"albumMessage": {"expectedImageCount": 2}},
+                    }
+                }
+            }
+        )
+
+        self.assertIsNone(mensaje)
+
     def test_usa_el_telefono_cuando_el_remoteJid_viene_como_lid(self):
         """Un LID no sirve para responder: WasenderAPI lo rechaza con 422.
 

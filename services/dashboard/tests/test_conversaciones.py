@@ -19,15 +19,19 @@ from tests.conftest import token_csrf
 
 
 def _mensaje(client_id: str, texto: str, *, direction="inbound", author="cliente",
-             creado: datetime | None = None, event_type="message", tool="", proyecto_id=1):
+             creado: datetime | None = None, event_type="message", tool="", proyecto_id=1,
+             message_type="text", quoted_text=""):
     pool.ejecutar(
         """
         INSERT INTO conversation_messages
-            (proyecto_id, client_id, canal, direction, author, sender_name, text, event_type,
-             tool_name, created_at)
-        VALUES (%s, %s, 'whatsapp', %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()))
+            (proyecto_id, client_id, canal, direction, author, sender_name, message_type,
+             text, quoted_text, event_type, tool_name, created_at)
+        VALUES (%s, %s, 'whatsapp', %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()))
         """,
-        (proyecto_id, client_id, direction, author, "Ana", texto, event_type, tool, creado),
+        (
+            proyecto_id, client_id, direction, author, "Ana", message_type,
+            texto, quoted_text, event_type, tool, creado,
+        ),
     )
 
 
@@ -244,6 +248,34 @@ def test_la_pagina_distingue_al_bot_del_dueno_del_negocio(sesion_cliente):
     assert "Bot" in cuerpo
     assert "Dueño del negocio" in cuerpo
     assert "de-dueño" in cuerpo
+
+
+def test_el_dashboard_muestra_media_del_dueno_y_el_mensaje_citado(sesion_cliente):
+    _mensaje("50688888888", "Información del formulario")
+    _mensaje(
+        "50688888888", "[Image]", direction="outbound", author="dueño",
+        message_type="image", quoted_text="Información del formulario",
+    )
+
+    cuerpo = sesion_cliente.get("/conversaciones/whatsapp/50688888888").text
+
+    assert "Dueño del negocio" in cuerpo
+    assert "· image" in cuerpo
+    assert "Mensaje citado" in cuerpo
+    assert cuerpo.count("Información del formulario") == 2
+
+
+def test_una_pausa_sin_fecha_muestra_motivo_y_que_no_expira(sesion_cliente):
+    _mensaje("50688888888", "hola")
+    pool.ejecutar(
+        """INSERT INTO users_blocked (proyecto_id, user_id, reason, expires_at)
+           VALUES (1, 'whatsapp:50688888888', 'Flujo de publicidad', NULL)"""
+    )
+
+    cuerpo = sesion_cliente.get("/conversaciones/whatsapp/50688888888").text
+
+    assert "IA pausada sin fecha" in cuerpo
+    assert "Flujo de publicidad" in cuerpo
 
 
 def test_el_dueno_puede_responder_whatsapp_desde_el_hilo(sesion_cliente, monkeypatch):

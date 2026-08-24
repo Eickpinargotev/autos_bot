@@ -109,6 +109,7 @@ class ConversationOrchestrator:
                 sender_name=message.user_name,
                 message_type=message.message_type,
                 text=message.text or "",
+                quoted_text=message.quoted_text,
                 event_type=_evento_de(message),
             )
 
@@ -362,7 +363,13 @@ class ConversationOrchestrator:
             return []
 
         try:
-            human_intervention.registrar(message.channel, message.user_id, message.text or "")
+            human_intervention.registrar(
+                message.channel,
+                message.user_id,
+                message.text or "",
+                message_type=message.message_type,
+                quoted_text=message.quoted_text,
+            )
         except Exception as e:
             print(f"Error registrando la intervención humana: {e}")
 

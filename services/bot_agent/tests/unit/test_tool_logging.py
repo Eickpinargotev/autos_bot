@@ -40,7 +40,7 @@ class ConversationToolLoggingTests(unittest.TestCase):
         (
             proyecto_id, client_id, canal, direction, author, _sender_id, _sender_name,
             message_type, _text, event_type, tool_name, status,
-            entrada, salida, _error, duration_ms,
+            _quoted_text, entrada, salida, _error, duration_ms,
         ) = params
 
         self.assertEqual(proyecto_id, 1)
@@ -73,10 +73,10 @@ class ConversationToolLoggingTests(unittest.TestCase):
         _, params = ejecutar_mock.call_args.args
         self.assertEqual(params[10], "reception.decide")
         self.assertEqual(params[11], "error")
-        self.assertEqual(params[14], "boom")
+        self.assertEqual(params[15], "boom")
         # Sin datos de entrada/salida se guarda NULL, no un "{}" inútil.
-        self.assertIsNone(params[12])
         self.assertIsNone(params[13])
+        self.assertIsNone(params[14])
 
     def test_fallo_de_la_base_no_rompe_el_turno(self):
         """Perder una línea de log jamás debe tumbar la atención al cliente."""

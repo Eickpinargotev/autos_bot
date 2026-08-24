@@ -837,6 +837,9 @@ form.linea button { flex: 0 0 auto; }
 .burbuja.outbound { align-self: flex-end; background: var(--elevado); border-color: transparent; border-bottom-right-radius: 4px; }
 .burbuja.de-dueño { border-left: 3px solid var(--alerta); }
 .burbuja.de-dueño .meta .autor { color: var(--alerta); }
+.mensaje-citado { margin: 5px 0 7px; padding: 7px 9px; border-left: 3px solid var(--borde); border-radius: 3px; background: var(--panel); color: var(--suave); font-size: 12.5px; line-height: 1.4; }
+.mensaje-citado > span { display: block; margin-bottom: 2px; color: var(--tenue); font-size: 11px; font-weight: 600; }
+.mensaje-citado > div { white-space: pre-wrap; overflow-wrap: anywhere; }
 .reporte-creado a { color: inherit; font-weight: 600; }
 .compositor-chat textarea { width: 100%; min-height: 58px; max-height: 150px; resize: vertical; }
 .cabecera-prompts { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; }

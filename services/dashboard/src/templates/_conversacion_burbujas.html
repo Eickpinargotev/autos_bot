@@ -79,6 +79,12 @@ salida: {{ m.salida }}</pre>
     {% elif m.event_type == 'media_avisada' %}
     <div class="etiqueta-origen">📎 {{ m.message_type | capitalize }} · el bot no puede abrirlo, se envió el aviso</div>
     {% endif %}
+    {% if m.quoted_text %}
+    <div class="mensaje-citado">
+      <span>Mensaje citado</span>
+      <div>{{- m.quoted_text -}}</div>
+    </div>
+    {% endif %}
     {% if m.text %}<div class="texto">{{- m.text -}}</div>{% endif %}
   </div>
   {% endif %}

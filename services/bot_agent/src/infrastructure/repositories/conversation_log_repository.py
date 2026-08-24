@@ -27,6 +27,7 @@ class ConversationLogRepository:
         sender_name: str,
         message_type: MessageType | str,
         text: str = "",
+        quoted_text: str = "",
         event_type: str = "message",
     ) -> bool:
         if (event_type or "message") == "message":
@@ -47,6 +48,7 @@ class ConversationLogRepository:
                 "sender_name": sender_name or "Desconocido",
                 "message_type": ConversationLogRepository._message_type_value(message_type),
                 "text": text or "",
+                "quoted_text": quoted_text or "",
                 "event_type": event_type or "message",
             },
         )
@@ -127,8 +129,8 @@ class ConversationLogRepository:
                 INSERT INTO conversation_messages (
                     proyecto_id, client_id, canal, direction, author, sender_id, sender_name,
                     message_type, text, event_type, tool_name, status,
-                    entrada, salida, error, duration_ms
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    quoted_text, entrada, salida, error, duration_ms
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     proyecto_id, str(client_id),
@@ -142,6 +144,7 @@ class ConversationLogRepository:
                     message.get("event_type") or "message",
                     str(message.get("tool_name") or "")[:120],
                     str(message.get("status") or "")[:40],
+                    message.get("quoted_text") or "",
                     ConversationLogRepository._json_o_nulo(message.get("input")),
                     ConversationLogRepository._json_o_nulo(message.get("output")),
                     message.get("error") or "",

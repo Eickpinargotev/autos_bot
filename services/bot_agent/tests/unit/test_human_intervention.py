@@ -35,6 +35,35 @@ def test_registra_como_dueno_pausa_ia_y_cancela_recordatorios():
     vaciar.assert_called_once_with("506", Channel.WHATSAPP)
 
 
+def test_la_media_del_dueno_se_guarda_con_tipo_y_contexto_visibles():
+    repo = MagicMock()
+    with patch.object(
+        human_intervention.ConversationLogRepository, "append_message"
+    ) as log, patch.object(
+        human_intervention.seguimiento_service, "registrar_mensaje"
+    ), patch.object(
+        human_intervention.seguimiento_service, "registrar_intervencion_humana"
+    ), patch.object(
+        human_intervention, "PostgresUserRepo", return_value=repo
+    ), patch.object(
+        human_intervention, "clear_user_runtime_context"
+    ), patch.object(
+        human_intervention.BufferService, "get_and_clear_buffer"
+    ):
+        human_intervention.registrar(
+            Channel.WHATSAPP,
+            "506",
+            "",
+            message_type=MessageType.IMAGE,
+            quoted_text="Este es el vehículo",
+        )
+
+    mensaje = log.call_args.kwargs["message"]
+    assert mensaje["message_type"] == "image"
+    assert mensaje["text"] == "[Image]"
+    assert mensaje["quoted_text"] == "Este es el vehículo"
+
+
 def test_el_bloqueo_ocurre_aunque_falle_el_registro_del_mensaje():
     repo = MagicMock()
     with patch.object(

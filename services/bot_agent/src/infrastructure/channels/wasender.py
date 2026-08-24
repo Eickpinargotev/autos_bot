@@ -435,6 +435,11 @@ def mensaje_entrante(evento: dict[str, Any]) -> InboundMessage | None:
     mensaje_id = str(_primero(clave, "id") or _primero(mensaje, "id", "msgId", "messageId") or "")
 
     contenido = mensaje.get("message") or {}
+    # WhatsApp emite un contenedor adicional para un álbum y después entrega
+    # cada imagen como su propio mensaje. El contenedor no es contenido visible
+    # y guardarlo produciría una burbuja vacía duplicada en el dashboard.
+    if isinstance(contenido, dict) and "albumMessage" in contenido:
+        return None
     tipo = MessageType.OTHER
     texto = ""
     texto_publicidad = ""

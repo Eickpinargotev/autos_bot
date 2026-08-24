@@ -13,8 +13,9 @@
     <div class="estados-chat">
       {% if canal == 'whatsapp' %}
         {% if bloqueo_temporal %}
-        <span class="pastilla alerta" data-pausa-ia>
-          IA pausada{% if bloqueo_temporal.expires_at %} hasta {{ bloqueo_temporal.expires_at | fecha }}{% endif %}
+        <span class="pastilla alerta" data-pausa-ia title="{{ bloqueo_temporal.reason or '' }}">
+          IA pausada{% if bloqueo_temporal.expires_at %} hasta {{ bloqueo_temporal.expires_at | fecha }}{% else %} sin fecha{% endif %}
+          {% if bloqueo_temporal.reason %} · {{ bloqueo_temporal.reason | truncate(55) }}{% endif %}
         </span>
         {% endif %}
         {% if bloqueo_permanente %}

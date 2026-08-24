@@ -81,6 +81,17 @@ class NoSeCobraTests(unittest.TestCase):
         self.assertIn("video", acciones[0].text.lower())
         cobro.assert_not_called()
 
+    def test_el_contexto_citado_del_cliente_se_guarda_en_el_historial(self):
+        mensaje = _entrante(MessageType.TEXT, "¿Vuelvo a llenar este?")
+        mensaje.quoted_text = "Formulario para solicitar la cita teórica"
+
+        _, _, log = self._procesar(mensaje)
+
+        self.assertEqual(
+            log.call_args.kwargs["quoted_text"],
+            "Formulario para solicitar la cita teórica",
+        )
+
     def test_despues_de_un_reporte_la_media_no_recibe_ninguna_respuesta(self):
         """Regresión del diagnóstico 50671404012: una imagen entraba por la
         rama automática antes de que se comprobara la pausa del handoff."""
