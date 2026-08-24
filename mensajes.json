@@ -550,28 +550,26 @@
   "AUTOMATICO": {
     "MEDIA_IMAGEN": {
       "mensajes": [
-        "Recibí tu imagen, pero no puedo revisarla por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarla directamente."
+        "Gracias, recibí tu imagen."
       ]
     },
     "MEDIA_DOCUMENTO": {
       "mensajes": [
-        "Recibí tu documento, pero no puedo revisarlo por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarlo directamente."
+        "Gracias, recibí tu documento."
       ]
     },
     "MEDIA_VIDEO": {
       "mensajes": [
-        "Recibí tu video, pero no puedo revisarlo por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarlo directamente."
+        "Gracias, recibí tu video."
       ]
     },
     "MEDIA_ENLACE": {
       "mensajes": [
-        "Recibí tu enlace, pero no puedo revisarlo por este medio. Si me cuentas en texto qué necesitas, te ayudo, o si prefieres, un asesor puede revisarlo directamente."
+        "Gracias, recibí tu enlace."
       ]
     },
     "MEDIA_INSISTE": {
-      "mensajes": [
-        "Ayuda solicitada: el usuario insiste enviando varias imagenes/documentos"
-      ]
+      "reporte": "El cliente envió varios archivos y requiere revisión del equipo."
     },
     "MEDIA_AUDIO_ILEGIBLE": {
       "mensajes": [

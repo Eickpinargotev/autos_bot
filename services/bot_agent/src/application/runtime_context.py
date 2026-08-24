@@ -6,6 +6,7 @@ AD_REPORT_TEXT = "El usuario respondio a un recordatorio para unirse al grupo"
 WELCOME_REPORT_CONTEXT = "welcome"
 AD_REPORT_CONTEXT = "ad_group_reminder"
 KEYWORD_REPORT_CONTEXT = "keyword_reminder"
+MEDIA_REPORT_CONTEXT = "media_review"
 RUNTIME_TTL_SECONDS = 60 * 60 * 24 * 14
 REPORT_TTL_SECONDS = 60 * 60 * 24 * 60
 
@@ -15,7 +16,12 @@ AD_REMINDER_STAGES = (1, 2, 3)
 # Contextos posibles de claves report_fired:<context>. Se enumeran para poder
 # borrarlas por clave exacta: un SCAN por patrón recorre TODO el keyspace de
 # Redis y en el camino caliente de mensajes se vuelve lento con muchos usuarios.
-REPORT_CONTEXTS = (WELCOME_REPORT_CONTEXT, AD_REPORT_CONTEXT, KEYWORD_REPORT_CONTEXT)
+REPORT_CONTEXTS = (
+    WELCOME_REPORT_CONTEXT,
+    AD_REPORT_CONTEXT,
+    KEYWORD_REPORT_CONTEXT,
+    MEDIA_REPORT_CONTEXT,
+)
 
 
 def _key(prefix: str, channel: Channel | str, user_id: str) -> str:

@@ -152,6 +152,40 @@ class NoSeCobraTests(unittest.TestCase):
             with self.subTest(texto=texto):
                 self.assertIsNone(_ENLACE.search(texto))
 
+    def test_varios_adjuntos_crean_reporte_interno_y_no_envian_la_razon(self):
+        mensaje = _entrante(MessageType.IMAGE)
+        with patch(
+            "src.application.conversation_orchestrator.BufferService.add_image_info_count",
+            return_value=False,
+        ), patch(
+            "src.application.conversation_orchestrator.mark_report_once", return_value=True
+        ), patch(
+            "src.application.conversation_orchestrator.ReportRepository.create_report"
+        ) as reporte, patch(
+            "src.application.conversation_orchestrator.PostgresUserRepo"
+        ) as repo, patch(
+            "src.application.conversation_orchestrator.seguimiento_service.registrar_derivacion"
+        ), patch(
+            "src.application.conversation_orchestrator.clear_user_runtime_context"
+        ):
+            acciones = ConversationOrchestrator()._responder_por_media(mensaje, "MEDIA_IMAGEN")
+
+        self.assertEqual(acciones, [])
+        reporte.assert_called_once()
+        self.assertIn("revisión del equipo", reporte.call_args.kwargs["problema"])
+        repo.return_value.block_user.assert_called_once()
+
+    def test_los_avisos_de_media_no_exponen_la_derivacion_interna(self):
+        from src.application.message_catalog import get_messages_for_node
+
+        for nodo in ("MEDIA_IMAGEN", "MEDIA_DOCUMENTO", "MEDIA_VIDEO", "MEDIA_ENLACE"):
+            with self.subTest(nodo=nodo):
+                texto = " ".join(get_messages_for_node("AUTOMATICO", nodo)).lower()
+                self.assertNotIn("asesor", texto)
+                self.assertNotIn("ayuda solicitada", texto)
+
+        self.assertEqual(get_messages_for_node("AUTOMATICO", "MEDIA_INSISTE"), [])
+
     def test_reconoce_las_formas_en_que_se_pega_un_enlace(self):
         from src.application.conversation_orchestrator import _ENLACE
 

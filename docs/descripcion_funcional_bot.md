@@ -41,7 +41,7 @@ Los mensajes que atiende son:
 
 - Texto: se procesa normalmente y puede activar procesos de atencion, RAG, publicidad o palabras clave.
 - Audio: se agrega a la conversacion como texto transcrito y luego se procesa junto con otros mensajes recientes.
-- Imagen o documento: el bot avisa que no puede ver imagenes/documentos. Si el cliente insiste, se interpreta como una solicitud de ayuda para revision humana.
+- Imagen, documento, video o enlace: el bot confirma la recepcion con un mensaje neutro. Si llegan varios archivos en poco tiempo, crea un aviso interno para revision humana, pausa sus respuestas y no expone al cliente la razon operativa.
 - Eventos de grupo: cuando el sistema detecta ingreso a grupo, puede enviar el mensaje de bienvenida y cambiar el estado del cliente; este mensaje de bienvenida se envía solo si el cliente primero recibió el mensaje de invitación cuando llego por publicidad.
 
 ## Recepcion inicial (supervisor)
@@ -143,6 +143,8 @@ La logica general es:
 5. El equipo revisa el reporte y continua la atencion manualmente.
 
 Tambien puede haber pausas temporales por publicidad, ingreso a grupo, palabras clave o pausas por intervención manual el equipo. En todos los casos, la finalidad es la misma: evitar que el bot interfiera cuando hay una secuencia especial o un seguimiento humano en curso.
+
+La intervención manual del dueño tiene prioridad absoluta. Desde que el dueño escribe, el bot no procesa texto, palabras clave, enlaces, audios, imágenes, documentos, videos, stickers ni eventos de grupo para ese número hasta que venza el plazo configurado o se levante el bloqueo explícitamente.
 
 ## Recordatorios
 

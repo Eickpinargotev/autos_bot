@@ -89,3 +89,49 @@ class PostgresUserRepo:
             include_permanent
             and bloqueos_permanentes_repository.esta_bloqueado(user_id, channel)
         )
+
+    def is_blocked_for_reason(
+        self,
+        user_id: str,
+        reason: str,
+        channel: Channel | str = Channel.TELEGRAM,
+    ) -> bool:
+        """Comprueba un bloqueo temporal concreto todavía vigente.
+
+        Algunas entradas normalmente prioritarias (por ejemplo una palabra
+        clave) pueden ejecutarse durante otros flujos. Una intervención humana
+        es distinta: debe silenciar absolutamente todas las ramas del bot.
+        """
+        proyecto_id = proyecto_actual()
+        if not proyecto_id:
+            return False
+        blocked_id = subject_id(channel, user_id)
+        ids_to_check = [blocked_id]
+        if (channel.value if isinstance(channel, Channel) else channel) == Channel.TELEGRAM.value:
+            ids_to_check.append(user_id)
+
+        def op(conn) -> bool:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_id, expires_at
+                    FROM users_blocked
+                    WHERE proyecto_id = %s
+                      AND user_id = ANY(%s)
+                      AND reason = %s
+                    """,
+                    (proyecto_id, ids_to_check, reason),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False
+                stored_user_id, expires_at = row
+                if expires_at and datetime.datetime.now() > expires_at:
+                    cur.execute(
+                        "DELETE FROM users_blocked WHERE proyecto_id = %s AND user_id = %s",
+                        (proyecto_id, stored_user_id),
+                    )
+                    return False
+                return True
+
+        return bool(run_query(op))

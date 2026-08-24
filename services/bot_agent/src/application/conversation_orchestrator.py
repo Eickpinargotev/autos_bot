@@ -6,6 +6,7 @@ from src.application.message_catalog import mensajes_del_negocio, mensajes_db
 from src.application import human_intervention
 from src.application.runtime_context import (
     AD_REPORT_TEXT,
+    MEDIA_REPORT_CONTEXT,
     WELCOME_REPORT_CONTEXT,
     clear_user_runtime_context,
     consume_ad_report,
@@ -112,6 +113,23 @@ class ConversationOrchestrator:
                 event_type=_evento_de(message),
             )
 
+        # Los bloqueos absolutos se comprueban antes que stickers, eventos de
+        # grupo, palabras clave o adjuntos. Registrar el inbound arriba sigue
+        # siendo útil para el panel, pero ninguna rama automática puede ganarles.
+        from src.infrastructure.repositories import bloqueos_permanentes_repository
+        if bloqueos_permanentes_repository.esta_bloqueado(message.user_id, message.channel):
+            self._branch(message, "permanent_block")
+            return []
+
+        repo = PostgresUserRepo()
+        if repo.is_blocked_for_reason(
+            message.user_id,
+            human_intervention.MOTIVO_PAUSA_IA,
+            channel=message.channel,
+        ) is True:
+            self._branch(message, "temporary_block", {"source": "human_intervention"})
+            return []
+
         # Un sticker es un gesto, no una consulta: NO se responde. Queda en el
         # historial (arriba) para que quien lea el chat en el panel vea lo que
         # pasó de verdad, pero sin respuesta, sin LLM y sin cobro — y sin gastar
@@ -124,14 +142,6 @@ class ConversationOrchestrator:
         if message.event_type == "group_join":
             return self._handle_group_join(message)
 
-        # Un bloqueo permanente manda incluso sobre comandos, palabras clave y
-        # adjuntos. El mensaje sí queda en el dashboard (se registró arriba),
-        # pero el bot no responde por ningún camino.
-        from src.infrastructure.repositories import bloqueos_permanentes_repository
-        if bloqueos_permanentes_repository.esta_bloqueado(message.user_id, message.channel):
-            self._branch(message, "permanent_block")
-            return []
-
         # Los textos comprueban el bloqueo dentro de `_handle_text` porque los
         # comandos de operación y algunos disparadores tienen reglas propias.
         # La media no tenía ninguna comprobación: después de crear un reporte
@@ -141,7 +151,7 @@ class ConversationOrchestrator:
         # audio, hasta que el equipo levante la pausa.
         if (
             message.message_type != MessageType.TEXT
-            and PostgresUserRepo().is_blocked(
+            and repo.is_blocked(
                 message.user_id, channel=message.channel, include_permanent=False
             )
         ):
@@ -270,15 +280,48 @@ class ConversationOrchestrator:
         return []
 
     def _responder_por_media(self, message: InboundMessage, nodo: str) -> list[OrchestratorAction]:
-        """Acuse a un adjunto, con tope para el que insiste.
+        """Acusa un adjunto y deriva silenciosamente si llegan varios.
 
         El tope (`add_image_info_count`) es anti-bucle: quien manda ocho fotos
         seguidas no necesita ocho veces el mismo aviso. Pasado el límite se
-        cambia al nodo de insistencia, que pide ayuda humana.
+        crea un reporte interno y el bot se pausa. La razón operativa nunca se
+        devuelve como texto al cliente.
         """
         if not BufferService.add_image_info_count(message.user_id, message.channel):
-            nodo = "MEDIA_INSISTE"
+            self._reportar_media_para_revision(message)
+            return []
         return self._responder_automatico(message, nodo)
+
+    @staticmethod
+    def _reportar_media_para_revision(message: InboundMessage) -> None:
+        """Avisa al equipo una sola vez y transfiere el chat sin anunciarlo."""
+        if not mark_report_once(message.channel, message.user_id, MEDIA_REPORT_CONTEXT):
+            return
+
+        reason = (
+            mensajes_db.get("AUTOMATICO", {}).get("MEDIA_INSISTE", {}).get("reporte")
+            or "El cliente envió varios archivos y requiere revisión del equipo."
+        )
+        ReportRepository.create_report(
+            nombre=message.user_name,
+            numero=message.user_id,
+            problema=f"[{message.channel.value}] {reason}",
+            link_whatsapp=f"https://wa.me/{message.user_id}",
+            canal=message.channel.value,
+        )
+        PostgresUserRepo().block_user(
+            message.user_id,
+            reason=reason,
+            days=12,
+            channel=message.channel,
+        )
+        seguimiento_service.registrar_derivacion(message.user_id, message.channel)
+        clear_user_runtime_context(
+            message.channel,
+            message.user_id,
+            cancel_scheduled=False,
+            clear_reports=False,
+        )
 
     def _responder_automatico(self, message: InboundMessage, nodo: str) -> list[OrchestratorAction]:
         """Acuse fijo a lo que el bot no puede leer (imágenes, documentos, stickers).

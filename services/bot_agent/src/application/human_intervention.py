@@ -8,32 +8,46 @@ from src.infrastructure.repositories.conversation_log_repository import Conversa
 from src.infrastructure.repositories.postgres_user_repo import PostgresUserRepo
 
 DIAS_PAUSA_IA = 12
+MOTIVO_PAUSA_IA = "Intervención de un asesor humano"
 
 
 def registrar(channel: Channel | str, user_id: str, texto: str) -> None:
     canal = channel if isinstance(channel, Channel) else Channel(channel)
-    ConversationLogRepository.append_message(
-        client_id=user_id,
-        canal=canal,
-        message={
-            "direction": "outbound",
-            "author": "dueño",
-            "sender_id": "humano",
-            "sender_name": "Asesor",
-            "message_type": "text",
-            "text": texto,
-            "event_type": "intervencion_humana",
-        },
-    )
-    seguimiento_service.registrar_mensaje(
-        client_id=user_id, canal=canal, autor="dueño", texto=texto
-    )
-    seguimiento_service.registrar_intervencion_humana(user_id, canal)
+    # Este es el efecto crítico y debe ocurrir ANTES que trazabilidad, métricas
+    # o limpieza. Si alguno de esos efectos secundarios falla, el bot igual
+    # queda en silencio desde el instante en que el dueño tomó la conversación.
     PostgresUserRepo().block_user(
         user_id,
-        reason="Intervención de un asesor humano",
+        reason=MOTIVO_PAUSA_IA,
         days=DIAS_PAUSA_IA,
         channel=canal,
     )
-    clear_user_runtime_context(canal, user_id, cancel_scheduled=True, clear_reports=False)
-    BufferService.get_and_clear_buffer(user_id, canal)
+
+    efectos = (
+        lambda: clear_user_runtime_context(
+            canal, user_id, cancel_scheduled=True, clear_reports=False
+        ),
+        lambda: BufferService.get_and_clear_buffer(user_id, canal),
+        lambda: ConversationLogRepository.append_message(
+            client_id=user_id,
+            canal=canal,
+            message={
+                "direction": "outbound",
+                "author": "dueño",
+                "sender_id": "humano",
+                "sender_name": "Asesor",
+                "message_type": "text",
+                "text": texto,
+                "event_type": "intervencion_humana",
+            },
+        ),
+        lambda: seguimiento_service.registrar_mensaje(
+            client_id=user_id, canal=canal, autor="dueño", texto=texto
+        ),
+        lambda: seguimiento_service.registrar_intervencion_humana(user_id, canal),
+    )
+    for efecto in efectos:
+        try:
+            efecto()
+        except Exception as exc:
+            print(f"Error posterior al bloqueo por intervención humana: {exc}")
