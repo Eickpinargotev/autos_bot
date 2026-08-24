@@ -96,6 +96,10 @@ def consume_ad_report(channel: Channel | str, user_id: str) -> bool:
     return mark_report_once(channel, user_id, AD_REPORT_CONTEXT)
 
 
+def ad_report_consumed(channel: Channel | str, user_id: str) -> bool:
+    return bool(redis_client.exists(_key("ad_report_consumed", channel, user_id)))
+
+
 def consume_keyword_report(channel: Channel | str, user_id: str) -> str:
     if not has_keyword_context(channel, user_id):
         return ""

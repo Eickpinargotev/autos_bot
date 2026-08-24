@@ -23,6 +23,21 @@ def test_el_html_de_google_se_lee_como_datos_y_descarta_facebook():
     assert "facebook" not in repr(plantillas).lower()
 
 
+def test_csv_con_comillas_dobles_dentro_del_mensaje_no_desplaza_la_clave():
+    datos = (
+        'CIUDAD,PRIMER MENSAJE,CIUDAD_MAYUSCULA,FACEBOOK\n'
+        'Quepos,"LUGAR: ""Iglesia Cuadrangular"". Barrio Bella Vista",QUEPOS,'
+        'https://facebook.example/anuncio\n'
+    ).encode()
+
+    plantillas = archivos_catalogo.analizar_mensajes(datos, "ciudades.csv")
+
+    assert [p["clave"] for p in plantillas] == ["QUEPOS"]
+    assert plantillas[0]["partes"][0]["texto"] == (
+        'LUGAR: "Iglesia Cuadrangular". Barrio Bella Vista'
+    )
+
+
 def test_cargar_mensajes_crea_y_luego_actualiza_sin_duplicar(sesion_cliente, monkeypatch):
     monkeypatch.setattr("src.services.media.verificar", lambda ref, tipo: (True, ""))
     for _ in range(2):

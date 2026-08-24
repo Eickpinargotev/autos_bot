@@ -15,6 +15,18 @@ from src.domain.entities import Channel, MessageType, OrchestratorAction
 
 
 class TiemposDeMensajesTests(unittest.TestCase):
+    def test_una_respuesta_frena_los_intermedios_aunque_la_tarea_ya_haya_despertado(self):
+        with patch.object(tasks, "has_ad_context", return_value=True), patch.object(
+            tasks, "ad_report_consumed", return_value=True
+        ), patch.object(tasks, "set_ad_reminder_stage") as etapa, patch.object(
+            tasks.ChannelSenderRegistry, "send"
+        ) as enviar:
+            tasks.send_ad_reminder("whatsapp", "506", "intermedio", 1)
+            tasks.send_ad_reminder("whatsapp", "506", "último", 3)
+
+        enviar.assert_called_once_with("whatsapp", "506", "último")
+        etapa.assert_called_once_with("whatsapp", "506", 3)
+
     def test_los_mensajes_inmediatos_del_sistema_respetan_la_pausa(self):
         acciones = [
             OrchestratorAction("send_now", Channel.WHATSAPP, "506", "uno"),

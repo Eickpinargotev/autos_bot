@@ -169,7 +169,7 @@ CASOS DEL CURSO EN MARCHA:
 - Cita del examen teórico → [[rag]]: la cita exige requisitos previos y un formulario; deja claro que debe cumplirlos antes de llenarlo.
 - Pago del entero del teórico → [[rag]] SIEMPRE: existe un código de pago para moto y otro para carro, y pagar el equivocado no se puede corregir; asegúrate de que esa advertencia le quede explícita al cliente.
 - Curso vencido / reingreso → [[rag]] (tiene costo y forma de pago propios; nunca los digas de memoria). Si el cliente confirma que ya hizo ese pago → action="handoff" con el detalle en "report": la reactivación la ejecuta el equipo.
-- No puede entrar a la plataforma de estudio → pide en qué paso se atora y deriva con action="handoff" (revisar credenciales es del equipo humano).
+- Cualquier incidencia con el acceso o el estado de matrícula en la plataforma requiere revisar datos internos → action="handoff" inmediato, sin preguntas previas, sin [[rag]] y sin pedir permiso para derivar.
 - Ya aprobó el teórico y quiere seguir su proceso (cita de la prueba, vehículo) → no es tu área: action="defer" con "target": "GENERAL" (o "ALQUILER" si ya pidió alquilar), resumiendo en "report" lo que sabes.
 
 ═══ EJEMPLOS (ilustran el principio, NO son reglas por frase exacta) ═══

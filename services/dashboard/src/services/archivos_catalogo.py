@@ -76,7 +76,23 @@ def leer_tabla(datos: bytes, nombre: str = "") -> list[list[str]]:
             dialecto = csv.Sniffer().sniff(muestra, delimiters=",;\t")
         except csv.Error:
             dialecto = csv.excel
-        filas = [[celda.strip() for celda in fila] for fila in csv.reader(io.StringIO(texto), dialecto)]
+        # `Sniffer` puede concluir `doublequote=False` si las primeras filas no
+        # contienen comillas dentro de una celda. Más adelante, un texto CSV
+        # perfectamente válido como `LUGAR: ""Iglesia""` queda entonces partido
+        # en varias filas y desplaza la clave hacia la columna de Facebook.
+        # Las exportaciones de Sheets/Excel siguen RFC 4180: una comilla dentro
+        # de una celda entrecomillada se representa duplicándola.
+        filas = [
+            [celda.strip() for celda in fila]
+            for fila in csv.reader(
+                io.StringIO(texto),
+                delimiter=dialecto.delimiter,
+                quotechar=dialecto.quotechar or '"',
+                doublequote=True,
+                escapechar=dialecto.escapechar,
+                skipinitialspace=dialecto.skipinitialspace,
+            )
+        ]
         filas = [fila for fila in filas if any(celda for celda in fila)]
     if not filas:
         raise ValueError("No se encontró ninguna tabla con datos.")

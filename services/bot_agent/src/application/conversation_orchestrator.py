@@ -12,7 +12,6 @@ from src.application.runtime_context import (
     consume_ad_report,
     consume_keyword_report,
     consume_welcome_context,
-    get_ad_reminder_stage,
     has_ad_context,
     mark_report_once,
     register_keyword_context,
@@ -405,10 +404,12 @@ class ConversationOrchestrator:
                 link_whatsapp=f"https://wa.me/{message.user_id}",
                 canal=message.channel.value,
             )
-            if get_ad_reminder_stage(message.channel, message.user_id) == 1:
-                from src.infrastructure.tasks.celery_app import cancel_ad_reminder_stage
+            from src.infrastructure.tasks.celery_app import cancel_ad_reminder_stage
 
-                cancel_ad_reminder_stage(message.channel.value, message.user_id, 2)
+            # Una respuesta conserva únicamente el último recordatorio de la
+            # publicidad. Entrar al grupo sigue cancelándolos todos.
+            for stage in (1, 2):
+                cancel_ad_reminder_stage(message.channel.value, message.user_id, stage)
             return
 
         keyword_report = consume_keyword_report(message.channel, message.user_id)

@@ -12,7 +12,7 @@ cosa que se rompe sola al añadir un caso nuevo.
 
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-token")
 os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/test")
@@ -243,6 +243,28 @@ class SiSeCobraTests(unittest.TestCase):
 
 
 class PublicidadDeFacebookTests(unittest.TestCase):
+    def test_una_respuesta_conserva_solo_el_ultimo_recordatorio(self):
+        mensaje = _entrante(MessageType.TEXT, "consulta del cliente")
+
+        with patch(
+            "src.application.conversation_orchestrator.consume_welcome_context",
+            return_value=False,
+        ), patch(
+            "src.application.conversation_orchestrator.consume_ad_report",
+            return_value=True,
+        ), patch(
+            "src.application.conversation_orchestrator.ReportRepository.create_report"
+        ) as reporte, patch(
+            "src.infrastructure.tasks.celery_app.cancel_ad_reminder_stage"
+        ) as cancelar:
+            ConversationOrchestrator()._handle_blocked_text(mensaje)
+
+        reporte.assert_called_once()
+        self.assertEqual(
+            cancelar.call_args_list,
+            [call("whatsapp", "50688888888", 1), call("whatsapp", "50688888888", 2)],
+        )
+
     def test_la_ciudad_del_anuncio_dispara_publicidad_sin_preguntarla(self):
         mensaje = _entrante(MessageType.TEXT, "¡Hola! Quiero más información")
         mensaje.advertisement_text = "🚔🚔 LAUREL 🚔🚔\n\nCURSO TEÓRICO PARA LICENCIAS"

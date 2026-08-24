@@ -10,6 +10,7 @@ from src.application.message_catalog import get_node_data
 from src.application.reminder_service import ReminderService
 from src.application.runtime_context import (
     RUNTIME_TTL_SECONDS,
+    ad_report_consumed,
     get_ad_task_id,
     has_ad_context,
     has_keyword_context,
@@ -321,6 +322,11 @@ def send_single_message(channel: str, user_id: str, message: str):
 @celery_app.task
 def send_ad_reminder(channel: str, user_id: str, message: str, stage: int):
     if not has_ad_context(channel, user_id):
+        return
+    # La revocación puede cruzarse con una tarea que ya despertó. La respuesta
+    # del cliente también se comprueba aquí para que nunca salgan las etapas
+    # intermedias; el tercer recordatorio se conserva por regla de publicidad.
+    if stage < 3 and ad_report_consumed(channel, user_id):
         return
     set_ad_reminder_stage(channel, user_id, stage)
     ChannelSenderRegistry.send(channel, user_id, message)
