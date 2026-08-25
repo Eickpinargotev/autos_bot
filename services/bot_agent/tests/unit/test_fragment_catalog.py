@@ -50,6 +50,27 @@ class FragmentCatalogTests(unittest.TestCase):
         ):
             self.assertEqual(resolve_variant("DICTAMEN.D1", "506", "whatsapp"), "DICTAMEN.D1")
 
+    def test_historical_record_without_known_keyword_uses_all_alternate_sinpes(self):
+        """El CSV legado no dice si fue tareas o transporte; la fila basta."""
+        historical = {
+            "id": 7,
+            "registro": "50688887777",
+            "canal": "whatsapp",
+            "palabra_clave": "",
+        }
+        with patch(
+            "src.infrastructure.repositories.keyword_registry_repository.consultar_uno",
+            return_value=historical,
+        ):
+            for base, alternate in (
+                ("DICTAMEN.D1", "DICTAMEN.D1_1"),
+                ("GENERAL.G16", "GENERAL.G16_1"),
+                ("GENERAL.G28", "GENERAL.G28_1"),
+            ):
+                resolved = resolve_variant(base, historical["registro"], historical["canal"])
+                self.assertEqual(resolved, alternate)
+                self.assertIn("61103205", "\n".join(get_fragment(resolved).messages))
+
     def test_resolve_variant_fails_safe_on_registry_error(self):
         with patch(
             "src.infrastructure.repositories.keyword_registry_repository.KeywordRegistryRepository.exists",

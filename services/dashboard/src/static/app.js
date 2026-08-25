@@ -1,7 +1,8 @@
-/* Nueve comportamientos, nada más: refresco de fragmentos, edición en línea,
+/* Diez comportamientos, nada más: refresco de fragmentos, edición en línea,
    dos de navegación (menú lateral y menú de cuenta), copiar al portapapeles,
    avisos flotantes, ventanas <dialog>, sus categorías y el visor de
-   conversaciones. Todo lo demás son formularios HTML normales con POST y
+   conversaciones y carga incremental de registros. Todo lo demás son
+   formularios HTML normales con POST y
    redirección, que funcionan aunque este archivo no cargue. */
 
 (function () {
@@ -921,5 +922,52 @@
     }).catch(function (error) {
       form.insertAdjacentHTML("beforebegin", '<p class="mensaje error">' + error.message + '</p>');
     });
+  });
+
+  /* 10. Registros: la tabla empieza con diez filas. Un observador pide la
+     siguiente tanda solo cuando su testigo se acerca a la pantalla. */
+  function observarSiguienteRegistro(testigo) {
+    if (!testigo || testigo.dataset.observado === "1") return;
+    testigo.dataset.observado = "1";
+    var observador = new IntersectionObserver(function (entradas) {
+      if (entradas.some(function (entrada) { return entrada.isIntersecting; })) {
+        observador.disconnect();
+        cargarSiguienteRegistro(testigo);
+      }
+    }, { rootMargin: "300px 0px" });
+    testigo._observadorRegistros = observador;
+    observador.observe(testigo);
+  }
+
+  function cargarSiguienteRegistro(testigo) {
+    if (!testigo || testigo.dataset.enVuelo === "1") return;
+    testigo.dataset.enVuelo = "1";
+    var estado = testigo.querySelector("[data-registros-estado]");
+    var reintentar = testigo.querySelector("[data-registros-reintentar]");
+    if (estado) estado.textContent = "Cargando más…";
+    if (reintentar) reintentar.hidden = true;
+    fetch(testigo.getAttribute("data-registros-siguiente"), { headers: { "X-Fragmento": "1" } })
+      .then(function (respuesta) { return respuesta.ok ? respuesta.text() : Promise.reject(); })
+      .then(function (html) {
+        testigo.insertAdjacentHTML("beforebegin", html);
+        var tabla = testigo.parentElement;
+        testigo.remove();
+        observarSiguienteRegistro(tabla && tabla.querySelector("[data-registros-siguiente]"));
+      })
+      .catch(function () {
+        delete testigo.dataset.enVuelo;
+        if (estado) estado.textContent = "No se pudo cargar la siguiente tanda.";
+        if (reintentar) reintentar.hidden = false;
+      });
+  }
+
+  document.querySelectorAll("[data-registros-siguiente]").forEach(observarSiguienteRegistro);
+
+  document.addEventListener("click", function (e) {
+    var boton = e.target.closest && e.target.closest("[data-registros-reintentar]");
+    if (!boton) return;
+    var testigo = boton.closest("[data-registros-siguiente]");
+    if (testigo && testigo._observadorRegistros) testigo._observadorRegistros.disconnect();
+    cargarSiguienteRegistro(testigo);
   });
 })();

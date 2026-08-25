@@ -129,6 +129,7 @@ SECCIONES_NEGOCIO: list[dict[str, Any]] = [
             # Mezclarlas en la misma pantalla no dejaba ver cuál de las dos
             # cosas estabas tocando.
             {"etiqueta": "Palabras clave", "url": "/palabras-clave", "icono": "etiqueta"},
+            {"etiqueta": "Registros", "url": "/registros", "icono": "clientes"},
             {"etiqueta": "Enviar", "url": "/enviar", "icono": "enviar"},
             {"etiqueta": "Envíos", "url": "/envios", "icono": "bandeja"},
         ],

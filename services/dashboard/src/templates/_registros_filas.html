@@ -1,0 +1,27 @@
+{% for r in registros %}
+<tr data-registro-id="{{ r.id }}">
+  <td style="white-space:nowrap"><strong>{{ r.registro }}</strong></td>
+  <td>{{ r.nombre or '—' }}</td>
+  <td>
+    {% if r.palabra_clave %}{{ r.palabra_clave }}
+    {% else %}<span class="pastilla">Histórico</span>{% endif %}
+  </td>
+  <td style="white-space:nowrap">{{ r.creado_en | fecha }}</td>
+</tr>
+{% else %}
+  {% if mostrar_vacio %}
+  <tr><td colspan="4" class="vacio">
+    {% if busqueda %}Ese número no está en la lista de usuarios registrados.
+    {% else %}Todavía no hay usuarios registrados.{% endif %}
+  </td></tr>
+  {% endif %}
+{% endfor %}
+
+{% if siguiente_cursor %}
+<tr data-registros-siguiente="/registros/lista?cursor={{ siguiente_cursor | urlencode }}">
+  <td colspan="4" class="vacio" style="padding:20px">
+    <span data-registros-estado aria-live="polite">Cargando más…</span>
+    <button class="mini" type="button" data-registros-reintentar hidden>Reintentar</button>
+  </td>
+</tr>
+{% endif %}

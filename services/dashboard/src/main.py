@@ -18,7 +18,7 @@ from src.core import eventos, security
 from src.core.config import settings
 from src.core.plantillas import plantillas
 from src.db.migrate import aplicar_migraciones
-from src.routes import admin, auth, catalogo, envios, negocio, panel, tiempo_real
+from src.routes import admin, auth, catalogo, envios, negocio, panel, registros, tiempo_real
 from src.services import usuarios
 
 @asynccontextmanager
@@ -91,6 +91,7 @@ app.include_router(auth.router)
 app.include_router(panel.router)
 app.include_router(catalogo.router)
 app.include_router(envios.router)
+app.include_router(registros.router)
 app.include_router(negocio.router)
 app.include_router(admin.router)
 app.include_router(tiempo_real.router)

@@ -38,10 +38,13 @@ RUTAS_DEL_NEGOCIO = (
     "/mensajes",
     "/enviar",
     "/envios",
+    "/registros",
     # Los fragmentos que se refrescan solos, por el mismo motivo que arriba.
     "/reportes/lista",
     "/preguntas/lista",
     "/conversaciones/lista",
+    "/registros/lista",
+    "/registros/descargar",
 )
 
 RUTAS_DEL_CLIENTE = RUTAS_DEL_NEGOCIO

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block titulo %}Registros{% endblock %}
+
+{% block contenido %}
+<div class="titulo-con-acciones">
+  <div>
+    <h1>Usuarios registrados</h1>
+    <p class="sub">
+      Personas que alguna vez enviaron una palabra clave. El bot usa esta lista
+      para entregarles el SINPE y el formulario correspondientes.
+    </p>
+  </div>
+  <div class="acciones-cabecera">
+    <a class="boton" href="/registros/descargar">Descargar CSV</a>
+  </div>
+</div>
+
+<form class="panel linea" method="get" action="/registros" style="align-items:flex-end">
+  <div style="flex:1;min-width:220px">
+    <label for="buscar-registro">Buscar número en toda la lista</label>
+    <input id="buscar-registro" name="q" value="{{ busqueda }}"
+           inputmode="tel" autocomplete="off" placeholder="Ej. +506 8888 8888"
+           style="width:100%">
+  </div>
+  <button class="primario">Buscar</button>
+  {% if busqueda %}<a class="boton" href="/registros">Limpiar</a>{% endif %}
+</form>
+
+{% if busqueda %}
+<p class="sub">Resultado exacto para <strong>{{ busqueda }}</strong>.</p>
+{% endif %}
+
+<div class="panel tabla-scroll">
+  <table>
+    <thead>
+      <tr><th>Número</th><th>Nombre</th><th>Palabra clave</th><th>Fecha de registro</th></tr>
+    </thead>
+    <tbody data-registros-tabla>
+      {% include "_registros_filas.html" %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
