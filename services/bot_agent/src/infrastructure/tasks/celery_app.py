@@ -8,6 +8,11 @@ from src.application.buffer_service import BufferService, redis_client, scoped_k
 from src.application.project_context import ambito_proyecto, proyecto_actual
 from src.application.message_catalog import get_node_data
 from src.application.reminder_service import ReminderService
+from src.application.horario_recordatorios import (
+    segundos_hasta_horario_permitido,
+    segundos_para_recordatorio,
+    segundos_para_secuencia,
+)
 from src.application.runtime_context import (
     RUNTIME_TTL_SECONDS,
     ad_report_consumed,
@@ -328,6 +333,16 @@ def send_ad_reminder(channel: str, user_id: str, message: str, stage: int):
     # intermedias; el tercer recordatorio se conserva por regla de publicidad.
     if stage < 3 and ad_report_consumed(channel, user_id):
         return
+    espera = segundos_hasta_horario_permitido()
+    if espera:
+        task = send_ad_reminder.apply_async(
+            (channel, user_id, message, stage), countdown=espera
+        )
+        key = scoped_key("scheduled_tasks", channel, user_id)
+        redis_client.rpush(key, task.id)
+        redis_client.expire(key, RUNTIME_TTL_SECONDS)
+        save_ad_task_id(channel, user_id, stage, task.id)
+        return
     set_ad_reminder_stage(channel, user_id, stage)
     ChannelSenderRegistry.send(channel, user_id, message)
 
@@ -349,6 +364,16 @@ def send_keyword_reminder(channel: str, user_id: str, pieza_id: int, stage: int)
 
     texto = palabras_clave_repository.texto_para_enviar(pieza)
     if not texto:
+        return
+
+    espera = segundos_hasta_horario_permitido()
+    if espera:
+        task = send_keyword_reminder.apply_async(
+            (channel, user_id, pieza_id, stage), countdown=espera
+        )
+        key = scoped_key("scheduled_tasks", channel, user_id)
+        redis_client.rpush(key, task.id)
+        redis_client.expire(key, RUNTIME_TTL_SECONDS)
         return
 
     set_keyword_active_report(channel, user_id, stage, pieza.get("reporte") or "")
@@ -375,7 +400,7 @@ def schedule_smart_reminder_for_result(channel: Channel | str, user_id: str, rem
     channel_value = Channel(channel).value if isinstance(channel, str) else channel.value
     task = send_smart_reminder.apply_async(
         (channel_value, user_id, reminder.get("level", 1)),
-        countdown=reminder.get("seconds", 3600),
+        countdown=segundos_para_recordatorio(reminder.get("seconds", 3600)),
     )
     ReminderService.save_task(channel, user_id, task.id)
 
@@ -408,6 +433,16 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
         return
     if state.reminder_level >= level:
         return  # Tarea vieja: este nivel ya se envió.
+
+    # Se comprueba al despertar, además de ajustar la hora al agendar. Esto
+    # cubre tareas que ya estaban en Redis antes de desplegar esta regla.
+    espera = segundos_hasta_horario_permitido()
+    if espera:
+        task = send_smart_reminder.apply_async(
+            (channel, user_id, level), countdown=espera
+        )
+        ReminderService.save_task(channel, user_id, task.id)
+        return
 
     from src.application.unified_agent import FollowupAgent
 
@@ -450,7 +485,7 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
         minutos = max(1, min(int(config_recordatorios.get("intervalo_minutos") or 60), 20160))
         task = send_smart_reminder.apply_async(
             (channel, user_id, level + 1),
-            countdown=minutos * 60,
+            countdown=segundos_para_recordatorio(minutos * 60),
         )
         ReminderService.save_task(channel, user_id, task.id)
 
@@ -483,9 +518,10 @@ def schedule_ad_programmed_messages(channel: str, user_id: str, dia: str, valor:
         max(5, min(int(config.get(f"publicidad_recordatorio_{i}_segundos") or respaldo), 1209600))
         for i, respaldo in ((1, 7200), (2, 72000), (3, 82800))
     ]
-    t1 = send_ad_reminder.apply_async((channel, user_id, msg1, 1), countdown=tiempos[0])
-    t2 = send_ad_reminder.apply_async((channel, user_id, msg2, 2), countdown=tiempos[1])
-    t3 = send_ad_reminder.apply_async((channel, user_id, msg3, 3), countdown=tiempos[2])
+    countdowns = segundos_para_secuencia(tiempos)
+    t1 = send_ad_reminder.apply_async((channel, user_id, msg1, 1), countdown=countdowns[0])
+    t2 = send_ad_reminder.apply_async((channel, user_id, msg2, 2), countdown=countdowns[1])
+    t3 = send_ad_reminder.apply_async((channel, user_id, msg3, 3), countdown=countdowns[2])
     
     # Store IDs to allow cancellation
     key = scoped_key("scheduled_tasks", channel, user_id)
@@ -569,12 +605,17 @@ def schedule_keyword_programmed_messages(channel: str, user_id: str, palabra_id:
     pendientes se cancelan (`cancel_scheduled_tasks`).
     """
     tasks = []
-    for pieza in palabras_clave_repository.piezas_de(palabra_id, "recordatorio"):
-        minutos = int(pieza.get("minutos") or 0)
-        if minutos < 1:
-            continue
+    piezas = [
+        pieza
+        for pieza in palabras_clave_repository.piezas_de(palabra_id, "recordatorio")
+        if int(pieza.get("minutos") or 0) >= 1
+    ]
+    countdowns = segundos_para_secuencia(
+        [int(pieza.get("minutos") or 0) * 60 for pieza in piezas]
+    )
+    for pieza, countdown in zip(piezas, countdowns):
         task = send_keyword_reminder.apply_async(
-            (channel, user_id, pieza["id"], pieza["orden"]), countdown=minutos * 60
+            (channel, user_id, pieza["id"], pieza["orden"]), countdown=countdown
         )
         tasks.append(task.id)
 

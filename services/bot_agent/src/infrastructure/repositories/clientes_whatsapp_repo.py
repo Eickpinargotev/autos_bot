@@ -39,6 +39,22 @@ def limpiar_cache() -> None:
     _cache_credenciales.clear()
 
 
+def zona_horaria_del_proyecto(proyecto_id: int | None = None) -> str:
+    """Zona local del negocio actual; respaldo seguro para tareas antiguas."""
+    proyecto_id = int(proyecto_id or proyecto_actual() or 0)
+    if not proyecto_id:
+        return "America/Costa_Rica"
+    try:
+        fila = consultar_uno(
+            "SELECT zona_horaria FROM clientes_whatsapp WHERE id = %s",
+            (proyecto_id,),
+        )
+    except Exception as exc:
+        print(f"Error leyendo zona horaria del negocio: {exc}")
+        return "America/Costa_Rica"
+    return str((fila or {}).get("zona_horaria") or "America/Costa_Rica")
+
+
 def por_token(token: str) -> dict[str, Any] | None:
     """El negocio activo dueño de ese token, o None si no existe o está inactivo."""
     if not token:

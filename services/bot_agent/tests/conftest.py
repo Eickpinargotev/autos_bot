@@ -108,6 +108,14 @@ def _aisla_servicios(monkeypatch):
     monkeypatch.setattr(Task, "apply_async", MagicMock(name="apply_async"))
     monkeypatch.setattr(Task, "delay", MagicMock(name="delay"))
 
+    # Los tests existentes de tareas no deben depender de la hora a la que se
+    # ejecuta pytest. Los casos específicos del horario repatchan estas tres
+    # funciones; el cálculo puro se prueba sin dobles en su propio módulo.
+    tareas = importlib.import_module("src.infrastructure.tasks.celery_app")
+    monkeypatch.setattr(tareas, "segundos_hasta_horario_permitido", MagicMock(return_value=0))
+    monkeypatch.setattr(tareas, "segundos_para_recordatorio", MagicMock(side_effect=lambda segundos: segundos))
+    monkeypatch.setattr(tareas, "segundos_para_secuencia", MagicMock(side_effect=lambda segundos: segundos))
+
     for nombre_modulo in _MODULOS_CON_POSTGRES:
         try:
             modulo = importlib.import_module(nombre_modulo)
