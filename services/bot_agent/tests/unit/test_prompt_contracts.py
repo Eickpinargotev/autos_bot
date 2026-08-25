@@ -78,6 +78,12 @@ class CommonContractTests(unittest.TestCase):
     def test_contract_avoids_intent_by_exact_phrase(self):
         self.assertIn("nunca por palabras sueltas ni frases exactas", AGENT_COMMON_CONTRACT)
 
+    def test_contract_does_not_turn_status_updates_into_new_requests(self):
+        self.assertIn("INTENCIÓN DE AVANZAR VS. DATO DE ESTADO", AGENT_COMMON_CONTRACT)
+        self.assertIn("no inventes el siguiente objetivo del cliente", AGENT_COMMON_CONTRACT)
+        self.assertIn("NO significa por sí mismo", AGENT_COMMON_CONTRACT)
+        self.assertIn('usa action="close"', AGENT_COMMON_CONTRACT)
+
 
 class SupervisorPromptTests(unittest.TestCase):
     def test_schema_defines_route_and_targets(self):
