@@ -8,7 +8,8 @@ import pytest
 
 from src.commands import importar_registros
 from src.db import pool
-from src.services import clientes_whatsapp, registros
+from src.services import clientes_whatsapp, importacion_registros, registros
+from tests.conftest import token_csrf
 
 
 def _proyecto_principal() -> dict:
@@ -86,6 +87,9 @@ def test_pantalla_inicial_solo_pinta_diez_y_ofrece_siguiente_tanda(sesion_client
     assert "data-registros-siguiente=" in cuerpo
     assert 'href="/registros/descargar"' in cuerpo
     assert 'href="/registros"' in cuerpo  # entrada del lateral
+    assert 'data-abre="agregar-registro"' in cuerpo
+    assert 'data-abre="cargar-registros"' in cuerpo
+    assert cuerpo.count(">Eliminar</button>") == 10
 
 
 def test_busqueda_http_muestra_solo_la_coincidencia(sesion_cliente):
@@ -102,6 +106,79 @@ def test_busqueda_http_muestra_solo_la_coincidencia(sesion_cliente):
 
 def test_cursor_http_invalido_se_rechaza(sesion_cliente):
     assert sesion_cliente.get("/registros/lista?cursor=no-es-valido").status_code == 400
+
+
+def test_dueno_puede_agregar_y_eliminar_un_registro(sesion_cliente):
+    respuesta = sesion_cliente.post(
+        "/registros",
+        data={
+            "numero": "+506 8888-7777",
+            "nombre": "Agregada",
+            "palabra_clave": "transporte",
+            "canal": "whatsapp",
+            "csrf": token_csrf(sesion_cliente),
+        },
+        follow_redirects=False,
+    )
+    fila = pool.consultar_uno(
+        "SELECT * FROM keyword_registros WHERE registro = '50688887777'"
+    )
+
+    assert respuesta.status_code == 303
+    assert fila["nombre"] == "Agregada" and fila["palabra_clave"] == "transporte"
+
+    borrado = sesion_cliente.post(
+        f"/registros/{fila['id']}/eliminar",
+        data={"csrf": token_csrf(sesion_cliente)},
+        follow_redirects=False,
+    )
+    assert borrado.status_code == 303
+    assert pool.consultar_uno("SELECT id FROM keyword_registros WHERE id = %s", (fila["id"],)) is None
+
+
+def test_no_se_puede_eliminar_un_registro_de_otro_proyecto(sesion_cliente):
+    ajeno = clientes_whatsapp.crear("Proyecto ajeno")
+    _agregar(ajeno["id"], "50699998888", fecha=datetime.now(timezone.utc))
+    fila = pool.consultar_uno("SELECT id FROM keyword_registros WHERE proyecto_id = %s", (ajeno["id"],))
+
+    respuesta = sesion_cliente.post(
+        f"/registros/{fila['id']}/eliminar",
+        data={"csrf": token_csrf(sesion_cliente)},
+    )
+
+    assert respuesta.status_code == 404
+    assert pool.consultar_uno("SELECT id FROM keyword_registros WHERE id = %s", (fila["id"],))
+
+
+def test_dueno_puede_cargar_el_csv_completo_desde_la_pantalla(sesion_cliente):
+    csv_bytes = (
+        "numero,Nombre,Fecha de registro (dia/mes//año)\n"
+        "50688887777,Ana,28/10/2025\n"
+        "50688886666,Luis,29/10/2025\n"
+    ).encode()
+
+    respuesta = sesion_cliente.post(
+        "/registros/cargar",
+        data={"csrf": token_csrf(sesion_cliente)},
+        files={"archivo": ("registros.csv", csv_bytes, "text/csv")},
+        follow_redirects=False,
+    )
+
+    assert respuesta.status_code == 303
+    assert "2%20agregados" in respuesta.headers["location"]
+    assert pool.consultar_uno("SELECT COUNT(*) AS total FROM keyword_registros")["total"] == 2
+
+
+def test_csv_descargado_se_puede_volver_a_cargar():
+    contenido = (
+        "\ufeffnumero,Nombre,Palabra clave,Canal,Fecha de registro\r\n"
+        "50688887777,Ana,tareas,whatsapp,28/10/2025\r\n"
+    ).encode("utf-8")
+
+    lectura = importacion_registros.leer_bytes(contenido)
+
+    assert lectura.registros[0].palabra_clave == "tareas"
+    assert lectura.registros[0].canal == "whatsapp"
 
 
 def test_descarga_incluye_todo_y_marca_el_historico(sesion_cliente):

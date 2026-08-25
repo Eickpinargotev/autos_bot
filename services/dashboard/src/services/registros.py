@@ -99,6 +99,46 @@ def buscar(proyecto_id: int, numero: str) -> list[dict[str, Any]]:
     )
 
 
+def crear(
+    proyecto_id: int,
+    numero: str,
+    nombre: str = "",
+    palabra_clave: str = "",
+    canal: str = "whatsapp",
+) -> dict[str, Any]:
+    limpio = normalizar_numero(numero)
+    nombre = " ".join(str(nombre or "").split())
+    palabra_clave = str(palabra_clave or "").strip().lower()
+    canal = str(canal or "").strip().lower()
+    if len(limpio) < 7:
+        raise ValueError("Escribe un número válido con código de país.")
+    if len(nombre) > 200:
+        raise ValueError("El nombre no puede superar 200 caracteres.")
+    if palabra_clave not in {"", "tareas", "transporte"}:
+        raise ValueError("Selecciona una palabra clave válida.")
+    if canal not in {"whatsapp", "telegram"}:
+        raise ValueError("Selecciona un canal válido.")
+    fila = pool.consultar_uno(
+        """
+        INSERT INTO keyword_registros (proyecto_id, registro, canal, nombre, palabra_clave)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (proyecto_id, registro, canal) DO NOTHING
+        RETURNING id, registro, canal, nombre, palabra_clave, creado_en
+        """,
+        (int(proyecto_id), limpio, canal, nombre, palabra_clave),
+    )
+    if not fila:
+        raise ValueError(f"El número {limpio} ya está registrado en {canal}.")
+    return fila
+
+
+def eliminar(proyecto_id: int, registro_id: int) -> int:
+    return pool.ejecutar(
+        "DELETE FROM keyword_registros WHERE proyecto_id = %s AND id = %s",
+        (int(proyecto_id), int(registro_id)),
+    )
+
+
 def _todos(proyecto_id: int) -> Iterator[dict[str, Any]]:
     cursor: tuple[datetime, int] | None = None
     while True:

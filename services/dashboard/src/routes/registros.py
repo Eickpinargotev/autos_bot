@@ -1,11 +1,13 @@
-"""Consulta y descarga del registro de palabras clave de cada proyecto."""
+"""Administración del registro de palabras clave de cada proyecto."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from src.core import security
 from src.core.plantillas import render
-from src.services import clientes_whatsapp, registros as svc_registros
+from src.services import clientes_whatsapp, importacion_registros, registros as svc_registros
 
 router = APIRouter()
 
@@ -37,6 +39,67 @@ def registros(request: Request, usuario=Depends(security.requiere_negocio)):
         mostrar_vacio=True,
         **datos,
     )
+
+
+@router.post("/registros")
+def agregar(
+    request: Request,
+    numero: str = Form(...),
+    nombre: str = Form(""),
+    palabra_clave: str = Form(""),
+    canal: str = Form("whatsapp"),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto(usuario)
+    try:
+        fila = svc_registros.crear(proyecto["id"], numero, nombre, palabra_clave, canal)
+    except ValueError as exc:
+        return RedirectResponse(f"/registros?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(
+        f"/registros?q={quote(fila['registro'])}&aviso=Registro+agregado", status_code=303
+    )
+
+
+@router.post("/registros/cargar")
+def cargar(
+    request: Request,
+    archivo: UploadFile = File(...),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto(usuario)
+    try:
+        datos = archivo.file.read(importacion_registros.MAX_ARCHIVO_BYTES + 1)
+        lectura = importacion_registros.leer_bytes(datos)
+        resultado = importacion_registros.importar(
+            lectura, proyecto["id"], proyecto.get("zona_horaria") or "UTC"
+        )
+    except ValueError as exc:
+        return RedirectResponse(f"/registros?error={quote(str(exc))}", status_code=303)
+    aviso = (
+        f"CSV procesado: {resultado['insertadas']} agregados, "
+        f"{resultado['existentes']} ya existían"
+    )
+    if resultado["rechazadas"]:
+        aviso += f" y {resultado['rechazadas']} filas rechazadas"
+    return RedirectResponse(f"/registros?aviso={quote(aviso)}", status_code=303)
+
+
+@router.post("/registros/{registro_id}/eliminar")
+def eliminar(
+    request: Request,
+    registro_id: int,
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto(usuario)
+    if not svc_registros.eliminar(proyecto["id"], registro_id):
+        raise HTTPException(status_code=404, detail="Ese registro no pertenece a tu proyecto")
+    return RedirectResponse("/registros?aviso=Registro+eliminado", status_code=303)
 
 
 @router.get("/registros/lista")

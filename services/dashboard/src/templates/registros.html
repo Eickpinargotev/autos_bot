@@ -11,9 +11,65 @@
     </p>
   </div>
   <div class="acciones-cabecera">
+    <button type="button" data-abre="cargar-registros">Cargar CSV</button>
+    <button class="primario" type="button" data-abre="agregar-registro">Añadir registro</button>
     <a class="boton" href="/registros/descargar">Descargar CSV</a>
   </div>
 </div>
+
+<dialog class="flotante" id="agregar-registro">
+  <div class="cabecera">
+    <h2>Añadir usuario registrado</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/registros">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="registro-numero">Número con código de país</label>
+      <input id="registro-numero" name="numero" inputmode="tel" required
+             placeholder="50688888888" style="width:100%">
+      <label for="registro-nombre">Nombre</label>
+      <input id="registro-nombre" name="nombre" maxlength="200" style="width:100%">
+      <label for="registro-palabra">Palabra clave</label>
+      <select id="registro-palabra" name="palabra_clave" style="width:100%">
+        <option value="">Histórico / no se conoce</option>
+        <option value="tareas">tareas</option>
+        <option value="transporte">transporte</option>
+      </select>
+      <input type="hidden" name="canal" value="whatsapp">
+      <p class="sub" style="margin:10px 0 0">
+        Al agregarlo, el bot lo reconocerá inmediatamente como usuario registrado.
+      </p>
+      <div class="linea" style="justify-content:flex-end;margin-top:16px">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Añadir</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog class="flotante" id="cargar-registros">
+  <div class="cabecera">
+    <h2>Cargar usuarios registrados</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    <form method="post" action="/registros/cargar" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="archivo-registros">Archivo CSV</label>
+      <input id="archivo-registros" name="archivo" type="file" accept=".csv,text/csv"
+             required style="width:100%">
+      <p class="sub" style="margin:10px 0 0">
+        Acepta el archivo histórico original y el CSV descargado desde esta página.
+        Los duplicados se omiten y ningún registro existente se borra.
+      </p>
+      <div class="linea" style="justify-content:flex-end;margin-top:16px">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Cargar CSV</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 <form class="panel linea" method="get" action="/registros" style="align-items:flex-end">
   <div style="flex:1;min-width:220px">
@@ -33,7 +89,7 @@
 <div class="panel tabla-scroll">
   <table>
     <thead>
-      <tr><th>Número</th><th>Nombre</th><th>Palabra clave</th><th>Fecha de registro</th></tr>
+      <tr><th>Número</th><th>Nombre</th><th>Palabra clave</th><th>Fecha de registro</th><th></th></tr>
     </thead>
     <tbody data-registros-tabla>
       {% include "_registros_filas.html" %}

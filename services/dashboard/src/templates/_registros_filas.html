@@ -7,10 +7,17 @@
     {% else %}<span class="pastilla">Histórico</span>{% endif %}
   </td>
   <td style="white-space:nowrap">{{ r.creado_en | fecha }}</td>
+  <td class="acciones">
+    <form method="post" action="/registros/{{ r.id }}/eliminar"
+          onsubmit="return confirm('Este número dejará de recibir el SINPE para usuarios registrados. ¿Eliminarlo?')">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini peligro">Eliminar</button>
+    </form>
+  </td>
 </tr>
 {% else %}
   {% if mostrar_vacio %}
-  <tr><td colspan="4" class="vacio">
+  <tr><td colspan="5" class="vacio">
     {% if busqueda %}Ese número no está en la lista de usuarios registrados.
     {% else %}Todavía no hay usuarios registrados.{% endif %}
   </td></tr>
@@ -19,7 +26,7 @@
 
 {% if siguiente_cursor %}
 <tr data-registros-siguiente="/registros/lista?cursor={{ siguiente_cursor | urlencode }}">
-  <td colspan="4" class="vacio" style="padding:20px">
+  <td colspan="5" class="vacio" style="padding:20px">
     <span data-registros-estado aria-live="polite">Cargando más…</span>
     <button class="mini" type="button" data-registros-reintentar hidden>Reintentar</button>
   </td>
