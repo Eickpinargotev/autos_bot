@@ -66,6 +66,8 @@ _MODULOS_CON_REDIS = (
     "src.infrastructure.tasks.celery_app",
     "src.infrastructure.channels.inbound_registry",
     "src.infrastructure.channels.outbound_registry",
+    "src.infrastructure.channels.outbound_coordinator",
+    "src.application.drenaje_recordatorios",
 )
 
 # Valor inocuo por función: "no escribió nada" / "no encontró nada".
@@ -113,8 +115,29 @@ def _aisla_servicios(monkeypatch):
     # funciones; el cálculo puro se prueba sin dobles en su propio módulo.
     tareas = importlib.import_module("src.infrastructure.tasks.celery_app")
     monkeypatch.setattr(tareas, "segundos_hasta_horario_permitido", MagicMock(return_value=0))
-    monkeypatch.setattr(tareas, "segundos_para_recordatorio", MagicMock(side_effect=lambda segundos: segundos))
-    monkeypatch.setattr(tareas, "segundos_para_secuencia", MagicMock(side_effect=lambda segundos: segundos))
+    from src.application.horario_recordatorios import PlanificacionRecordatorio
+
+    monkeypatch.setattr(
+        tareas,
+        "planificar_recordatorio",
+        MagicMock(side_effect=lambda segundos: PlanificacionRecordatorio(int(segundos), False)),
+    )
+    monkeypatch.setattr(
+        tareas,
+        "planificar_secuencia",
+        MagicMock(
+            side_effect=lambda segundos: [
+                PlanificacionRecordatorio(int(valor), False) for valor in segundos
+            ]
+        ),
+    )
+    from src.application.drenaje_recordatorios import TurnoDrenaje
+
+    monkeypatch.setattr(
+        tareas,
+        "solicitar_turno_drenaje",
+        MagicMock(return_value=TurnoDrenaje()),
+    )
 
     for nombre_modulo in _MODULOS_CON_POSTGRES:
         try:

@@ -11,6 +11,7 @@ from src.core.config import settings
 from src.domain.entities import Channel, MessageType
 from src.infrastructure.channels import inbound_registry, outbound_registry, wasender
 from src.infrastructure.channels.senders import ChannelSenderRegistry
+from src.infrastructure.channels.outbound_coordinator import PrioridadSalida
 from src.infrastructure.repositories import clientes_whatsapp_repo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 from src.infrastructure.logging.trace_sanitizer import MAX_PROVIDER_BYTES, sanitize
@@ -318,7 +319,11 @@ def responder_como_dueno(
             raise HTTPException(status_code=404, detail="La conversación no pertenece al proyecto")
         try:
             ChannelSenderRegistry.send(
-                canal_valido, client_id, texto, log_conversation=False
+                canal_valido,
+                client_id,
+                texto,
+                log_conversation=False,
+                prioridad=PrioridadSalida.INTERACTIVA,
             )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"No se pudo enviar: {exc}") from exc

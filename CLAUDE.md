@@ -231,6 +231,17 @@ El **dashboard** (`services/dashboard/src/`) sigue la misma separación:
   (`palabras_clave._minutos_validos`). El texto se **relee al enviarse**, no viaja
   dentro de la tarea: entre agendar y salir pueden pasar días, y apagar o borrar un
   recordatorio en el panel tiene que servir también para los ya agendados.
+- **La apertura de las 07:00 no libera una ráfaga.** Los recordatorios que se
+  aplazaron por la franja 23:00–07:00 comparten un reloj Redis por proyecto y
+  canal: el primero puede salir al abrir y cada envío confirmado abre el
+  siguiente turno con 5–10 minutos aleatorios. Las tareas antiguas sin la marca
+  de procedencia se tratan como acumuladas. No metas aquí un `sleep`: la tarea
+  se reagenda para no ocupar uno de los 20 hilos del worker.
+- **Toda salida pasa por `ChannelSenderRegistry`.** Ahí vive el candado Redis
+  renovable por proyecto/canal que impide dos llamadas físicas simultáneas,
+  incluida media, respuestas del panel y Telegram. Las respuestas interactivas
+  anuncian que esperan; un recordatorio debe ceder, liberar su reserva de
+  drenaje y reagendarse, nunca enviar por fuera del candado.
 - **El tope de minutos existe por Celery, no por gusto.** `palabras_clave.MAX_MINUTOS`
   (14 días) y `celery_app.MAX_RECORDATORIO_MINUTOS` son el MISMO número: el
   `visibility_timeout` se calcula como el doble del countdown más largo, y una tarea

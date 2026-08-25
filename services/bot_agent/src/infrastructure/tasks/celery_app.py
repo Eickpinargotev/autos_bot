@@ -9,9 +9,16 @@ from src.application.project_context import ambito_proyecto, proyecto_actual
 from src.application.message_catalog import get_node_data
 from src.application.reminder_service import ReminderService
 from src.application.horario_recordatorios import (
+    planificar_recordatorio,
+    planificar_secuencia,
     segundos_hasta_horario_permitido,
-    segundos_para_recordatorio,
-    segundos_para_secuencia,
+)
+from src.application.drenaje_recordatorios import (
+    DrenajeNoDisponible,
+    TurnoDrenaje,
+    confirmar_envio as confirmar_drenaje,
+    liberar_turno as liberar_drenaje,
+    solicitar_turno as solicitar_turno_drenaje,
 )
 from src.application.runtime_context import (
     RUNTIME_TTL_SECONDS,
@@ -27,6 +34,11 @@ from src.domain.entities import Channel, MessageType
 from src.application import seguimiento_service, transcripcion_service
 from src.infrastructure.repositories import clientes_whatsapp_repo
 from src.infrastructure.channels.senders import ChannelSenderRegistry
+from src.infrastructure.channels.outbound_coordinator import (
+    CoordinacionSalidaNoDisponible,
+    PrioridadSalida,
+    SalidaOcupada,
+)
 from src.infrastructure.channels.wasender import WasenderNoConfigurado
 from src.infrastructure.repositories import envios_repository
 from src.infrastructure.repositories import palabras_clave_repository
@@ -188,7 +200,9 @@ def _process_buffered_messages_locked(channel_value: Channel, user_id: str, user
         for indice, msg in enumerate(result.replies):
             if indice:
                 time.sleep(instrucciones_repository.intervalo_entre_mensajes())
-            ChannelSenderRegistry.send(channel_value, user_id, msg)
+            ChannelSenderRegistry.send(
+                channel_value, user_id, msg, prioridad=PrioridadSalida.INTERACTIVA
+            )
 
     if result.reminder:
         schedule_smart_reminder_for_result(channel_value, user_id, result.reminder)
@@ -290,7 +304,9 @@ def transcribir_nota_de_voz(channel: str, user_id: str, user_name: str, payload:
             event_type="audio_no_transcrito",
         )
         for texto in get_node_data("AUTOMATICO", "MEDIA_AUDIO_ILEGIBLE").get("mensajes", []):
-            ChannelSenderRegistry.send(canal, user_id, texto)
+            ChannelSenderRegistry.send(
+                canal, user_id, texto, prioridad=PrioridadSalida.INTERACTIVA
+            )
         return {"transcrito": False, "segundos": resultado.segundos}
 
     # En el historial queda el TEXTO, marcado como que vino de un audio. El
@@ -318,14 +334,22 @@ def send_delayed_message_sequence(channel: str, user_id: str, messages: list[str
     for indice, msg in enumerate(messages):
         if indice:
             time.sleep(intervalo)
-        ChannelSenderRegistry.send(channel, user_id, msg)
+        ChannelSenderRegistry.send(
+            channel, user_id, msg, prioridad=PrioridadSalida.INTERACTIVA
+        )
 
 @celery_app.task
 def send_single_message(channel: str, user_id: str, message: str):
     ChannelSenderRegistry.send(channel, user_id, message)
 
 @celery_app.task
-def send_ad_reminder(channel: str, user_id: str, message: str, stage: int):
+def send_ad_reminder(
+    channel: str,
+    user_id: str,
+    message: str,
+    stage: int,
+    aplazado_por_silencio: bool | None = None,
+):
     if not has_ad_context(channel, user_id):
         return
     # La revocación puede cruzarse con una tarea que ya despertó. La respuesta
@@ -335,19 +359,54 @@ def send_ad_reminder(channel: str, user_id: str, message: str, stage: int):
         return
     espera = segundos_hasta_horario_permitido()
     if espera:
-        task = send_ad_reminder.apply_async(
-            (channel, user_id, message, stage), countdown=espera
+        _reagendar_ad(
+            channel, user_id, message, stage, True, espera,
+            motivo="horario_silencioso",
         )
-        key = scoped_key("scheduled_tasks", channel, user_id)
-        redis_client.rpush(key, task.id)
-        redis_client.expire(key, RUNTIME_TTL_SECONDS)
-        save_ad_task_id(channel, user_id, stage, task.id)
         return
+
+    turno = _solicitar_drenaje(channel, aplazado_por_silencio)
+    if turno.espera_segundos:
+        _reagendar_ad(
+            channel, user_id, message, stage, aplazado_por_silencio,
+            turno.espera_segundos,
+            motivo="drenaje_nocturno",
+        )
+        return
+
+    try:
+        ChannelSenderRegistry.send(
+            channel, user_id, message, prioridad=PrioridadSalida.RECORDATORIO
+        )
+    except SalidaOcupada as exc:
+        _liberar_drenaje_seguro(channel, turno)
+        _reagendar_ad(
+            channel, user_id, message, stage, aplazado_por_silencio,
+            exc.espera_segundos,
+            motivo="respuesta_interactiva_prioritaria",
+        )
+        return
+    except CoordinacionSalidaNoDisponible:
+        _liberar_drenaje_seguro(channel, turno)
+        _reagendar_ad(
+            channel, user_id, message, stage, aplazado_por_silencio, 30,
+            motivo="coordinacion_no_disponible",
+        )
+        return
+    except Exception:
+        _liberar_drenaje_seguro(channel, turno)
+        raise
+    _confirmar_drenaje_seguro(channel, turno)
     set_ad_reminder_stage(channel, user_id, stage)
-    ChannelSenderRegistry.send(channel, user_id, message)
 
 @celery_app.task
-def send_keyword_reminder(channel: str, user_id: str, pieza_id: int, stage: int):
+def send_keyword_reminder(
+    channel: str,
+    user_id: str,
+    pieza_id: int,
+    stage: int,
+    aplazado_por_silencio: bool | None = None,
+):
     """Manda un recordatorio de palabra clave, releyéndolo en el momento.
 
     El texto NO viaja dentro de la tarea: entre que se agenda y que sale pueden
@@ -368,16 +427,123 @@ def send_keyword_reminder(channel: str, user_id: str, pieza_id: int, stage: int)
 
     espera = segundos_hasta_horario_permitido()
     if espera:
-        task = send_keyword_reminder.apply_async(
-            (channel, user_id, pieza_id, stage), countdown=espera
+        _reagendar_keyword(
+            channel, user_id, pieza_id, stage, True, espera,
+            motivo="horario_silencioso",
         )
-        key = scoped_key("scheduled_tasks", channel, user_id)
-        redis_client.rpush(key, task.id)
-        redis_client.expire(key, RUNTIME_TTL_SECONDS)
         return
 
+    turno = _solicitar_drenaje(channel, aplazado_por_silencio)
+    if turno.espera_segundos:
+        _reagendar_keyword(
+            channel, user_id, pieza_id, stage, aplazado_por_silencio,
+            turno.espera_segundos,
+            motivo="drenaje_nocturno",
+        )
+        return
+
+    try:
+        ChannelSenderRegistry.send(
+            channel, user_id, texto, prioridad=PrioridadSalida.RECORDATORIO
+        )
+    except SalidaOcupada as exc:
+        _liberar_drenaje_seguro(channel, turno)
+        _reagendar_keyword(
+            channel, user_id, pieza_id, stage, aplazado_por_silencio,
+            exc.espera_segundos,
+            motivo="respuesta_interactiva_prioritaria",
+        )
+        return
+    except CoordinacionSalidaNoDisponible:
+        _liberar_drenaje_seguro(channel, turno)
+        _reagendar_keyword(
+            channel, user_id, pieza_id, stage, aplazado_por_silencio, 30,
+            motivo="coordinacion_no_disponible",
+        )
+        return
+    except Exception:
+        _liberar_drenaje_seguro(channel, turno)
+        raise
+    _confirmar_drenaje_seguro(channel, turno)
     set_keyword_active_report(channel, user_id, stage, pieza.get("reporte") or "")
-    ChannelSenderRegistry.send(channel, user_id, texto)
+
+
+def _registrar_aplazamiento(channel: str, motivo: str, espera: int | float) -> None:
+    print(
+        "Recordatorio aplazado "
+        f"proyecto={proyecto_actual()} canal={channel} motivo={motivo} "
+        f"espera_segundos={max(1, int(espera))}"
+    )
+
+
+def _solicitar_drenaje(
+    channel: str, aplazado_por_silencio: bool | None
+) -> TurnoDrenaje:
+    try:
+        return solicitar_turno_drenaje(channel, aplazado_por_silencio)
+    except DrenajeNoDisponible:
+        return TurnoDrenaje(espera_segundos=30)
+
+
+def _liberar_drenaje_seguro(channel: str, turno: TurnoDrenaje) -> None:
+    try:
+        liberar_drenaje(channel, turno)
+    except DrenajeNoDisponible:
+        pass
+
+
+def _confirmar_drenaje_seguro(channel: str, turno: TurnoDrenaje) -> None:
+    try:
+        confirmar_drenaje(channel, turno)
+    except DrenajeNoDisponible as exc:
+        # El mensaje ya salió: propagar causaría un duplicado. La reserva queda
+        # con TTL y frena temporalmente a los demás aunque Redis haya fallado.
+        print(
+            "No se pudo confirmar el reloj del recordatorio; "
+            f"proyecto={proyecto_actual()} canal={channel} "
+            f"error={type(exc).__name__}"
+        )
+
+
+def _reagendar_ad(
+    channel: str,
+    user_id: str,
+    message: str,
+    stage: int,
+    aplazado_por_silencio: bool | None,
+    espera: int | float,
+    *,
+    motivo: str,
+) -> None:
+    espera = max(1, int(espera))
+    task = send_ad_reminder.apply_async(
+        (channel, user_id, message, stage, aplazado_por_silencio), countdown=espera
+    )
+    key = scoped_key("scheduled_tasks", channel, user_id)
+    redis_client.rpush(key, task.id)
+    redis_client.expire(key, RUNTIME_TTL_SECONDS)
+    save_ad_task_id(channel, user_id, stage, task.id)
+    _registrar_aplazamiento(channel, motivo, espera)
+
+
+def _reagendar_keyword(
+    channel: str,
+    user_id: str,
+    pieza_id: int,
+    stage: int,
+    aplazado_por_silencio: bool | None,
+    espera: int | float,
+    *,
+    motivo: str,
+) -> None:
+    espera = max(1, int(espera))
+    task = send_keyword_reminder.apply_async(
+        (channel, user_id, pieza_id, stage, aplazado_por_silencio), countdown=espera
+    )
+    key = scoped_key("scheduled_tasks", channel, user_id)
+    redis_client.rpush(key, task.id)
+    redis_client.expire(key, RUNTIME_TTL_SECONDS)
+    _registrar_aplazamiento(channel, motivo, espera)
 
 def cancel_scheduled_tasks(channel: str, user_id: str):
     """
@@ -398,14 +564,25 @@ def cancel_ad_reminder_stage(channel: str, user_id: str, stage: int):
 
 def schedule_smart_reminder_for_result(channel: Channel | str, user_id: str, reminder: dict):
     channel_value = Channel(channel).value if isinstance(channel, str) else channel.value
+    plan = planificar_recordatorio(reminder.get("seconds", 3600))
     task = send_smart_reminder.apply_async(
-        (channel_value, user_id, reminder.get("level", 1)),
-        countdown=segundos_para_recordatorio(reminder.get("seconds", 3600)),
+        (
+            channel_value,
+            user_id,
+            reminder.get("level", 1),
+            plan.aplazado_por_silencio,
+        ),
+        countdown=plan.segundos,
     )
     ReminderService.save_task(channel, user_id, task.id)
 
 @celery_app.task
-def send_smart_reminder(channel: str, user_id: str, level: int = 1):
+def send_smart_reminder(
+    channel: str,
+    user_id: str,
+    level: int = 1,
+    aplazado_por_silencio: bool | None = None,
+):
     """Recordatorio inteligente: retoma la conversación si quedó algo pendiente.
 
     El LLM decide si conviene recordar y redacta el mensaje; el código aplica
@@ -438,22 +615,36 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
     # cubre tareas que ya estaban en Redis antes de desplegar esta regla.
     espera = segundos_hasta_horario_permitido()
     if espera:
-        task = send_smart_reminder.apply_async(
-            (channel, user_id, level), countdown=espera
+        _reagendar_smart(
+            channel, user_id, level, True, espera, motivo="horario_silencioso"
         )
-        ReminderService.save_task(channel, user_id, task.id)
+        return
+
+    turno = _solicitar_drenaje(channel, aplazado_por_silencio)
+    if turno.espera_segundos:
+        _reagendar_smart(
+            channel, user_id, level, aplazado_por_silencio,
+            turno.espera_segundos,
+            motivo="drenaje_nocturno",
+        )
         return
 
     from src.application.unified_agent import FollowupAgent
 
-    decision = FollowupAgent().decide(state, client_id=user_id, canal=channel)
+    try:
+        decision = FollowupAgent().decide(state, client_id=user_id, canal=channel)
+    except Exception:
+        _liberar_drenaje_seguro(channel, turno)
+        raise
     if not decision.send or not decision.message:
+        _liberar_drenaje_seguro(channel, turno)
         return
 
     # La llamada al LLM tarda segundos: el cliente pudo escribir en ese lapso.
     # Se re-verifica el buffer y que el estado no haya cambiado antes de enviar,
     # para no cruzar un recordatorio con una conversación ya avanzada.
     if BufferService.has_pending(user_id, channel):
+        _liberar_drenaje_seguro(channel, turno)
         return
     current = ConversationStateRepo.get(channel, user_id)
     if (
@@ -461,10 +652,36 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
         or current.reminder_level != state.reminder_level
         or not current.awaiting_reply
     ):
+        _liberar_drenaje_seguro(channel, turno)
         return
     state = current
 
-    ChannelSenderRegistry.send(channel, user_id, decision.message)
+    try:
+        ChannelSenderRegistry.send(
+            channel,
+            user_id,
+            decision.message,
+            prioridad=PrioridadSalida.RECORDATORIO,
+        )
+    except SalidaOcupada as exc:
+        _liberar_drenaje_seguro(channel, turno)
+        _reagendar_smart(
+            channel, user_id, level, aplazado_por_silencio,
+            exc.espera_segundos,
+            motivo="respuesta_interactiva_prioritaria",
+        )
+        return
+    except CoordinacionSalidaNoDisponible:
+        _liberar_drenaje_seguro(channel, turno)
+        _reagendar_smart(
+            channel, user_id, level, aplazado_por_silencio, 30,
+            motivo="coordinacion_no_disponible",
+        )
+        return
+    except Exception:
+        _liberar_drenaje_seguro(channel, turno)
+        raise
+    _confirmar_drenaje_seguro(channel, turno)
 
     state.reminder_level = level
     state.last_messages = [decision.message]
@@ -483,11 +700,29 @@ def send_smart_reminder(channel: str, user_id: str, level: int = 1):
 
     if level < settings.FOLLOWUP_MAX_REMINDERS:
         minutos = max(1, min(int(config_recordatorios.get("intervalo_minutos") or 60), 20160))
+        plan = planificar_recordatorio(minutos * 60)
         task = send_smart_reminder.apply_async(
-            (channel, user_id, level + 1),
-            countdown=segundos_para_recordatorio(minutos * 60),
+            (channel, user_id, level + 1, plan.aplazado_por_silencio),
+            countdown=plan.segundos,
         )
         ReminderService.save_task(channel, user_id, task.id)
+
+
+def _reagendar_smart(
+    channel: str,
+    user_id: str,
+    level: int,
+    aplazado_por_silencio: bool | None,
+    espera: int | float,
+    *,
+    motivo: str,
+) -> None:
+    espera = max(1, int(espera))
+    task = send_smart_reminder.apply_async(
+        (channel, user_id, level, aplazado_por_silencio), countdown=espera
+    )
+    ReminderService.save_task(channel, user_id, task.id)
+    _registrar_aplazamiento(channel, motivo, espera)
 
 @celery_app.task
 def create_flow_report_and_block(channel: str, user_id: str, report_reason: str):
@@ -518,10 +753,15 @@ def schedule_ad_programmed_messages(channel: str, user_id: str, dia: str, valor:
         max(5, min(int(config.get(f"publicidad_recordatorio_{i}_segundos") or respaldo), 1209600))
         for i, respaldo in ((1, 7200), (2, 72000), (3, 82800))
     ]
-    countdowns = segundos_para_secuencia(tiempos)
-    t1 = send_ad_reminder.apply_async((channel, user_id, msg1, 1), countdown=countdowns[0])
-    t2 = send_ad_reminder.apply_async((channel, user_id, msg2, 2), countdown=countdowns[1])
-    t3 = send_ad_reminder.apply_async((channel, user_id, msg3, 3), countdown=countdowns[2])
+    planes = planificar_secuencia(tiempos)
+    tareas = [
+        send_ad_reminder.apply_async(
+            (channel, user_id, mensaje, etapa, plan.aplazado_por_silencio),
+            countdown=plan.segundos,
+        )
+        for mensaje, etapa, plan in zip((msg1, msg2, msg3), (1, 2, 3), planes)
+    ]
+    t1, t2, t3 = tareas
     
     # Store IDs to allow cancellation
     key = scoped_key("scheduled_tasks", channel, user_id)
@@ -610,12 +850,19 @@ def schedule_keyword_programmed_messages(channel: str, user_id: str, palabra_id:
         for pieza in palabras_clave_repository.piezas_de(palabra_id, "recordatorio")
         if int(pieza.get("minutos") or 0) >= 1
     ]
-    countdowns = segundos_para_secuencia(
+    planes = planificar_secuencia(
         [int(pieza.get("minutos") or 0) * 60 for pieza in piezas]
     )
-    for pieza, countdown in zip(piezas, countdowns):
+    for pieza, plan in zip(piezas, planes):
         task = send_keyword_reminder.apply_async(
-            (channel, user_id, pieza["id"], pieza["orden"]), countdown=countdown
+            (
+                channel,
+                user_id,
+                pieza["id"],
+                pieza["orden"],
+                plan.aplazado_por_silencio,
+            ),
+            countdown=plan.segundos,
         )
         tasks.append(task.id)
 

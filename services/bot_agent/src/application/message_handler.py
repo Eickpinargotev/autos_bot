@@ -3,14 +3,15 @@ from src.application.conversation_orchestrator import ConversationOrchestrator
 import time
 
 from src.infrastructure.channels.senders import ChannelSenderRegistry
+from src.infrastructure.channels.outbound_coordinator import PrioridadSalida
 from src.infrastructure.repositories import instrucciones_repository
 from src.application.project_context import ambito_proyecto
 
 class MessageHandler:
     """Entrada de un mensaje para los canales que NO tienen bucle propio.
 
-    Telegram atiende desde `telegram_channel`, que responde con `reply_text` del
-    propio update. WhatsApp entra por el webhook, donde no hay a quién
+    Telegram atiende desde `telegram_channel`, que despacha sus propias salidas
+    coordinadas. WhatsApp entra por el webhook, donde no hay a quién
     "responder": la contestación es una llamada nueva a WasenderAPI. Por eso las
     respuestas inmediatas se envían aquí — antes solo se registraban y se
     devolvían, y como el webhook descarta ese retorno, en WhatsApp quedaban
@@ -68,6 +69,7 @@ class MessageHandler:
                     action.user_id,
                     action.text,
                     log_conversation=not action.skip_conversation_log,
+                    prioridad=PrioridadSalida.INTERACTIVA,
                 )
                 if enviado is None:
                     enviado = action.text

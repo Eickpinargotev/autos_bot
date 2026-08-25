@@ -3,7 +3,8 @@ import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from src.infrastructure.channels.base_channel import BaseChannel
-from src.infrastructure.channels.senders import TelegramSender
+from src.infrastructure.channels.senders import ChannelSenderRegistry
+from src.infrastructure.channels.outbound_coordinator import PrioridadSalida
 from src.domain.entities import Channel, InboundMessage, MessageType
 from src.application.conversation_orchestrator import ConversationOrchestrator
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
@@ -46,9 +47,13 @@ class TelegramChannel(BaseChannel):
             text="/start",
             event_type="command",
         )
-        await update.message.reply_text(text)
         await asyncio.to_thread(
-            ConversationLogRepository.log_outbound, client_id=user_id, canal=Channel.TELEGRAM, text=text
+            ChannelSenderRegistry.send,
+            Channel.TELEGRAM,
+            user_id,
+            text,
+            True,
+            PrioridadSalida.INTERACTIVA,
         )
 
     async def _cmd_d(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,12 +77,13 @@ class TelegramChannel(BaseChannel):
     async def _handle_audio(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._dispatch(update, MessageType.AUDIO)
         text = "Audio recibido, procesando..."
-        await update.message.reply_text(text)
         await asyncio.to_thread(
-            ConversationLogRepository.log_outbound,
-            client_id=str(update.message.chat_id),
-            canal=Channel.TELEGRAM,
-            text=text,
+            ChannelSenderRegistry.send,
+            Channel.TELEGRAM,
+            str(update.message.chat_id),
+            text,
+            True,
+            PrioridadSalida.INTERACTIVA,
         )
 
     async def _dispatch(self, update: Update, msg_type: MessageType, text: str = ""):
@@ -99,21 +105,33 @@ class TelegramChannel(BaseChannel):
                 if enviados:
                     from src.infrastructure.repositories import instrucciones_repository
                     await asyncio.sleep(instrucciones_repository.intervalo_entre_mensajes())
-                await update.message.reply_text(action.text)
-                if not action.skip_conversation_log:
-                    await asyncio.to_thread(
-                        ConversationLogRepository.log_outbound,
-                        client_id=action.user_id,
-                        canal=action.channel,
-                        text=action.text,
-                    )
+                await asyncio.to_thread(
+                    ChannelSenderRegistry.send,
+                    action.channel,
+                    action.user_id,
+                    action.text,
+                    not action.skip_conversation_log,
+                    PrioridadSalida.INTERACTIVA,
+                )
                 enviados += 1
 
     def send_message_sync(self, user_id: str, text: str):
-        TelegramSender().send_message_sync(user_id, text)
+        ChannelSenderRegistry.send(
+            Channel.TELEGRAM,
+            user_id,
+            text,
+            prioridad=PrioridadSalida.INTERACTIVA,
+        )
 
     async def send_message(self, user_id: str, text: str):
-        await self.app.bot.send_message(chat_id=user_id, text=text)
+        await asyncio.to_thread(
+            ChannelSenderRegistry.send,
+            Channel.TELEGRAM,
+            user_id,
+            text,
+            True,
+            PrioridadSalida.INTERACTIVA,
+        )
 
     def start(self):
         self.app.run_polling()

@@ -23,6 +23,7 @@ os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.infrastructure.repositories import palabras_clave_repository
 from src.infrastructure.tasks import celery_app as tasks
+from src.infrastructure.channels.outbound_coordinator import PrioridadSalida
 
 
 class MatchDeLaPalabraTests(unittest.TestCase):
@@ -112,7 +113,12 @@ class EnvioDelRecordatorioTests(unittest.TestCase):
             tasks.send_keyword_reminder("whatsapp", "50688888888", 10, 1)
 
         leer.assert_called_once_with(10)
-        enviar.assert_called_once_with("whatsapp", "50688888888", "texto nuevo")
+        enviar.assert_called_once_with(
+            "whatsapp",
+            "50688888888",
+            "texto nuevo",
+            prioridad=PrioridadSalida.RECORDATORIO,
+        )
 
     def test_un_recordatorio_apagado_no_sale(self):
         """Apagarlo en el panel tiene que servir también para los ya agendados."""

@@ -10,6 +10,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.infrastructure.tasks import celery_app as tasks
+from src.infrastructure.channels.outbound_coordinator import PrioridadSalida
 from src.application.message_handler import MessageHandler
 from src.domain.entities import Channel, MessageType, OrchestratorAction
 
@@ -24,7 +25,9 @@ class TiemposDeMensajesTests(unittest.TestCase):
             tasks.send_ad_reminder("whatsapp", "506", "intermedio", 1)
             tasks.send_ad_reminder("whatsapp", "506", "último", 3)
 
-        enviar.assert_called_once_with("whatsapp", "506", "último")
+        enviar.assert_called_once_with(
+            "whatsapp", "506", "último", prioridad=PrioridadSalida.RECORDATORIO
+        )
         etapa.assert_called_once_with("whatsapp", "506", 3)
 
     def test_los_mensajes_inmediatos_del_sistema_respetan_la_pausa(self):

@@ -13,6 +13,7 @@ os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.domain.entities import Channel, MessageType
 from src.infrastructure.webhooks import app as webhook_app
+from src.infrastructure.channels.outbound_coordinator import PrioridadSalida
 
 
 class WebhookAppTests(unittest.TestCase):
@@ -47,7 +48,13 @@ class WebhookAppTests(unittest.TestCase):
             )
 
         self.assertEqual(resultado, {"status": "ok"})
-        enviar.assert_called_once_with(Channel.WHATSAPP, "506", "Le atiendo yo", log_conversation=False)
+        enviar.assert_called_once_with(
+            Channel.WHATSAPP,
+            "506",
+            "Le atiendo yo",
+            log_conversation=False,
+            prioridad=PrioridadSalida.INTERACTIVA,
+        )
         registrar.assert_called_once_with(Channel.WHATSAPP, "506", "Le atiendo yo")
 
     def test_responder_no_envia_una_conversacion_ajena(self):

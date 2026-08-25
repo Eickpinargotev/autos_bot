@@ -11,6 +11,10 @@ from src.infrastructure.channels.outbound_attachments import (
     parse_outbound_message,
     url_publica,
 )
+from src.infrastructure.channels.outbound_coordinator import (
+    PrioridadSalida,
+    turno_de_salida,
+)
 from src.infrastructure.repositories import clientes_whatsapp_repo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
 
@@ -91,7 +95,26 @@ class ChannelSenderRegistry:
         return cls._senders[channel_value]
 
     @classmethod
-    def send(cls, channel: Channel | str, user_id: str, text: str, log_conversation: bool = True):
+    def send(
+        cls,
+        channel: Channel | str,
+        user_id: str,
+        text: str,
+        log_conversation: bool = True,
+        prioridad: PrioridadSalida = PrioridadSalida.NORMAL,
+    ):
+        """Envía una unidad lógica bajo el candado de la cuenta del negocio."""
+        with turno_de_salida(channel, prioridad):
+            return cls._send_locked(channel, user_id, text, log_conversation)
+
+    @classmethod
+    def _send_locked(
+        cls,
+        channel: Channel | str,
+        user_id: str,
+        text: str,
+        log_conversation: bool,
+    ):
         sender = cls.get(channel)
         parsed = parse_outbound_message(text)
 
