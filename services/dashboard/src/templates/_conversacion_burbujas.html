@@ -85,7 +85,14 @@ salida: {{ m.salida }}</pre>
       <div>{{- m.quoted_text -}}</div>
     </div>
     {% endif %}
-    {% if m.text %}<div class="texto">{{- m.text -}}</div>{% endif %}
+    {% if m.text %}
+    <div class="texto">{{- m.text -}}</div>
+    {% elif m.event_type == 'intervencion_humana' %}
+    {# Antes de guardar el tipo de multimedia, los audios e imágenes enviados
+       por el dueño quedaron como texto vacío. No inventamos qué eran: solo
+       evitamos que el historial muestre una burbuja sin explicación. #}
+    <div class="texto">[Contenido no registrado]</div>
+    {% endif %}
   </div>
   {% endif %}
 {% else %}

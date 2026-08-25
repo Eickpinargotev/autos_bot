@@ -265,6 +265,20 @@ def test_el_dashboard_muestra_media_del_dueno_y_el_mensaje_citado(sesion_cliente
     assert cuerpo.count("Información del formulario") == 2
 
 
+def test_una_intervencion_historica_vacia_no_deja_una_burbuja_sin_explicacion(
+    sesion_cliente,
+):
+    _mensaje(
+        "50688888888", "", direction="outbound", author="dueño",
+        event_type="intervencion_humana",
+    )
+
+    cuerpo = sesion_cliente.get("/conversaciones/whatsapp/50688888888").text
+
+    assert "Dueño del negocio" in cuerpo
+    assert "[Contenido no registrado]" in cuerpo
+
+
 def test_una_pausa_sin_fecha_muestra_motivo_y_que_no_expira(sesion_cliente):
     _mensaje("50688888888", "hola")
     pool.ejecutar(
