@@ -86,7 +86,6 @@
   </div>
   <div class="cuerpo">
     <p style="margin-top:0">Se borra el historial y el bot olvida esta conversación. No se puede deshacer.</p>
-    <p class="sub">El consumo ya facturado no cambia.</p>
     <form method="post" action="/conversaciones/{{ canal }}/{{ client_id }}/eliminar"
           class="linea" style="justify-content:flex-end" data-conv-accion="eliminar">
       <input type="hidden" name="csrf" value="{{ csrf }}">

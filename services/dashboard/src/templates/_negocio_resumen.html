@@ -9,9 +9,9 @@
     <div class="nota">{{ resumen.clientes or 0 }} clientes distintos</div>
   </div>
   <div class="cifra">
-    <div class="etiqueta">Facturado</div>
-    <div class="valor">{{ resumen.facturado_microusd | usd }}</div>
-    <div class="nota">Costo real {{ resumen.real_microusd | usd }}</div>
+    <div class="etiqueta">Costo real interno</div>
+    <div class="valor">{{ resumen.real_microusd | usd }}</div>
+    <div class="nota">Acumulado de proveedores</div>
   </div>
   <div class="cifra">
     <div class="etiqueta">Reportes pendientes</div>

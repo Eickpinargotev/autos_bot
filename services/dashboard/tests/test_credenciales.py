@@ -146,7 +146,8 @@ def test_el_admin_ve_el_panel_del_cliente_y_pierde_sus_permisos(sesion_admin):
     # Mientras suplanta ve exactamente lo que ve el cliente, incluidas las
     # restricciones: si no, no serviría para reproducir su problema.
     assert sesion_admin.get("/admin/costos").status_code == 403
-    assert sesion_admin.get("/factura").status_code == 200
+    assert sesion_admin.get("/factura").status_code == 404
+    assert sesion_admin.get("/conversaciones").status_code == 200
 
     sesion_admin.post("/salir-de-cuenta")
     assert sesion_admin.get("/admin/costos").status_code == 200

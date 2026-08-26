@@ -1,4 +1,4 @@
-"""Tests deterministas del registro de consumo facturable (`uso_eventos`).
+"""Tests deterministas del registro del costo real (`uso_eventos`).
 
 Lo que se protege aquí es el dinero: que cada hecho quede imputado en la
 categoría correcta, con el costo real congelado, y que un fallo de la base nunca
@@ -51,13 +51,7 @@ class ReinicioDeChatTests(unittest.TestCase):
 
 
 class EventoLlmTests(unittest.TestCase):
-    def test_imputa_al_periodo_abierto_y_a_la_tarifa_vigente(self):
-        """El periodo y la tarifa se resuelven DENTRO del INSERT.
-
-        Si se cachearan en el proceso, los eventos posteriores a un cierre de
-        periodo (o a un cambio de precios) caerían en el sitio equivocado
-        durante la ventana de caché.
-        """
+    def test_conserva_el_costo_real_sin_aplicar_tarifas(self):
         with patch(f"{_MODULO}.ejecutar", return_value=1) as ejecutar_mock:
             billing_repository.registrar_evento_llm(
                 client_id="5061",
@@ -73,10 +67,9 @@ class EventoLlmTests(unittest.TestCase):
         sql, params = ejecutar_mock.call_args.args
         self.assertIn("FROM periodos_facturacion", sql)
         self.assertIn("cerrado_en IS NULL", sql)
-        self.assertIn("FROM tarifas", sql)
-        self.assertIn("vigente_desde <= NOW()", sql)
-        # El costo de venta se deriva del real por el multiplicador de la tarifa.
-        self.assertIn("ROUND(%s * COALESCE(t.multiplicador_llm, 1))", sql)
+        self.assertNotIn("FROM tarifas", sql)
+        self.assertIn("NULL", sql)  # tarifa_id histórico
+        self.assertIn("%s, 0", sql)  # costo real y cobro variable desactivado
         self.assertEqual(params[0], 1)
         self.assertEqual(params[1], "5061")
         self.assertEqual(params[2], "whatsapp")
@@ -100,7 +93,7 @@ class EventoLlmTests(unittest.TestCase):
 
 
 class EventoCodigoTests(unittest.TestCase):
-    def test_se_cobra_por_mensaje_y_sin_costo_real(self):
+    def test_registra_la_cantidad_sin_tarifa_ni_costo_real(self):
         """Un mensaje disparado por código no le cuesta nada al proveedor."""
         with patch(f"{_MODULO}.ejecutar", return_value=1) as ejecutar_mock:
             billing_repository.registrar_evento_codigo(
@@ -109,10 +102,9 @@ class EventoCodigoTests(unittest.TestCase):
 
         sql, params = ejecutar_mock.call_args.args
         self.assertIn("'codigo'", sql)
-        self.assertIn("%s * COALESCE(t.precio_mensaje_codigo_microusd, 0)", sql)
-        self.assertIn(", 0,", sql)  # costo_real_microusd fijo en cero
+        self.assertNotIn("tarifas", sql)
+        self.assertIn("%s, 0, 0", sql)
         self.assertEqual(params[4], 3)
-        self.assertEqual(params[5], 3)
 
     def test_no_registra_nada_sin_mensajes(self):
         with patch(f"{_MODULO}.ejecutar") as ejecutar_mock:

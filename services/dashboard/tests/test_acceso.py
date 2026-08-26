@@ -4,13 +4,9 @@ Es la barrera que impide que el cliente vea el costo real del proveedor, los
 logs de conversación o el cierre de periodos.
 """
 
-from tests.conftest import token_csrf
-
 RUTAS_SOLO_ADMIN = (
     "/admin/costos",
     "/admin/negocios",
-    "/admin/periodos",
-    "/admin/tarifas",
     # El visor por negocio. Devuelve un fragmento para la ventana flotante, pero
     # sirve exactamente lo mismo que el listado completo: las conversaciones de
     # los clientes. Si se abriera al negocio, vería los chats de otros.
@@ -30,7 +26,6 @@ RUTAS_SOLO_ADMIN = (
 # Páginas del panel del NEGOCIO. El administrador tampoco entra: no son su
 # trabajo, y para verlas suplanta al negocio desde su perfil.
 RUTAS_DEL_NEGOCIO = (
-    "/factura",
     "/conversaciones",
     "/reportes",
     "/conocimiento",
@@ -62,7 +57,7 @@ def test_el_cambio_de_contrasena_lo_ve_cualquier_sesion(sesion_admin, sesion_cli
 
 
 def test_sin_sesion_se_redirige_al_login(cliente_http):
-    respuesta = cliente_http.get("/factura", follow_redirects=False)
+    respuesta = cliente_http.get("/conversaciones", follow_redirects=False)
     assert respuesta.status_code == 303
     assert respuesta.headers["location"].startswith("/login")
 
@@ -93,28 +88,18 @@ def test_el_admin_no_entra_al_panel_del_negocio(sesion_admin):
     conocimiento, las preguntas y los mensajes los administra el negocio. El
     admin llega a ellos suplantando, lo que además deja registro."""
     for ruta in RUTAS_DEL_NEGOCIO:
-        if ruta == "/factura":
-            continue  # su propio consumo sí lo ve
         assert sesion_admin.get(ruta).status_code == 403, f"{ruta} quedó accesible al admin"
 
 
-def test_la_factura_del_cliente_no_revela_el_costo_real(sesion_cliente):
-    """El precio de venta sí; lo que se le paga al proveedor, nunca."""
-    from src.db import pool
+def test_el_negocio_no_tiene_rutas_de_consumo(sesion_cliente):
+    assert sesion_cliente.get("/factura").status_code == 404
+    assert sesion_cliente.get("/factura/totales").status_code == 404
+    assert "Mi consumo" not in sesion_cliente.get("/conversaciones").text
 
-    pool.ejecutar(
-        """
-        INSERT INTO uso_eventos (periodo_id, client_id, canal, categoria, origen,
-                                 mensajes, costo_real_microusd, costo_cliente_microusd)
-        SELECT id, '506', 'whatsapp', 'llm', 'agente', 1, 1965, 3144
-        FROM periodos_facturacion WHERE cerrado_en IS NULL
-        """
-    )
-    cuerpo = sesion_cliente.get("/factura").text
 
-    assert "0.0031" in cuerpo          # lo facturado
-    assert "0.0020" not in cuerpo      # el costo real
-    assert "argen" not in cuerpo       # ni el margen
+def test_tarifas_y_periodos_desaparecieron_del_panel(sesion_admin):
+    assert sesion_admin.get("/admin/tarifas").status_code == 404
+    assert sesion_admin.get("/admin/periodos").status_code == 404
 
 
 def test_credenciales_malas_no_crean_sesion(cliente_http):
@@ -126,7 +111,7 @@ def test_credenciales_malas_no_crean_sesion(cliente_http):
     )
     assert respuesta.status_code == 200
     assert "incorrectos" in respuesta.text
-    assert cliente_http.get("/factura", follow_redirects=False).status_code == 303
+    assert cliente_http.get("/conversaciones", follow_redirects=False).status_code == 303
 
 
 def test_el_mensaje_de_error_no_distingue_usuario_inexistente(cliente_http):
@@ -154,19 +139,6 @@ def test_una_contrasena_provisional_bloquea_el_resto_del_panel(cliente_http):
     assert cliente_http.get("/password").status_code == 200
 
 
-def test_sin_token_csrf_no_se_puede_escribir(sesion_admin):
-    """Sin esto, un sitio externo podría cerrar un periodo desde el navegador."""
-    respuesta = sesion_admin.post("/admin/periodos/cerrar", data={"nota": "sin csrf"})
-    assert respuesta.status_code == 403
-
-
-def test_con_token_csrf_si_se_puede(sesion_admin):
-    respuesta = sesion_admin.post(
-        "/admin/periodos/cerrar",
-        data={"nota": "con csrf", "csrf": token_csrf(sesion_admin)},
-        follow_redirects=False,
-    )
-    assert respuesta.status_code == 303
 
 
 def test_al_salir_la_sesion_deja_de_servir(sesion_admin):
@@ -184,4 +156,52 @@ def test_el_login_no_redirige_a_sitios_externos(cliente_http):
         data={"usuario": "victima", "password": "clave-de-pruebas-1", "siguiente": "https://sitio-malo.example"},
         follow_redirects=False,
     )
-    assert respuesta.headers["location"] == "/"
+    assert respuesta.headers["location"] == "/conversaciones"
+
+
+def test_el_admin_no_aterriza_en_la_ultima_pagina_del_negocio(cliente_http):
+    """Reproduce el 403 que aparecía justo después de iniciar sesión."""
+    from src.services import usuarios
+
+    usuarios.crear("admin_nuevo", "clave-de-pruebas-1", "admin", debe_cambiar=False)
+    respuesta = cliente_http.post(
+        "/login",
+        data={
+            "usuario": "admin_nuevo",
+            "password": "clave-de-pruebas-1",
+            "siguiente": "/conversaciones",
+        },
+        follow_redirects=False,
+    )
+
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"] == "/admin/negocios"
+
+
+def test_cada_rol_conserva_solo_un_destino_que_le_pertenece(cliente_http):
+    from src.services import usuarios
+
+    usuarios.crear("admin_destino", "clave-de-pruebas-1", "admin", debe_cambiar=False)
+    admin = cliente_http.post(
+        "/login",
+        data={
+            "usuario": "admin_destino",
+            "password": "clave-de-pruebas-1",
+            "siguiente": "/admin/costos",
+        },
+        follow_redirects=False,
+    )
+    assert admin.headers["location"] == "/admin/costos"
+
+    cliente_http.post("/logout")
+    usuarios.crear("negocio_destino", "clave-de-pruebas-1", "cliente", debe_cambiar=False)
+    negocio = cliente_http.post(
+        "/login",
+        data={
+            "usuario": "negocio_destino",
+            "password": "clave-de-pruebas-1",
+            "siguiente": "/admin/costos",
+        },
+        follow_redirects=False,
+    )
+    assert negocio.headers["location"] == "/conversaciones"

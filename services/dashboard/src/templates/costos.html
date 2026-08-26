@@ -1,17 +1,11 @@
 {% extends "base.html" %}
-{% block titulo %}Costos{% endblock %}
+{% block titulo %}Consumo real{% endblock %}
 
 {% block contenido %}
-<h1>Costos y facturación</h1>
+<h1>Consumo real</h1>
 <p class="sub">
-  Periodo abierto {{ periodo.id }}.
-  {% if tarifa %}
-    Tarifa vigente: {{ tarifa.modelo }}, margen {{ tarifa.multiplicador_llm }}× sobre el costo real
-    y {{ tarifa.precio_mensaje_codigo_microusd | usd }} por mensaje automático.
-    <a href="/admin/tarifas">Cambiar</a>
-  {% else %}
-    <strong>No hay tarifa configurada.</strong> <a href="/admin/tarifas">Crea una</a> o no se podrá facturar.
-  {% endif %}
+  Costos reales acumulados de los proveedores. Estas cifras son internas y no
+  se muestran al dueño de ningún proyecto.
 </p>
 
 <div data-vivo="uso" data-refrescar="/admin/costos/totales" data-cada="5000">

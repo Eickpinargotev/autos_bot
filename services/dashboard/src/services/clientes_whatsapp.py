@@ -156,12 +156,11 @@ def resumen_actividad(proyecto_id: int) -> dict[str, Any]:
         SELECT
           (SELECT COUNT(DISTINCT (client_id, canal)) FROM conversation_messages WHERE proyecto_id = %s) AS conversaciones,
           (SELECT COUNT(*) FROM seguimiento_clientes WHERE proyecto_id = %s) AS clientes,
-          (SELECT COALESCE(SUM(costo_cliente_microusd), 0) FROM uso_eventos WHERE proyecto_id = %s) AS facturado_microusd,
           (SELECT COALESCE(SUM(costo_real_microusd), 0) FROM uso_eventos WHERE proyecto_id = %s) AS real_microusd,
           (SELECT COUNT(*) FROM reportes WHERE proyecto_id = %s AND NOT revisado) AS reportes_pendientes,
           (SELECT MAX(created_at) FROM conversation_messages WHERE proyecto_id = %s) AS ultima_actividad
         """,
-        (int(proyecto_id),) * 6,
+        (int(proyecto_id),) * 5,
     )
     return fila or {}
 

@@ -245,7 +245,6 @@ def test_el_flujo_no_se_cachea_ni_se_bufferiza():
 FRAGMENTOS_DEL_NEGOCIO = (
     ("/reportes", "/reportes/lista"),
     ("/preguntas", "/preguntas/lista"),
-    ("/factura", "/factura/totales"),
     ("/envios", "/envios/sesiones"),
 )
 
@@ -308,7 +307,7 @@ def test_el_menu_refrescado_sigue_marcando_donde_estas(sesion_cliente):
     """Sin el `?en=`, el primer refresco apagaba el resaltado y el menú dejaba
     de decir en qué página estabas."""
     assert 'href="/reportes" class="activo"' in sesion_cliente.get("/pendientes?en=/reportes").text
-    assert 'href="/reportes" class="activo"' not in sesion_cliente.get("/pendientes?en=/factura").text
+    assert 'href="/reportes" class="activo"' not in sesion_cliente.get("/pendientes?en=/conversaciones").text
 
 
 def test_el_menu_no_abre_flujo_por_su_cuenta(sesion_cliente):
@@ -327,7 +326,7 @@ def test_el_menu_no_abre_flujo_por_su_cuenta(sesion_cliente):
 # Pantallas de catálogo: se editan a mano y no las toca nadie más, así que no
 # tienen por qué mantener una conexión abierta.
 QUIETAS_DEL_NEGOCIO = ("/mensajes", "/palabras-clave", "/enviar", "/conocimiento")
-QUIETAS_DEL_ADMIN = ("/admin/usuarios", "/admin/configuracion", "/admin/periodos", "/admin/tarifas")
+QUIETAS_DEL_ADMIN = ("/admin/usuarios", "/admin/configuracion")
 
 
 def _abre_flujo(html: str) -> bool:
@@ -350,7 +349,7 @@ def test_una_pantalla_de_catalogo_del_admin_no_abre_flujo(sesion_admin, ruta):
     assert not _abre_flujo(sesion_admin.get(ruta).text), f"{ruta} gasta una conexión sin necesitarla"
 
 
-@pytest.mark.parametrize("ruta", ("/reportes", "/preguntas", "/conversaciones", "/factura", "/envios"))
+@pytest.mark.parametrize("ruta", ("/reportes", "/preguntas", "/conversaciones", "/envios"))
 def test_las_pantallas_vivas_si_abren_flujo(sesion_cliente, ruta):
     """La otra mitad del trato: lo que sí cambia solo tiene que enterarse."""
     assert _abre_flujo(sesion_cliente.get(ruta).text), f"{ruta} dejó de actualizarse sola"

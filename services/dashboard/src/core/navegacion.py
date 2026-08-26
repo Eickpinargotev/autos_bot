@@ -10,7 +10,7 @@ Tres cosas distintas que antes se llamaban todas «cliente»:
 
 * **Base de Control** es la PLATAFORMA. Es la marca del panel y no cambia.
 * Un **proyecto** es cada uno de nuestros clientes (hoy «Escuela de Manejo»):
-  su número de WhatsApp, su bot, su conocimiento y su factura. Un proyecto tiene
+  su número de WhatsApp, su bot y su conocimiento. Un proyecto tiene
   **un único usuario asignado** — no varios: quien lo administra es una persona,
   con su nombre, y esa cuenta es su llave.
 * Un **cliente** es la persona que le escribe al bot. Solo aparece dentro del
@@ -21,11 +21,11 @@ Tres cosas distintas que antes se llamaban todas «cliente»:
 Son dos trabajos distintos:
 
 * **Administrador** (nosotros). Ve la lista de **proyectos**. Su trabajo es
-  facturarlos, ver qué falló y entrar a su cuenta mediante suplantación auditada
+  controlar el costo real, ver qué falló y entrar a su cuenta mediante suplantación auditada
   cuando necesita soporte. No abre conversaciones ni bloqueos directamente.
 * **Proyecto** (nuestro cliente). Administra su catálogo, su base de
-  conocimiento, mensajes, conversaciones y bloqueos permanentes. No ve el costo
-  real: eso es nuestro margen, no su factura.
+  conocimiento, mensajes, conversaciones y bloqueos permanentes. No ve datos de
+  consumo: el servicio se cobra mediante un valor fijo.
 
 ## Lo de la cuenta no se repite en el lateral, ni es una página
 
@@ -63,11 +63,9 @@ SECCIONES_ADMIN: list[dict[str, Any]] = [
         ],
     },
     {
-        "titulo": "Facturación",
+        "titulo": "Costos internos",
         "paginas": [
-            {"etiqueta": "Costos", "url": "/admin/costos", "icono": "panel"},
-            {"etiqueta": "Periodos", "url": "/admin/periodos", "icono": "calendario"},
-            {"etiqueta": "Tarifas", "url": "/admin/tarifas", "icono": "etiqueta"},
+            {"etiqueta": "Consumo real", "url": "/admin/costos", "icono": "panel"},
         ],
     },
     # La sección «Sistema» (cuentas, ajustes, mi cuenta) NO va aquí: vive en el
@@ -104,7 +102,6 @@ SECCIONES_NEGOCIO: list[dict[str, Any]] = [
         "paginas": [
             {"etiqueta": "Conversaciones", "url": "/conversaciones", "icono": "chat", "prefijo": True},
             {"etiqueta": "Reportes", "url": "/reportes", "icono": "documento"},
-            {"etiqueta": "Mi consumo", "url": "/factura", "icono": "dinero"},
         ],
     },
     {

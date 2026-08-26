@@ -33,6 +33,29 @@ def test_los_totales_suman_lo_registrado():
     assert totales["margen_microusd"] == 900
 
 
+def test_el_control_real_acumula_sin_tarifas_ni_cortes():
+    _evento(1000, 9999)
+    facturacion.cerrar_periodo("admin")
+    _evento(500, 8888)
+
+    totales = facturacion.totales_reales()
+    categorias = facturacion.desglose_real_por_categoria()
+
+    assert totales["real_microusd"] == 1500
+    assert "cliente_microusd" not in totales
+    assert sum(c["real_microusd"] for c in categorias) == 1500
+    assert all("cliente_microusd" not in c for c in categorias)
+
+
+def test_la_pantalla_admin_solo_presenta_costos_reales(sesion_admin):
+    cuerpo = sesion_admin.get("/admin/costos").text
+    assert "Consumo real" in cuerpo
+    assert "Costo real" in cuerpo
+    assert "Facturado" not in cuerpo
+    assert "Tarifa" not in cuerpo
+    assert "Margen" not in cuerpo
+
+
 def test_cerrar_congela_los_totales_y_deja_el_nuevo_en_cero():
     _evento(1000, 1600)
     anterior = facturacion.periodo_abierto()["id"]

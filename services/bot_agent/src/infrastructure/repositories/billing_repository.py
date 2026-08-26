@@ -1,25 +1,22 @@
-"""Libro mayor del consumo facturable (`uso_eventos`).
+"""Libro mayor del costo real de operación (`uso_eventos`).
 
-Tres categorías, tal como se cobra:
+Tres categorías, tal como se mide:
 
-- `llm`: el turno pasó por el modelo. El costo REAL sale de los tokens y de los
-  precios del proveedor; al cliente se le cobra ese costo multiplicado por el
-  margen de la tarifa vigente.
+- `llm`: el turno pasó por el modelo. El costo real sale de los tokens y de los
+  precios del proveedor.
 - `codigo`: mensaje disparado por un algoritmo, sin modelo de por medio (la
   palabra clave `tareas`/`transporte`, los flujos programados, los envíos
-  manuales). No tiene costo real de proveedor y al cliente se le cobra una
-  tarifa fija por mensaje.
+  manuales). No tiene costo real de modelo, pero se conserva la cantidad para
+  auditar cada componente.
 - `audio`: transcripción de una nota de voz. Se separa de `llm` porque el
-  negocio quiere ver aparte "lo que pago por tokens" y "lo que pago por audios",
+  administrador necesita ver aparte tokens y audios,
   y porque no encaja en las otras dos: tiene costo real de proveedor (a
   diferencia de `codigo`) pero se mide en segundos y no en tokens.
 
-Todo se resuelve en UNA sentencia: el periodo abierto y la tarifa vigente se
-buscan dentro del propio INSERT. Así no hay caché que quede obsoleta ni ventana
-de carrera tras un cierre de periodo o un cambio de precios — el evento queda
-imputado exactamente donde corresponde en el instante en que ocurrió.
-
-El costo se congela en la fila. Cambiar la tarifa mañana no reescribe lo de hoy.
+El costo real se congela en la fila. Las columnas históricas de tarifa y precio
+de venta se escriben como NULL y cero: siguen en el esquema para permitir una
+actualización sin destruir el historial anterior, pero ya no intervienen en el
+cobro fijo.
 """
 
 from src.domain.entities import Channel
@@ -49,8 +46,7 @@ def registrar_evento_llm(
     """Anota un turno procesado por el LLM.
 
     El costo real llega ya calculado por `seguimiento_service.costo_microusd`,
-    que es la única fuente de esa fórmula. Aquí solo se le aplica el margen de
-    venta de la tarifa vigente.
+    que es la única fuente de esa fórmula.
     """
     proyecto_id = proyecto_actual()
     if not proyecto_id:
@@ -65,19 +61,14 @@ def registrar_evento_llm(
             )
             SELECT
                 %s, p.id,
-                t.id,
+                NULL,
                 %s, %s, 'llm', %s, %s,
                 %s, %s, %s, 1,
-                %s,
-                ROUND(%s * COALESCE(t.multiplicador_llm, 1))
+                %s, 0
             FROM (
                 SELECT id FROM periodos_facturacion
                 WHERE cerrado_en IS NULL ORDER BY id DESC LIMIT 1
             ) p
-            LEFT JOIN LATERAL (
-                SELECT id, multiplicador_llm FROM tarifas
-                WHERE vigente_desde <= NOW() ORDER BY vigente_desde DESC, id DESC LIMIT 1
-            ) t ON TRUE
             """,
             (
                 proyecto_id, str(client_id or ""),
@@ -87,7 +78,6 @@ def registrar_evento_llm(
                 int(tokens_entrada or 0),
                 int(tokens_cacheados or 0),
                 int(tokens_salida or 0),
-                int(costo_real_microusd or 0),
                 int(costo_real_microusd or 0),
             ),
         )
@@ -109,13 +99,8 @@ def registrar_evento_audio(
 ) -> bool:
     """Anota la transcripción de una nota de voz.
 
-    Tercera categoría, separada de `llm` a pedido del negocio: el cliente quiere
-    ver por un lado lo que paga en tokens y por otro lo que paga en audios. No
-    encaja en las otras dos — tiene costo real de proveedor (a diferencia de
-    `codigo`) pero no se mide en tokens (a diferencia de `llm`).
-
-    Se le aplica el mismo margen que al LLM: es el margen del negocio sobre lo
-    que le cuesta operar, no una tarifa por tecnología.
+    Tiene costo real de proveedor (a diferencia de `codigo`) y se mide en
+    segundos, por eso se conserva como categoría propia.
     """
     proyecto_id = proyecto_actual()
     if not proyecto_id or (segundos <= 0 and costo_real_microusd <= 0):
@@ -129,19 +114,14 @@ def registrar_evento_audio(
             )
             SELECT
                 %s, p.id,
-                t.id,
+                NULL,
                 %s, %s, 'audio', %s, %s,
                 %s, 1,
-                %s,
-                ROUND(%s * COALESCE(t.multiplicador_llm, 1))
+                %s, 0
             FROM (
                 SELECT id FROM periodos_facturacion
                 WHERE cerrado_en IS NULL ORDER BY id DESC LIMIT 1
             ) p
-            LEFT JOIN LATERAL (
-                SELECT id, multiplicador_llm FROM tarifas
-                WHERE vigente_desde <= NOW() ORDER BY vigente_desde DESC, id DESC LIMIT 1
-            ) t ON TRUE
             """,
             (
                 proyecto_id, str(client_id or ""),
@@ -149,7 +129,6 @@ def registrar_evento_audio(
                 origen or "",
                 modelo or "",
                 int(segundos or 0),
-                int(costo_real_microusd or 0),
                 int(costo_real_microusd or 0),
             ),
         )
@@ -179,24 +158,18 @@ def registrar_evento_codigo(
             )
             SELECT
                 %s, p.id,
-                t.id,
+                NULL,
                 %s, %s, 'codigo', %s,
-                %s, 0,
-                %s * COALESCE(t.precio_mensaje_codigo_microusd, 0)
+                %s, 0, 0
             FROM (
                 SELECT id FROM periodos_facturacion
                 WHERE cerrado_en IS NULL ORDER BY id DESC LIMIT 1
             ) p
-            LEFT JOIN LATERAL (
-                SELECT id, precio_mensaje_codigo_microusd FROM tarifas
-                WHERE vigente_desde <= NOW() ORDER BY vigente_desde DESC, id DESC LIMIT 1
-            ) t ON TRUE
             """,
             (
                 proyecto_id, str(client_id or ""),
                 _canal(canal),
                 origen or "",
-                int(mensajes),
                 int(mensajes),
             ),
         )

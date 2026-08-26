@@ -77,12 +77,18 @@ def test_el_lateral_de_un_proyecto_dice_en_cual_estas(sesion_cliente):
     negocio = clientes_whatsapp.por_usuario(cuenta["id"])
     clientes_whatsapp.actualizar_config(negocio["id"], nombre="Escuela de Manejo")
 
-    cuerpo = sesion_cliente.get("/factura").text
+    cuerpo = sesion_cliente.get("/conversaciones").text
 
     assert "Base de Control" in cuerpo
     assert "Escuela de Manejo" in cuerpo
     # Y el rol crudo de la base no se pinta: «cliente» no significaba nada.
     assert '<span class="cuenta-rol">cliente' not in cuerpo
+
+
+def test_el_lateral_del_negocio_no_muestra_consumo(sesion_cliente):
+    cuerpo = sesion_cliente.get("/conversaciones").text
+    assert "Mi consumo" not in cuerpo
+    assert 'href="/factura"' not in cuerpo
 
 
 # --- Mi cuenta es una ventana, no una página ----------------------------------

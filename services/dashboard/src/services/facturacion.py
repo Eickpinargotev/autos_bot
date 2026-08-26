@@ -1,4 +1,4 @@
-"""Consultas y operaciones de facturación.
+"""Consultas históricas y control interno de costos reales.
 
 Reglas del modelo:
 
@@ -20,6 +20,98 @@ MICRO = 1_000_000
 def usd(microusd: int | None) -> float:
     """Convierte micro-USD (entero) a USD legible."""
     return round(int(microusd or 0) / MICRO, 6)
+
+
+# --- Costos reales (modalidad de cobro fijo) ---------------------------------
+
+def totales_reales(proyecto_id: int | None = None) -> dict[str, Any]:
+    """Costo real acumulado, sin tarifas de venta ni cortes de facturación."""
+    fila = pool.consultar_uno(
+        """
+        SELECT COALESCE(SUM(costo_real_microusd), 0) AS real_microusd,
+               COALESCE(SUM(mensajes), 0)            AS mensajes,
+               COALESCE(SUM(tokens_entrada), 0)      AS tokens_entrada,
+               COALESCE(SUM(tokens_salida), 0)       AS tokens_salida,
+               COUNT(*)                              AS eventos
+        FROM uso_eventos
+        WHERE (%s IS NULL OR proyecto_id = %s)
+        """,
+        (proyecto_id, proyecto_id),
+    ) or {}
+    real = int(fila.get("real_microusd") or 0)
+    return {
+        "real_microusd": real,
+        "real_usd": usd(real),
+        "mensajes": int(fila.get("mensajes") or 0),
+        "tokens_entrada": int(fila.get("tokens_entrada") or 0),
+        "tokens_salida": int(fila.get("tokens_salida") or 0),
+        "eventos": int(fila.get("eventos") or 0),
+    }
+
+
+def desglose_real_por_categoria(proyecto_id: int | None = None) -> list[dict[str, Any]]:
+    """Costo real acumulado de cada componente técnico."""
+    filas = pool.consultar(
+        """
+        SELECT categoria,
+               COUNT(*)                              AS eventos,
+               COALESCE(SUM(mensajes), 0)            AS mensajes,
+               COALESCE(SUM(tokens_entrada), 0)      AS tokens_entrada,
+               COALESCE(SUM(tokens_cacheados), 0)    AS tokens_cacheados,
+               COALESCE(SUM(tokens_salida), 0)       AS tokens_salida,
+               COALESCE(SUM(segundos_audio), 0)      AS segundos_audio,
+               COALESCE(SUM(costo_real_microusd), 0) AS real_microusd
+        FROM uso_eventos
+        WHERE (%s IS NULL OR proyecto_id = %s)
+        GROUP BY categoria
+        """,
+        (proyecto_id, proyecto_id),
+    )
+    resultado = [
+        {
+            **fila,
+            "etiqueta": ETIQUETAS_CATEGORIA.get(fila["categoria"], fila["categoria"]),
+            "real_usd": usd(fila["real_microusd"]),
+            "minutos_audio": round(int(fila["segundos_audio"] or 0) / 60, 1),
+        }
+        for fila in filas
+    ]
+    resultado.sort(key=lambda f: _ORDEN_CATEGORIA.get(f["categoria"], 9))
+    return resultado
+
+
+def desglose_real_por_origen(proyecto_id: int | None = None) -> list[dict[str, Any]]:
+    filas = pool.consultar(
+        """
+        SELECT origen, categoria, COUNT(*) AS eventos,
+               COALESCE(SUM(costo_real_microusd), 0) AS real_microusd
+        FROM uso_eventos
+        WHERE (%s IS NULL OR proyecto_id = %s)
+        GROUP BY origen, categoria
+        ORDER BY real_microusd DESC
+        """,
+        (proyecto_id, proyecto_id),
+    )
+    return [{**fila, "real_usd": usd(fila["real_microusd"])} for fila in filas]
+
+
+def ahorro_real_por_cache(proyecto_id: int | None = None) -> dict[str, Any]:
+    fila = pool.consultar_uno(
+        """
+        SELECT COALESCE(SUM(tokens_entrada), 0) AS entrada,
+               COALESCE(SUM(tokens_cacheados), 0) AS cacheados
+        FROM uso_eventos
+        WHERE categoria = 'llm' AND (%s IS NULL OR proyecto_id = %s)
+        """,
+        (proyecto_id, proyecto_id),
+    ) or {}
+    entrada = int(fila.get("entrada") or 0)
+    cacheados = int(fila.get("cacheados") or 0)
+    return {
+        "tokens_entrada": entrada,
+        "tokens_cacheados": cacheados,
+        "porcentaje": round(cacheados / entrada * 100, 1) if entrada else 0.0,
+    }
 
 
 # --- Periodos ----------------------------------------------------------------

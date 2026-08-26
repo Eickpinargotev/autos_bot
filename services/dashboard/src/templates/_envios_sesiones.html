@@ -68,8 +68,7 @@
     <div class="cuerpo">
       <p style="margin-top:0">
         Se borra el registro de «{{ l.etiqueta }}» y de sus {{ l.total }} destinatarios.
-        Los mensajes que ya salieron no se deshacen, y lo que consumieron sigue en tu
-        consumo: el pasado no se recalcula.
+        Los mensajes que ya salieron no se deshacen.
       </p>
       <form method="post" action="/envios/{{ l.id }}/eliminar" class="linea" style="justify-content:flex-end">
         <input type="hidden" name="csrf" value="{{ csrf }}">

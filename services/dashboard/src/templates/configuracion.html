@@ -9,13 +9,6 @@
   en el servidor. De los secretos solo se indica si están puestos.
 </p>
 
-{% if not tarifa %}
-<div class="mensaje error">
-  No hay ninguna tarifa configurada: mientras siga así no se puede facturar el consumo.
-  <a href="/admin/tarifas">Crea una ahora</a>.
-</div>
-{% endif %}
-
 {% if password_fuera_del_entorno %}
 <div class="mensaje aviso">
   La contraseña de administrador se cambió desde el panel o por Telegram, así que ya no
@@ -24,24 +17,6 @@
 {% endif %}
 
 <div class="fichas">
-
-  <div class="panel">
-    <h2 style="margin-top:0">Facturación</h2>
-    <dl>
-      <div class="dato"><dt>Periodo abierto</dt><dd>#{{ periodo.id }} desde {{ periodo.abierto_en | fecha }}</dd></div>
-      {% if tarifa %}
-        <div class="dato"><dt>Modelo tarifado</dt><dd>{{ tarifa.modelo }}</dd></div>
-        <div class="dato"><dt>Margen sobre el costo real</dt><dd>{{ tarifa.multiplicador_llm }}×</dd></div>
-        <div class="dato"><dt>Mensaje automático</dt><dd>{{ tarifa.precio_mensaje_codigo_microusd | usd }}</dd></div>
-        <div class="dato"><dt>Vigente desde</dt><dd>{{ tarifa.vigente_desde | fecha }}</dd></div>
-      {% else %}
-        <div class="dato"><dt>Tarifa vigente</dt><dd><span class="pastilla error">sin configurar</span></dd></div>
-      {% endif %}
-    </dl>
-    <p class="sub" style="margin:14px 0 0">
-      <a href="/admin/tarifas">Tarifas</a> · <a href="/admin/periodos">Periodos</a>
-    </p>
-  </div>
 
   <div class="panel">
     <h2 style="margin-top:0">Cuentas y acceso</h2>

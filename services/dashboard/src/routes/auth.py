@@ -11,6 +11,27 @@ from src.services import recuperacion, usuarios
 router = APIRouter()
 
 
+def _inicio_del_rol(rol: str) -> str:
+    return "/admin/negocios" if rol == security.ROL_ADMIN else "/conversaciones"
+
+
+def _destino_tras_login(rol: str, siguiente: str) -> str:
+    """Respeta la URL pendiente solo cuando pertenece al rol autenticado.
+
+    El navegador suele volver a la última página abierta. Si esa página era
+    `/conversaciones` y después entra el administrador, enviarlo allí produce
+    un 403 nada más iniciar sesión. Lo mismo ocurriría al revés con `/admin`.
+    """
+    inicio = _inicio_del_rol(rol)
+    if not siguiente.startswith("/") or siguiente.startswith("//"):
+        return inicio
+    if siguiente == "/":
+        return inicio
+    if rol == security.ROL_ADMIN:
+        return siguiente if siguiente.startswith("/admin/") else inicio
+    return inicio if siguiente.startswith("/admin/") else siguiente
+
+
 def _redirigir(destino: str, aviso: str = "", error: str = "") -> RedirectResponse:
     separador = "&" if "?" in destino else "?"
     if aviso:
@@ -22,14 +43,13 @@ def _redirigir(destino: str, aviso: str = "", error: str = "") -> RedirectRespon
 
 @router.get("/")
 def inicio(request: Request):
-    """Cada rol aterriza donde le sirve: el cliente en su factura, el admin en costos."""
+    """Cada rol aterriza en su espacio de trabajo."""
     usuario = security.usuario_actual(request)
     if not usuario:
         return RedirectResponse(url="/login", status_code=303)
     if usuario["debe_cambiar_password"]:
         return RedirectResponse(url="/password", status_code=303)
-    destino = "/admin/negocios" if usuario["rol"] == security.ROL_ADMIN else "/conversaciones"
-    return RedirectResponse(url=destino, status_code=303)
+    return RedirectResponse(url=_inicio_del_rol(usuario["rol"]), status_code=303)
 
 
 @router.get("/login")
@@ -72,9 +92,9 @@ def login(
         ip=clave,
         user_agent=request.headers.get("user-agent", ""),
     )
-    # Redirección solo a rutas internas: un `siguiente` con http:// convertiría
-    # el login en un trampolín a sitios externos.
-    destino = siguiente if siguiente.startswith("/") and not siguiente.startswith("//") else "/"
+    # Además de impedir redirecciones externas, no se conserva una página del
+    # otro rol: el administrador nunca debe aterrizar en el panel del negocio.
+    destino = _destino_tras_login(cuenta["rol"], siguiente)
     respuesta = RedirectResponse(url=destino, status_code=303)
     respuesta.set_cookie(
         settings.SESSION_COOKIE_NAME,

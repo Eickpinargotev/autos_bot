@@ -1,4 +1,4 @@
-"""Zona del administrador: proyectos, facturación, incidencias y usuarios.
+"""Zona del administrador: proyectos, costos reales, incidencias y usuarios.
 
 Todas las rutas de este módulo dependen de `requiere_admin`. Un `cliente` recibe
 403 aunque escriba la URL a mano.
@@ -14,7 +14,6 @@ from src.core.config import settings
 from src.core.plantillas import render
 from src.services import (
     clientes_whatsapp,
-    facturacion,
     mensajeria,
     usuarios,
 )
@@ -28,7 +27,7 @@ router = APIRouter(prefix="/admin")
 def configuracion(request: Request, usuario=Depends(security.requiere_admin)):
     """Estado del sistema en una sola página, con el enlace a dónde se cambia.
 
-    No edita nada: cada ajuste se cambia donde vive (tarifas, periodos, usuarios)
+    No edita nada: cada ajuste se cambia donde vive (usuarios o `.env`)
     o en el `.env`. Aquí se ve, junto, qué está puesto y qué falta — que es lo que
     normalmente se busca cuando algo no funciona.
 
@@ -39,8 +38,6 @@ def configuracion(request: Request, usuario=Depends(security.requiere_admin)):
         request,
         "configuracion.html",
         usuario,
-        tarifa=facturacion.tarifa_vigente(),
-        periodo=facturacion.periodo_abierto(),
         cuentas_total=len(cuentas),
         cuentas_admin=sum(1 for c in cuentas if c["rol"] == security.ROL_ADMIN),
         cuentas_inactivas=sum(1 for c in cuentas if not c["activo"]),
@@ -409,7 +406,7 @@ def entrar_como(
     usuarios.iniciar_suplantacion(
         usuario["token"], usuario["id"], usuario_id, ip=request.client.host if request.client else ""
     )
-    return RedirectResponse(url="/factura", status_code=303)
+    return RedirectResponse(url="/conversaciones", status_code=303)
 
 
 @router.post("/usuarios/{usuario_id}/activo")
