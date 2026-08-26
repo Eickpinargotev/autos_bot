@@ -168,21 +168,20 @@
     },
     "G13": {
       "mensajes": [
-        "💡💡💡Hola!!!\n\nTenemos el siguiente paquete para alquilar su vehículo para prueba de manejo. Si no tiene cita para prueba le ayudamos con la programación de manera gratuita.\n\n🎯 *PAQUETE VIP* 🎯\n\n*VALOR:* 40 mil colones\n\n*VEHÍCULO:* Smart eléctrico o Spark automático gasolina (Dependiendo de la disponibilidad)\n\nIncluye:\n\n*PREVIO:*\n\n🚙 Clase de preparación que es para practicar conos, reversa, salida del plantel, direccionales y la manera correcta de hacer el alto en la salida del plantel  \n🚙 Recorrido explicativo de la ruta oficial que hace el evaluador.\n\n🇨🇷 *Notas a considerar:* 🇨🇷  \n👉📒*A)* La duración de la preparación es de 50 minutos en total  \n👉📒*B)* La preparación de este paquete debe hacerse agendando vía formulario  \n👉📒*C)* En este paquete se incluye enseñanza de manejo en carro automático. En caso que el usuario no tenga experiencia en el manejo de vehículos automáticos.  \n👉📒*D)* Explicación de luces y simulación de la revisión del vehículo\n\n🖊 El dinero se cancela en efectivo.\n\nEnvíeme el pdf de su cita para hacer la reservación",
-        "💡💡💡 Hola!!!\n\nEl paquete que deseas incluye una preparación qué consiste en:\n\n🌺 Recorrido visual explicativo de la ruta  \n🌺 Revisión y aprendizaje del sistema de luces que hace el evaluador previo al inicio de la prueba  \n🌺 Práctica en plantel de conos  \n\nPor favor elije el día y hora de la preparación en el siguiente enlace  \n\n👇🟨👇🟨👇🟨👇🟨👇  \n\nhttps://calendly.com/clasesdemanejo/clases",
+        "💡💡💡Hola!!!\n\nTenemos el siguiente paquete para alquilar su vehículo para prueba de manejo. Si no tiene cita para prueba le ayudamos con la programación de manera gratuita.\n\n🎯 *PAQUETE VIP* 🎯\n\n*VALOR:* 40 mil colones\n\n*VEHÍCULO:* Smart eléctrico o Spark automático gasolina (Dependiendo de la disponibilidad)\n\nIncluye:\n\n*PREVIO:*\n\n🚙 Clase de preparación que es para practicar conos, reversa, salida del plantel, direccionales y la manera correcta de hacer el alto en la salida del plantel  \n🚙 Recorrido explicativo de la ruta oficial que hace el evaluador.\n\n🇨🇷 *Notas a considerar:* 🇨🇷  \n👉📒*A)* La duración de la preparación es de 50 minutos en total  \n👉📒*B)* En este paquete se incluye enseñanza de manejo en carro automático. En caso que el usuario no tenga experiencia en el manejo de vehículos automáticos.  \n👉📒*C)* Explicación de luces y simulación de la revisión del vehículo\n\n🖊 El dinero se cancela en efectivo.\n\nEnvíeme el pdf de su cita para hacer la reservación",
         "💡💡💡 Por favor llenar el formulario de reservación para alquiler  \n\nEl sinpe móvil se hace al número 60023618  \n\nhttps://forms.gle/v8BURKwGxLSVbgA98"
       ],
       "reporte": "Contestaron mensaje sobre formulario de reservación",
       "recordatorio": {
         "segundos": 80,
         "mensajes": [
-          "📌 Pudo completar la información que se pide en\nambos formularios???"
+          "📌 Pudo completar la información que se pide en el\nformulario de reservación de vehículos???"
         ],
         "reporte": "Contestaron recordatorio por formulario de reservación",
         "recordatorio": {
           "segundos": 80,
           "mensajes": [
-            "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos y el de la preparación"
+            "📌 Hola!!!\nNo me dijo si pudo llenar el formulario de reservación\nde vehículos"
           ],
           "reporte": "Contestaron recordatorio por formulario de reservación"
         }

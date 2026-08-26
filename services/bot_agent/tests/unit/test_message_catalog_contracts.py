@@ -53,6 +53,15 @@ class MessageCatalogContractTests(unittest.TestCase):
             "El saludo de Alquiler.A1 no menciona el servicio de alquiler/reservación",
         )
 
+    def test_alquiler_liberia_keeps_only_the_vehicle_reservation_form(self):
+        messages = get_messages_for_node("GENERAL", "G13")
+        text = "\n".join(messages).lower()
+
+        self.assertNotIn("calendly.com", text)
+        self.assertNotIn("agendando vía formulario", text)
+        self.assertNotIn("ambos formularios", text)
+        self.assertIn("forms.gle/v8burkwgxlsvbga98", text)
+
     def test_each_flow_greeting_names_its_own_service(self):
         # Generalización del bug de A1: el saludo inicial de cada flujo debe
         # nombrar SU servicio. Si al editar el catálogo se pega el framing de
