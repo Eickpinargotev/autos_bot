@@ -873,6 +873,26 @@ form.linea button { flex: 0 0 auto; }
 .version-prompt-cabecera, .version-prompt-pie { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .version-prompt-cabecera > div { display: flex; align-items: center; gap: 8px; }
 .version-prompt p { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--suave); line-height: 1.45; }
+.categorias-fragmentos { display: flex; flex-direction: column; gap: 18px; }
+.categoria-fragmentos { padding: 0; overflow: hidden; }
+.categoria-fragmentos.archivada, .fila-fragmento.archivada { opacity: .62; }
+.categoria-fragmentos-cabecera { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px; border-bottom: 1px solid var(--borde); background: var(--elevado); }
+.categoria-fragmentos-cabecera h2, .categoria-fragmentos-cabecera p { margin: 0; }
+.categoria-fragmentos-cabecera code { color: var(--tenue); }
+.lista-fragmentos { display: flex; flex-direction: column; }
+.fila-fragmento { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 22px; border-bottom: 1px solid var(--borde-suave); cursor: pointer; }
+.fila-fragmento:last-child { border-bottom: 0; }
+.fila-fragmento:hover { background: var(--elevado); }
+.fila-fragmento p { margin: 8px 0 0; color: var(--suave); white-space: pre-line; }
+.referencia-fragmento { display: inline-block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.meta-fragmento { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; color: var(--tenue); font-size: 12px; }
+.editor-mensaje { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: start; margin-bottom: 12px; }
+.editor-mensaje textarea { width: 100%; resize: vertical; }
+.numero-mensaje { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px; background: var(--elevado); color: var(--tenue); font-size: 12px; }
+.controles-mensaje { display: flex; flex-direction: column; gap: 5px; }
+.asignaciones-fragmento { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 16px; margin-top: 18px; padding: 14px; border: 1px solid var(--borde); border-radius: var(--radio); }
+.asignaciones-fragmento legend { padding: 0 7px; color: var(--suave); font-size: 13px; }
+.asignaciones-fragmento label { margin: 0; }
 .burbuja.internal { align-self: center; max-width: 100%; width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--suave); background: var(--elevado); border-color: transparent; }
 .burbuja.internal summary { cursor: pointer; font-size: 11px; }
 .burbuja.internal pre { white-space: pre-wrap; font-size: 11px; margin: 6px 0 0; }
@@ -968,6 +988,11 @@ dl { margin: 0; }
   .rejilla-agentes { grid-template-columns: 1fr; }
   .panel-prompts { padding: 18px; }
   .intervalo-modal { grid-template-columns: 1fr; }
+  .categoria-fragmentos-cabecera, .fila-fragmento { align-items: stretch; flex-direction: column; }
+  .meta-fragmento { justify-content: flex-start; }
+  .asignaciones-fragmento { grid-template-columns: 1fr; }
+  .editor-mensaje { grid-template-columns: 28px minmax(0, 1fr); }
+  .controles-mensaje { grid-column: 2; flex-direction: row; }
   .lateral { transform: translateX(-100%); transition: transform .18s ease; }
   body.lateral-abierto .lateral { transform: none; }
   body.con-panel .contenedor { margin-left: 0; }

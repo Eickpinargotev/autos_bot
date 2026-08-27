@@ -21,6 +21,7 @@ def test_un_proyecto_nace_con_todos_los_playbooks_y_una_hora():
     assert "CUÁNDO NO ENVIAR" in recordatorio["contenido"]
     assert config["habilitado"] is True
     assert config["intervalo_minutos"] == 60
+    assert config["maximo_recordatorios"] == 2
 
 
 def test_los_historiales_son_independientes_y_rollback_crea_otra_version():
@@ -61,10 +62,11 @@ def test_guardar_el_mismo_texto_no_duplica_y_vacio_se_rechaza():
 
 def test_configuracion_convierte_horas_y_permite_apagar():
     fila = instrucciones.guardar_configuracion_recordatorios(
-        1, False, 2, "horas", "dueño"
+        1, False, 2, "horas", "dueño", maximo_recordatorios=1
     )
     assert fila["habilitado"] is False
     assert fila["intervalo_minutos"] == 120
+    assert fila["maximo_recordatorios"] == 1
 
 
 def test_la_pagina_muestra_una_tarjeta_y_modales_por_agente(sesion_cliente):
@@ -77,6 +79,8 @@ def test_la_pagina_muestra_una_tarjeta_y_modales_por_agente(sesion_cliente):
     assert "Editar agente: Alquiler" in html
     assert 'data-carga="/agente/prompts/supervisor/historial"' in html
     assert "Recordatorios automáticos activos" in html
+    assert 'name="maximo_recordatorios"' in html
+    assert "1 recordatorio" in html
     assert "CUÁNDO NO ENVIAR" in html
 
     historial = sesion_cliente.get("/agente/prompts/supervisor/historial").text
@@ -96,9 +100,20 @@ def test_las_rutas_guardan_prompt_y_configuracion(sesion_cliente):
 
     respuesta = sesion_cliente.post(
         "/agente/recordatorios/configuracion",
-        data={"cantidad": "20", "unidad": "minutos", "csrf": csrf},
+        data={
+            "cantidad": "20", "unidad": "minutos",
+            "maximo_recordatorios": "1", "csrf": csrf,
+        },
         follow_redirects=False,
     )
     assert respuesta.status_code == 303
     assert instrucciones.configuracion_recordatorios(1)["habilitado"] is False
     assert instrucciones.configuracion_recordatorios(1)["intervalo_minutos"] == 20
+    assert instrucciones.configuracion_recordatorios(1)["maximo_recordatorios"] == 1
+
+
+def test_rechaza_una_cantidad_de_recordatorios_fuera_del_limite():
+    with pytest.raises(ValueError, match="entre 1 y 5"):
+        instrucciones.guardar_configuracion_recordatorios(
+            1, True, 60, "minutos", "dueño", maximo_recordatorios=6
+        )

@@ -43,8 +43,8 @@ especialistas, mensajes fijos y prompts en `docs/diseno_especialistas.md`.
 
 Los agentes deciden; el **código** hace cumplir las reglas duras:
 
-- **Textos curados literales:** los precios, guiones y formularios viven en
-  `mensajes.json`. El agente los referencia con etiquetas (`[[frag:ID]]`) y el
+- **Textos curados literales:** los precios, guiones y formularios viven por proyecto en
+  Postgres y se editan en «Agente IA → Fragmentos» (`mensajes.json` es respaldo). El agente los referencia con etiquetas (`[[frag:ID]]`) y el
   sistema los expande al texto exacto — el modelo nunca los reescribe.
 - **Partición por área:** cada agente solo puede enviar los fragmentos de SU
   catálogo; una etiqueta ajena se descarta automáticamente.

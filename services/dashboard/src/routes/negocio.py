@@ -22,6 +22,7 @@ from src.services import (
     bot_interno,
     clientes_whatsapp,
     diagnostico_conversacion,
+    fragmentos,
     instrucciones,
     trazabilidad,
 )
@@ -40,6 +41,155 @@ def _proyecto_del_usuario(usuario: dict) -> dict:
 
 
 # --- Instrucciones comerciales del agente -----------------------------------
+
+@router.get("/agente/fragmentos")
+def fragmentos_del_agente(request: Request, usuario=Depends(security.requiere_negocio)):
+    proyecto = _proyecto_del_usuario(usuario)
+    abierto = request.query_params.get("abierto", "")
+    return render(
+        request, "fragmentos.html", usuario,
+        categorias=fragmentos.listar(proyecto["id"]),
+        agentes=fragmentos.AGENTES,
+        nombres_agentes=fragmentos.NOMBRES_AGENTES,
+        abierto=int(abierto) if abierto.isdigit() else None,
+    )
+
+
+@router.get("/agente/fragmentos/{fragmento_id}/detalle")
+def detalle_fragmento(request: Request, fragmento_id: int,
+                      usuario=Depends(security.requiere_negocio)):
+    proyecto = _proyecto_del_usuario(usuario)
+    fragmento = fragmentos.obtener(proyecto["id"], fragmento_id)
+    if not fragmento:
+        raise HTTPException(status_code=404, detail="Ese fragmento no existe")
+    return render_fragmento(
+        request, "_fragmento_detalle.html", usuario,
+        fragmento=fragmento, agentes=fragmentos.AGENTES,
+        nombres_agentes=fragmentos.NOMBRES_AGENTES,
+    )
+
+
+@router.get("/agente/fragmentos/{fragmento_id}/historial")
+def historial_fragmento(request: Request, fragmento_id: int,
+                        usuario=Depends(security.requiere_negocio)):
+    proyecto = _proyecto_del_usuario(usuario)
+    fragmento = fragmentos.obtener(proyecto["id"], fragmento_id)
+    if not fragmento:
+        raise HTTPException(status_code=404, detail="Ese fragmento no existe")
+    return render_fragmento(
+        request, "_fragmento_historial.html", usuario,
+        fragmento=fragmento, historial=fragmentos.historial(proyecto["id"], fragmento_id),
+    )
+
+
+@router.post("/agente/fragmentos/categorias")
+def crear_categoria_fragmento(request: Request, codigo: str = Form(""), nombre: str = Form(""),
+                              csrf: str = Form(""), usuario=Depends(security.requiere_negocio)):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        fragmentos.crear_categoria(proyecto["id"], codigo, nombre, usuario["usuario"])
+    except ValueError as exc:
+        return RedirectResponse(f"/agente/fragmentos?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/agente/fragmentos?aviso=Categoría+creada", status_code=303)
+
+
+@router.post("/agente/fragmentos/categorias/{categoria_id}")
+def editar_categoria_fragmento(request: Request, categoria_id: int, nombre: str = Form(""),
+                               csrf: str = Form(""), usuario=Depends(security.requiere_negocio)):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        if not fragmentos.renombrar_categoria(proyecto["id"], categoria_id, nombre):
+            raise ValueError("Esa categoría no existe.")
+    except ValueError as exc:
+        return RedirectResponse(f"/agente/fragmentos?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/agente/fragmentos?aviso=Categoría+actualizada", status_code=303)
+
+
+@router.post("/agente/fragmentos/categorias/{categoria_id}/fragmentos")
+def crear_fragmento(request: Request, categoria_id: int, codigo: str = Form(""),
+                    mensajes: list[str] = Form(...), reporte: str = Form(""),
+                    agentes: list[str] = Form(...), csrf: str = Form(""),
+                    usuario=Depends(security.requiere_negocio)):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        creado = fragmentos.crear_fragmento(
+            proyecto["id"], categoria_id, codigo, mensajes, reporte, agentes, usuario["usuario"]
+        )
+    except ValueError as exc:
+        return RedirectResponse(f"/agente/fragmentos?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/agente/fragmentos?abierto={creado['id']}&aviso=Fragmento+creado", status_code=303)
+
+
+@router.post("/agente/fragmentos/{fragmento_id}")
+def guardar_fragmento(request: Request, fragmento_id: int,
+                      mensajes: list[str] = Form(...), reporte: str = Form(""),
+                      agentes: list[str] = Form(default=[]), csrf: str = Form(""),
+                      usuario=Depends(security.requiere_negocio)):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        fragmentos.guardar_fragmento(
+            proyecto["id"], fragmento_id, mensajes, reporte, agentes, usuario["usuario"]
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            f"/agente/fragmentos?abierto={fragmento_id}&error={quote(str(exc))}", status_code=303
+        )
+    return RedirectResponse(
+        f"/agente/fragmentos?abierto={fragmento_id}&aviso=Nueva+versión+guardada", status_code=303
+    )
+
+
+@router.post("/agente/fragmentos/{fragmento_id}/versiones/{version}/restaurar")
+def restaurar_fragmento(request: Request, fragmento_id: int, version: int,
+                        csrf: str = Form(""), usuario=Depends(security.requiere_negocio)):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    if not fragmentos.restaurar(proyecto["id"], fragmento_id, version, usuario["usuario"]):
+        raise HTTPException(status_code=404, detail="Esa versión no pertenece a tu proyecto")
+    return RedirectResponse(
+        f"/agente/fragmentos?abierto={fragmento_id}&aviso=Versión+restaurada", status_code=303
+    )
+
+
+@router.post("/agente/fragmentos/{fragmento_id}/estado")
+def estado_fragmento(request: Request, fragmento_id: int, accion: str = Form(""),
+                     csrf: str = Form(""), usuario=Depends(security.requiere_negocio)):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        if accion == "reactivar":
+            fragmentos.reactivar_fragmento(proyecto["id"], fragmento_id)
+            aviso = "Fragmento reactivado"
+        else:
+            fragmentos.archivar_fragmento(proyecto["id"], fragmento_id)
+            aviso = "Fragmento archivado"
+    except ValueError as exc:
+        return RedirectResponse(
+            f"/agente/fragmentos?abierto={fragmento_id}&error={quote(str(exc))}", status_code=303
+        )
+    return RedirectResponse(f"/agente/fragmentos?aviso={quote(aviso)}", status_code=303)
+
+
+@router.post("/agente/fragmentos/categorias/{categoria_id}/estado")
+def archivar_categoria_fragmento(request: Request, categoria_id: int, csrf: str = Form(""),
+                                 accion: str = Form(""),
+                                 usuario=Depends(security.requiere_negocio)):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        if accion == "reactivar":
+            fragmentos.reactivar_categoria(proyecto["id"], categoria_id)
+            aviso = "Categoría reactivada"
+        else:
+            fragmentos.archivar_categoria(proyecto["id"], categoria_id)
+            aviso = "Categoría archivada"
+    except ValueError as exc:
+        return RedirectResponse(f"/agente/fragmentos?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/agente/fragmentos?aviso={quote(aviso)}", status_code=303)
 
 @router.get("/agente/instrucciones")
 def instrucciones_del_agente(request: Request, usuario=Depends(security.requiere_negocio)):
@@ -126,6 +276,7 @@ def guardar_configuracion_recordatorios(
     habilitado: str = Form(""),
     cantidad: str = Form(""),
     unidad: str = Form(""),
+    maximo_recordatorios: str = Form(""),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
@@ -133,7 +284,8 @@ def guardar_configuracion_recordatorios(
     proyecto = _proyecto_del_usuario(usuario)
     try:
         instrucciones.guardar_configuracion_recordatorios(
-            proyecto["id"], bool(habilitado), cantidad, unidad, usuario["usuario"]
+            proyecto["id"], bool(habilitado), cantidad, unidad, usuario["usuario"],
+            maximo_recordatorios=maximo_recordatorios,
         )
     except ValueError as exc:
         return RedirectResponse(f"/agente/instrucciones?error={quote(str(exc))}", status_code=303)

@@ -105,10 +105,10 @@ class Settings(BaseSettings):
     # como etiquetas [[frag:ID]] (no texto completo), así que cabe más contexto
     # sin inflar Redis ni el prompt.
     AGENT_HISTORY_LIMIT: int = 12
-    # El switch y el intervalo de los recordatorios viven por proyecto en
-    # Postgres (`proyecto_recordatorios`) y se administran desde el dashboard.
-    # El tope sí es una regla dura común: evita un bucle aunque el prompt cambie.
-    FOLLOWUP_MAX_REMINDERS: int = 2
+    # Switch, intervalo y cantidad viven por proyecto en `proyecto_recordatorios`.
+    # Este valor es solamente el límite duro de seguridad que ninguna cuenta
+    # puede superar aunque la base quede alterada manualmente.
+    FOLLOWUP_MAX_REMINDERS: int = 5
     RAG_EMBEDDING_MODEL: str = "text-embedding-3-small"
     RAG_SYNC_TTL_SECONDS: int = 300
     GOOGLE_DRIVE_IMAGE_DOWNLOAD_URL_TEMPLATE: str = "https://drive.google.com/uc?export=download&id={image_id}"

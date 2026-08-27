@@ -103,15 +103,15 @@ diseño de áreas en `docs/diseno_especialistas.md`):
    (`ConversationState.active_agent`) y guardrails **deterministas** en sus nodos:
    expansión de fragmentos literales y RAG, fragmentos ajenos rechazados por área,
    anti-bucle y anti ping-pong (defer), reporte + bloqueo en handoff, estado e historial.
-3. `application/fragment_catalog.py` — fragmentos literales derivados de `mensajes.json`,
-   particionados por área (`AREA_FRAGMENTS`; variantes `_1` resueltas por código).
+3. `application/fragment_catalog.py` — fragmentos literales por proyecto leídos de Postgres,
+   con permisos por agente y variantes; `mensajes.json` es el respaldo si la base falla.
 
 Reglas para cambios:
 - Para cambiar **el comportamiento del agente** (qué intención hace qué, playbooks), edita el
   **prompt** (`core/prompts.py`, siguiendo §6). Los efectos duros (bloqueos, reportes,
   anti-bucle, expansión) viven en `agent_pipeline.py`; no los muevas al prompt.
-- Para cambiar **el texto de los mensajes** del bot, edita `mensajes.json` (ver §7). No metas
-  texto de negocio en el código ni en los prompts.
+- Para cambiar **los fragmentos del agente**, usa «Agente IA → Fragmentos» en el panel. No metas
+  texto de negocio en el código ni en los prompts; `mensajes.json` es solo semilla y respaldo.
 
 El **dashboard** (`services/dashboard/src/`) sigue la misma separación:
 - `db/migrations/*.sql` — el esquema COMPLETO de Postgres, incluidas las tablas que
@@ -302,7 +302,7 @@ El reto del sistema es mezclar **mensajes curados del negocio** (plantillas lite
 **flujo conversacional** razonado. Reglas para que sea natural y no robótico:
 
 - **Separación de capas:**
-  - *Textos curados (deterministas):* viven en `mensajes.json` y se envían LITERALES vía
+  - *Textos curados (deterministas):* viven en el catálogo de fragmentos de Postgres y se envían LITERALES vía
     `[[frag:ID]]` (`fragment_catalog.py` los expande; el LLM NO los reinventa ni parafrasea).
     Todo dato variable (precios, links, requisitos) sale de un fragmento o del RAG.
   - *Capa conversacional (razonada con contexto):* el agente decide con el historial y el
@@ -329,7 +329,7 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
 `docs/gobernanza_de_prompts.md`; resumen ejecutable:
 
 1. **Confirma que el bug es del prompt** y no del router, del grafo, de
-   `mensajes.json` o de la normalización de salida (`_validated_decision`).
+   catálogo de fragmentos o de la normalización de salida (`_validated_decision`).
    La mayoría de "bugs de prompt" son de otra capa.
 2. **La regla nueva se escribe por intención/contexto, nunca por frase exacta**, y va
    dentro del bloque del caso correspondiente (secciones `═══`), respetando el orden
@@ -341,14 +341,13 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
    regresiones LLM no está verificado.
 5. **Un cambio conceptual por commit**, con justificación del caso real que falla.
 6. Nada de conocimiento de negocio variable (precios, links, horarios) en el prompt:
-   eso vive en el RAG o en `mensajes.json`. Y `temperature=0` en toda decisión.
+   eso vive en el RAG o en los fragmentos. Y `temperature=0` en toda decisión.
 
 ## 7. Restricciones duras (rompen si las ignoras)
 
-- **`mensajes.json` vive en la RAÍZ del repo.** Ambos compose lo montan como
-  `./mensajes.json:/mensajes.json:ro` en los 3 servicios. El loader es
-  `src/application/message_catalog.py` (busca primero `/mensajes.json`). No lo muevas ni
-  dupliques.
+- **`mensajes.json` vive en la RAÍZ del repo.** Ambos compose lo montan en el dashboard y
+  los 3 servicios del bot. Es la semilla y el respaldo de emergencia; la fuente vigente de
+  los fragmentos es Postgres. No lo muevas ni lo dupliques.
 - **WhatsApp (WasenderAPI) manda la media por URL, no como binario.** Telegram sube el
   archivo; Wasender recibe un enlace. Por eso `ChannelSenderRegistry` pregunta si el sender
   tiene `send_image_url_sync` antes de descargar nada. Los marcadores `Imagen=` y `Video=`

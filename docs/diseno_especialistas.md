@@ -3,7 +3,7 @@
 Diseño del agente conversacional sobre la arquitectura ya construida en la rama
 `modelo-unico` (supervisor/workers, routing pegajoso, fragmentos literales,
 guardrails deterministas — ver `docs/modelo_unico.md`). Fuentes de verdad:
-`mensajes.json` (textos curados), `docs/RAG.md` (base de conocimiento) y
+catálogo de fragmentos en Postgres (`mensajes.json` como respaldo), `docs/RAG.md` (base de conocimiento) y
 `docs/diagramas/diagrama_de_flujos_bot.mmd` (flujos originales del FSM).
 
 Objetivos del diseño (en este orden):
@@ -65,7 +65,7 @@ turno por especialista, no re-enrutar al área que defirió, máx. 2 áreas por 
 ## 2. Mensajes fijos (plantillas que se envían tal cual)
 
 Regla ya vigente que se conserva: **todo texto de negocio es un fragmento
-literal** de `mensajes.json`, referenciado como `[[frag:FLUJO.NODO]]` y expandido
+literal** del catálogo por proyecto, referenciado como `[[frag:FLUJO.NODO]]` y expandido
 por código sin reescribir (estilo y emojis intactos). El LLM solo redacta
 "pegamento" conversacional (≤ 25 palabras por mensaje) y los recordatorios
 inteligentes.

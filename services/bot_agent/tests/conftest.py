@@ -42,6 +42,7 @@ _MODULOS_CON_POSTGRES = (
     "src.infrastructure.repositories.postgres_user_repo",
     "src.infrastructure.repositories.bloqueos_permanentes_repository",
     "src.infrastructure.repositories.instrucciones_repository",
+    "src.infrastructure.repositories.fragmentos_repository",
     "src.infrastructure.evals.conversation_shots",
     "src.application.rag_service",
     "src.application.seguimiento_service",
@@ -147,6 +148,16 @@ def _aisla_servicios(monkeypatch):
         for funcion, retorno in _RETORNOS.items():
             if hasattr(modulo, funcion):
                 monkeypatch.setattr(modulo, funcion, MagicMock(return_value=retorno))
+
+    # Sin una base simulada completa, el catálogo debe ejercer el respaldo
+    # histórico de mensajes.json. Los casos específicos de Postgres repatchan
+    # estas tres fronteras con filas concretas.
+    fragmentos_repo = importlib.import_module(
+        "src.infrastructure.repositories.fragmentos_repository"
+    )
+    monkeypatch.setattr(fragmentos_repo, "permitidos", MagicMock(return_value=None))
+    monkeypatch.setattr(fragmentos_repo, "obtener", MagicMock(return_value=False))
+    monkeypatch.setattr(fragmentos_repo, "variante_de", MagicMock(return_value=None))
 
     with ambito_proyecto(1):
         yield

@@ -33,7 +33,7 @@ def _pending_state(level: int = 0) -> ConversationState:
 
 class SmartReminderHarness(ExitStack):
     def __init__(self, state: ConversationState, *, buffer_pending=False, blocked=False,
-                 followup=None, enabled=True, interval=60):
+                 followup=None, enabled=True, interval=60, max_reminders=2):
         super().__init__()
         self.state = state
         self.buffer_pending = buffer_pending
@@ -41,6 +41,7 @@ class SmartReminderHarness(ExitStack):
         self.followup_decision = followup or MagicMock(send=True, message="📌 Hola!!! ¿Pudo llenar el formulario?")
         self.enabled = enabled
         self.interval = interval
+        self.max_reminders = max_reminders
 
     def __enter__(self):
         super().__enter__()
@@ -52,7 +53,11 @@ class SmartReminderHarness(ExitStack):
         self.enter_context(patch.object(
             tasks.instrucciones_repository,
             "configuracion_recordatorios",
-            return_value={"habilitado": self.enabled, "intervalo_minutos": self.interval},
+            return_value={
+                "habilitado": self.enabled,
+                "intervalo_minutos": self.interval,
+                "maximo_recordatorios": self.max_reminders,
+            },
         ))
         self.set_mock = self.enter_context(patch.object(tasks.ConversationStateRepo, "set"))
         self.send_mock = self.enter_context(patch.object(tasks.ChannelSenderRegistry, "send"))
@@ -91,9 +96,15 @@ class SmartReminderGuardrailTests(unittest.TestCase):
         h.send_mock.assert_not_called()
 
     def test_skips_when_reminder_cap_reached(self):
-        with SmartReminderHarness(_pending_state(level=settings.FOLLOWUP_MAX_REMINDERS)) as h:
-            tasks.send_smart_reminder("whatsapp", "506", settings.FOLLOWUP_MAX_REMINDERS + 1)
+        with SmartReminderHarness(_pending_state(level=1), max_reminders=1) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 2)
         h.send_mock.assert_not_called()
+
+    def test_skips_already_queued_level_above_new_project_limit(self):
+        with SmartReminderHarness(_pending_state(), max_reminders=1) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 2)
+        h.send_mock.assert_not_called()
+        h.followup_cls.assert_not_called()
 
     def test_skips_stale_task_for_already_sent_level(self):
         with SmartReminderHarness(_pending_state(level=1)) as h:
@@ -155,9 +166,9 @@ class SmartReminderSendTests(unittest.TestCase):
         self.assertEqual(h.apply_async.call_args.kwargs["countdown"], 1200)
 
     def test_last_allowed_level_does_not_reschedule(self):
-        state = _pending_state(level=settings.FOLLOWUP_MAX_REMINDERS - 1)
-        with SmartReminderHarness(state) as h:
-            tasks.send_smart_reminder("whatsapp", "506", settings.FOLLOWUP_MAX_REMINDERS)
+        state = _pending_state()
+        with SmartReminderHarness(state, max_reminders=1) as h:
+            tasks.send_smart_reminder("whatsapp", "506", 1)
 
         h.send_mock.assert_called_once()
         h.apply_async.assert_not_called()

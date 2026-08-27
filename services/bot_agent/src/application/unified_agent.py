@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from openai import OpenAI
 
 from src.application import seguimiento_service
-from src.application.fragment_catalog import AREA_FRAGMENTS, SPECIALIST_AREAS, catalog_for_prompt
+from src.application.fragment_catalog import SPECIALIST_AREAS, catalog_for_prompt
 from src.core.config import settings
 from src.core.modelos import kwargs_de_decision
 from src.core.prompts import (
@@ -174,12 +174,13 @@ def _system_prompt_for(role: str) -> str:
     # inmediato. Solo la parte estable y protegida queda cacheada por rol.
     body = instrucciones_repository.activas(tipo) or body_base
     if role not in _system_prompt_cache:
-        catalog = catalog_for_prompt(AREA_FRAGMENTS.get(role, ()))
-        _system_prompt_cache[role] = (
-            f"{AGENT_COMMON_CONTRACT}\n{schema}"
-            f"\n\n═══ TU CATÁLOGO DE FRAGMENTOS ═══\n\n{catalog}"
-        )
-    return f"{_system_prompt_cache[role]}\n\n{body}"
+        _system_prompt_cache[role] = f"{AGENT_COMMON_CONTRACT}\n{schema}"
+    catalog = catalog_for_prompt(role=role)
+    return (
+        f"{_system_prompt_cache[role]}"
+        f"\n\n═══ TU CATÁLOGO DE FRAGMENTOS ═══\n\n{catalog}"
+        f"\n\n{body}"
+    )
 
 
 class _DecisionAgent:

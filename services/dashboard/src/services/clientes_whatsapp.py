@@ -174,7 +174,7 @@ def crear(nombre: str, numero: str = "") -> dict[str, Any]:
     if pool.consultar_uno("SELECT id FROM clientes_whatsapp WHERE slug = %s", (slug,)):
         raise ValueError(f"Ya existe un cliente con el identificador '{slug}'.")
 
-    return pool.consultar_uno(
+    creado = pool.consultar_uno(
         """
         INSERT INTO clientes_whatsapp (nombre, slug, webhook_token, numero)
         VALUES (%s, %s, %s, %s)
@@ -182,6 +182,12 @@ def crear(nombre: str, numero: str = "") -> dict[str, Any]:
         """,
         (nombre[:120], slug, _token_nuevo(), str(numero or "").strip()[:40]),
     )
+    # El proyecto nace con el mismo catálogo conversacional base que sus
+    # prompts; a partir de aquí cada cuenta lo versiona de forma independiente.
+    from src.services import fragmentos
+
+    fragmentos.sembrar_catalogos_faltantes(creado["id"])
+    return creado
 
 
 def rotar_token(cliente_id: int) -> dict[str, Any] | None:

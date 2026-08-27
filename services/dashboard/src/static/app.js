@@ -406,7 +406,7 @@
     // las bandas del conocimiento: la banda entera abre la edición, pero lleva
     // dentro el visto de activar/desactivar. Sin esto, pulsar el visto enviaría
     // su formulario Y abriría la ventana encima.
-    var control = elemento.closest("button, a, input, label, select, textarea");
+    var control = elemento.closest("button, a, input, label, select, textarea, [data-copiar]");
     if (control && control !== objetivo && objetivo.contains(control)) return false;
 
     var destino = document.getElementById(objetivo.getAttribute("data-abre"));
@@ -547,6 +547,48 @@
     if (!interruptor) return;
     var destino = document.getElementById(interruptor.getAttribute("data-revela"));
     if (destino) destino.hidden = !interruptor.checked;
+  });
+
+  /* Editor de cadenas de fragmentos. Los textareas comparten `name=mensajes`;
+     su orden en el DOM es exactamente el orden que recibe FastAPI. */
+  function renumerarMensajes(editor) {
+    if (!editor) return;
+    editor.querySelectorAll("[data-lista-mensajes] .editor-mensaje").forEach(function (fila, i) {
+      var numero = fila.querySelector(".numero-mensaje");
+      if (numero) numero.textContent = String(i + 1);
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    var boton = e.target.closest && e.target.closest(
+      "[data-mensaje-agregar], [data-mensaje-subir], [data-mensaje-bajar], [data-mensaje-quitar]"
+    );
+    if (!boton) return;
+    var editor = boton.closest("[data-editor-mensajes]");
+    var lista = editor && editor.querySelector("[data-lista-mensajes]");
+    if (!lista) return;
+    if (boton.hasAttribute("data-mensaje-agregar")) {
+      var fila = document.createElement("div");
+      fila.className = "editor-mensaje";
+      fila.innerHTML = '<span class="numero-mensaje"></span><textarea name="mensajes" rows="5" required></textarea>' +
+        '<span class="controles-mensaje"><button type="button" class="mini" data-mensaje-subir aria-label="Subir">↑</button>' +
+        '<button type="button" class="mini" data-mensaje-bajar aria-label="Bajar">↓</button>' +
+        '<button type="button" class="mini" data-mensaje-quitar aria-label="Quitar">×</button></span>';
+      lista.appendChild(fila);
+      fila.querySelector("textarea").focus();
+    } else {
+      var actual = boton.closest(".editor-mensaje");
+      if (!actual) return;
+      if (boton.hasAttribute("data-mensaje-subir") && actual.previousElementSibling) {
+        lista.insertBefore(actual, actual.previousElementSibling);
+      } else if (boton.hasAttribute("data-mensaje-bajar") && actual.nextElementSibling) {
+        lista.insertBefore(actual.nextElementSibling, actual);
+      } else if (boton.hasAttribute("data-mensaje-quitar")) {
+        if (lista.querySelectorAll(".editor-mensaje").length > 1) actual.remove();
+        else actual.querySelector("textarea").value = "";
+      }
+    }
+    renumerarMensajes(editor);
   });
 
   /* 7d. Contador de caracteres.

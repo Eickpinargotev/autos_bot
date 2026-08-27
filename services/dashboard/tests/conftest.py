@@ -81,6 +81,7 @@ from src.db.migrate import aplicar_migraciones  # noqa: E402
 
 # Orden importante: las hijas antes que las padres por las claves foráneas.
 _TABLAS = (
+    "fragmento_categorias",
     "diagnostico_descargas",
     "proyecto_tiempos_mensajes",
     "proyecto_recordatorios",
@@ -177,7 +178,8 @@ def _base_limpia():
         "preguntas_sin_respuesta", "rag_chunks", "uso_eventos",
         "plantillas_mensaje", "plantilla_partes", "palabras_clave",
         "palabra_clave_piezas", "envios_lote", "envios",
-        "incidencias",
+        "incidencias", "fragmento_categorias", "agente_fragmentos",
+        "agente_fragmento_versiones", "agente_fragmento_asignaciones",
     ):
         pool.ejecutar(
             f"ALTER TABLE {tabla} ALTER COLUMN proyecto_id SET DEFAULT {int(proyecto['id'])}"
@@ -188,6 +190,8 @@ def _base_limpia():
     # porque el bot depende de que existan: probar contra una tabla vacía no
     # reflejaría el sistema real.
     _sembrar_mensajes_del_negocio(proyecto["id"])
+    from src.services import fragmentos
+    fragmentos.sembrar_catalogos_faltantes(proyecto["id"])
     yield
 
 

@@ -87,9 +87,19 @@
               <option value="horas" {% if config_recordatorios.unidad == 'horas' %}selected{% endif %}>horas</option>
             </select>
           </label>
+          <label>
+            Cantidad máxima
+            <select name="maximo_recordatorios">
+              {% for numero in range(1, 6) %}
+              <option value="{{ numero }}" {% if config_recordatorios.maximo_recordatorios == numero %}selected{% endif %}>
+                {{ numero }} {{ 'recordatorio' if numero == 1 else 'recordatorios' }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
           <button class="mini" type="submit">Guardar configuración</button>
         </div>
-        <p class="sub">Se usa el mismo intervalo para un máximo de dos recordatorios.</p>
+        <p class="sub">Si el cliente responde, cualquier recordatorio pendiente se cancela.</p>
       </form>
       {% endif %}
 

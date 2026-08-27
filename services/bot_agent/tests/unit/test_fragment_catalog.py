@@ -108,6 +108,37 @@ class FragmentCatalogTests(unittest.TestCase):
         self.assertNotIn("[[frag:DICTAMEN.D1_1]]", catalog)
         self.assertNotIn("[[frag:KEYWORD.T1]]", catalog)
 
+    def test_project_database_overrides_json_and_permissions(self):
+        row = {
+            "fragment_id": "QUEJA.Q1",
+            "mensajes": ["Texto editado desde el panel"],
+            "reporte": "Revisar la respuesta",
+            "retomar": "",
+        }
+        with patch(
+            "src.infrastructure.repositories.fragmentos_repository.obtener",
+            return_value=row,
+        ), patch(
+            "src.infrastructure.repositories.fragmentos_repository.permitidos",
+            return_value=["QUEJA.Q1"],
+        ):
+            frag = get_fragment("QUEJA.Q1")
+            self.assertEqual(frag.messages, ["Texto editado desde el panel"])
+            self.assertEqual(allowed_fragments("SUPERVISOR"), {"QUEJA.Q1"})
+            self.assertIn("Texto editado desde el panel", catalog_for_prompt(role="SUPERVISOR"))
+
+    def test_database_missing_row_is_authoritative_but_failure_falls_back(self):
+        with patch(
+            "src.infrastructure.repositories.fragmentos_repository.obtener",
+            return_value=None,
+        ):
+            self.assertIsNone(get_fragment("QUEJA.Q1"))
+        with patch(
+            "src.infrastructure.repositories.fragmentos_repository.obtener",
+            return_value=False,
+        ):
+            self.assertIsNotNone(get_fragment("QUEJA.Q1"))
+
 
 if __name__ == "__main__":
     unittest.main()

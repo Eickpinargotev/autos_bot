@@ -40,7 +40,7 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 .
 ├── docker-compose.yml          # Despliegue en la NUBE (EasyPanel) — archivo por defecto
 ├── docker-compose.local.yml    # Despliegue LOCAL (puertos expuestos, hot-reload del código)
-├── mensajes.json               # Catálogo de mensajes del bot (montado en /mensajes.json)
+├── mensajes.json               # Semilla y respaldo del catálogo editable
 ├── services/
 │   └── bot_agent/              # Servicio del bot (Dockerfile, src/, tests/)
 ├── data/                       # Estado persistente local (qdrant)
@@ -58,10 +58,9 @@ El código del bot sigue una organización por capas en `services/bot_agent/src/
 └── _local/                     # Notas, scripts scratch y overrides locales (ignorado por git)
 ```
 
-> **Nota sobre `mensajes.json`:** es el catálogo de mensajes que el bot carga al iniciar.
-> Vive en la raíz y ambos compose lo montan como `./mensajes.json:/mensajes.json:ro` en los
-> tres servicios. El loader (`src/application/message_catalog.py`) lo busca primero en
-> `/mensajes.json` (la ruta montada).
+> **Nota sobre los fragmentos:** Postgres es la fuente vigente por proyecto y se administra en
+> **Agente IA → Fragmentos**. `mensajes.json` vive en la raíz como semilla inicial y respaldo si
+> la base no está disponible; ambos compose lo montan en el dashboard y los servicios del bot.
 
 ## Cómo ejecutar
 
@@ -273,8 +272,8 @@ paralelo**.
   `--concurrency` en ambos compose.
 - **El techo real** lo pone el **rate limit de OpenAI**, no la CPU ni Redis.
 
-> **Thread-safety:** el código es seguro para el pool de hilos: los objetos compartidos
-> son de solo lectura (catálogo de `mensajes.json`), clientes thread-safe (`redis`,
+> **Thread-safety:** el código es seguro para el pool de hilos: el catálogo se lee por
+> proyecto desde Postgres, los clientes compartidos son thread-safe (`redis`,
 > `openai`) o aislados por hilo (el trazado de *shots* usa `contextvars`). El grafo se
 > invoca con estado por llamada y las conexiones a Postgres se crean por uso.
 

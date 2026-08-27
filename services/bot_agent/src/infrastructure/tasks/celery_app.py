@@ -592,6 +592,13 @@ def send_smart_reminder(
     config_recordatorios = instrucciones_repository.configuracion_recordatorios()
     if not config_recordatorios.get("habilitado", True):
         return
+    maximo_recordatorios = max(
+        1,
+        min(
+            int(config_recordatorios.get("maximo_recordatorios") or 2),
+            settings.FOLLOWUP_MAX_REMINDERS,
+        ),
+    )
 
     # El usuario pudo responder justo cuando vence el recordatorio: su mensaje
     # sigue en el buffer (aún sin procesar), pero ya respondió. No enviamos el
@@ -606,7 +613,9 @@ def send_smart_reminder(
     state = ConversationStateRepo.get(channel, user_id)
     if not state.awaiting_reply or not state.last_question:
         return
-    if state.reminder_level >= settings.FOLLOWUP_MAX_REMINDERS:
+    if state.reminder_level >= maximo_recordatorios:
+        return
+    if level > maximo_recordatorios:
         return
     if state.reminder_level >= level:
         return  # Tarea vieja: este nivel ya se envió.
@@ -698,7 +707,7 @@ def send_smart_reminder(
     ][-settings.AGENT_HISTORY_LIMIT:]
     ConversationStateRepo.set(channel, user_id, state)
 
-    if level < settings.FOLLOWUP_MAX_REMINDERS:
+    if level < maximo_recordatorios:
         minutos = max(1, min(int(config_recordatorios.get("intervalo_minutos") or 60), 20160))
         plan = planificar_recordatorio(minutos * 60)
         task = send_smart_reminder.apply_async(

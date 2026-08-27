@@ -50,7 +50,7 @@ Los flujos NO se perdieron; cambiaron de forma:
 | Antes (FSM) | Ahora (modelo único) |
 | ----------- | -------------------- |
 | Nodos y aristas en `flow_router.py` | **Playbooks** por intención en `UNIFIED_AGENT_PROMPT` (`core/prompts.py`): qué datos necesita cada proceso y qué fragmento entregar en cada situación. |
-| Textos curados por nodo en `mensajes.json` | Igual: `mensajes.json` sigue siendo la única fuente de los textos. El agente los referencia como **fragmentos literales** `[[frag:FLUJO.NODO]]` y `fragment_catalog.py` los expande sin reescribirlos (estilo y emojis intactos). |
+| Textos curados por nodo | Viven por proyecto en Postgres y se administran en **Agente IA → Fragmentos**. El agente los referencia como **fragmentos literales** `[[frag:FLUJO.NODO]]` y `fragment_catalog.py` los expande sin reescribirlos; `mensajes.json` queda como semilla y respaldo. |
 | `reporte` del nodo terminal | El fragmento conserva su metadato `reporte`: al enviarse queda `pending_report` y la siguiente respuesta del cliente se deriva al equipo (reporte + bloqueo), salvo que sea solo una duda informativa. |
 | Recordatorios fijos por nodo | **Recordatorios inteligentes** (ver abajo). |
 | Docs históricos (`tabla_decision_agente.md`, `reglas_agente_recepcion.md`) | Eliminados (quedan en el historial de git); el diseño vigente está en `docs/diseno_especialistas.md`. |

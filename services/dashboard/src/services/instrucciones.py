@@ -167,6 +167,11 @@ def guardar(
         raise ValueError("El prompt no puede estar vacío.")
     if len(contenido) > LIMITE:
         raise ValueError(f"El prompt no puede superar {LIMITE} caracteres.")
+    # Una etiqueta inválida terminaría descartada por el guardrail del bot y el
+    # cliente recibiría una respuesta vacía. Se detecta mientras se edita.
+    from src.services import fragmentos
+
+    fragmentos.validar_referencias_prompt(proyecto_id, tipo, contenido)
     actual = activa(proyecto_id, tipo)
     if actual.get("version") and str(actual.get("contenido") or "").strip() == contenido:
         return {**actual, "sin_cambios": True}
@@ -227,27 +232,56 @@ def configuracion_recordatorios(proyecto_id: int) -> dict[str, Any]:
     return pool.consultar_uno(
         "SELECT * FROM proyecto_recordatorios WHERE proyecto_id = %s",
         (int(proyecto_id),),
-    ) or {"proyecto_id": int(proyecto_id), "habilitado": True, "intervalo_minutos": 60}
+    ) or {
+        "proyecto_id": int(proyecto_id),
+        "habilitado": True,
+        "intervalo_minutos": 60,
+        "maximo_recordatorios": 2,
+    }
 
 
 def guardar_configuracion_recordatorios(
-    proyecto_id: int, habilitado: bool, cantidad: int, unidad: str, usuario: str
+    proyecto_id: int,
+    habilitado: bool,
+    cantidad: int,
+    unidad: str,
+    usuario: str,
+    maximo_recordatorios: int | str | None = None,
 ) -> dict[str, Any]:
     minutos = validar_configuracion_recordatorios(cantidad, unidad)
+    maximo = (
+        validar_maximo_recordatorios(maximo_recordatorios)
+        if maximo_recordatorios not in (None, "") else None
+    )
     return pool.consultar_uno(
         """
         INSERT INTO proyecto_recordatorios
-            (proyecto_id, habilitado, intervalo_minutos, actualizado_por, actualizado_en)
-        VALUES (%s, %s, %s, %s, NOW())
+            (proyecto_id, habilitado, intervalo_minutos, maximo_recordatorios,
+             actualizado_por, actualizado_en)
+        VALUES (%s, %s, %s, COALESCE(%s, 2), %s, NOW())
         ON CONFLICT (proyecto_id) DO UPDATE SET
             habilitado = EXCLUDED.habilitado,
             intervalo_minutos = EXCLUDED.intervalo_minutos,
+            maximo_recordatorios = COALESCE(%s, proyecto_recordatorios.maximo_recordatorios),
             actualizado_por = EXCLUDED.actualizado_por,
             actualizado_en = NOW()
         RETURNING *
         """,
-        (int(proyecto_id), bool(habilitado), minutos, str(usuario)[:120]),
+        (
+            int(proyecto_id), bool(habilitado), minutos, maximo,
+            str(usuario)[:120], maximo,
+        ),
     )
+
+
+def validar_maximo_recordatorios(valor: int | str) -> int:
+    try:
+        maximo = int(valor)
+    except (TypeError, ValueError):
+        raise ValueError("La cantidad de recordatorios tiene que ser un número entero.") from None
+    if maximo < 1 or maximo > 5:
+        raise ValueError("La cantidad de recordatorios debe estar entre 1 y 5.")
+    return maximo
 
 
 def validar_configuracion_recordatorios(cantidad: int, unidad: str) -> int:

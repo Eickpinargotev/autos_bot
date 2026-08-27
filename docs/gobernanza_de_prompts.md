@@ -55,10 +55,10 @@ preservarlos:
    código (`_validated_decision`): etiqueta RAG + consulta juntas, defer nunca
    hacia sí mismo, mensajes vacíos → aclaración segura. Si cambias el esquema,
    cambia en el mismo commit el json_schema, el validador y sus tests.
-6. **Genéricos respecto al catálogo.** Los prompts no mencionan contenido de
-   `mensajes.json` (precios, "casco", "programar cita"…). Lo vigila
+6. **Genéricos respecto al catálogo.** Los prompts no copian contenido de los
+   fragmentos (precios, "casco", "programar cita"…); solo usan su referencia. Lo vigila
    `tests/unit/test_prompt_contracts.py`. El conocimiento de negocio vive en el RAG
-   y en `mensajes.json`, no en los prompts.
+   y en el catálogo de fragmentos, no en los prompts.
 7. **Estados imposibles se bloquean en código, no solo en el prompt.** Ejemplos
    vigentes: un especialista no puede enviar fragmentos ajenos (partición en
    `agent_pipeline`), `route`/`defer` con target inválido se descartan
@@ -80,8 +80,8 @@ Checklist a seguir **en orden**; si un paso falla, no se avanza:
    qué el comportamiento actual es incorrecto, y por qué la solución es una
    instrucción general y no una regla por frase.
 2. **¿Es de verdad el prompt?** Antes de editar, confirma que el problema no es de:
-   - texto del bot → `mensajes.json`
-   - partición de fragmentos por área → `fragment_catalog.py` (`AREA_FRAGMENTS`)
+   - texto literal del bot → «Agente IA → Fragmentos»
+   - permisos de fragmentos por agente → asignaciones del catálogo
    - cableado del grafo / guardrails (anti-bucle, defer, reporte) → `agent_pipeline.py`
    - normalización de salida → `_validated_decision` (`unified_agent.py`)
    La mayoría de los "bugs de prompt" son de otra capa.

@@ -32,17 +32,20 @@ def activas(tipo: str = "principal") -> str:
 def configuracion_recordatorios() -> dict:
     proyecto_id = proyecto_actual()
     if not proyecto_id:
-        return {"habilitado": True, "intervalo_minutos": 60}
+        return {"habilitado": True, "intervalo_minutos": 60, "maximo_recordatorios": 2}
     try:
         fila = consultar_uno(
-            "SELECT habilitado, intervalo_minutos FROM proyecto_recordatorios "
+            "SELECT habilitado, intervalo_minutos, maximo_recordatorios "
+            "FROM proyecto_recordatorios "
             "WHERE proyecto_id = %s",
             (proyecto_id,),
         )
     except Exception as exc:
         print(f"Error leyendo configuración de recordatorios: {exc}")
-        return {"habilitado": True, "intervalo_minutos": 60}
-    return fila or {"habilitado": True, "intervalo_minutos": 60}
+        return {"habilitado": True, "intervalo_minutos": 60, "maximo_recordatorios": 2}
+    return fila or {
+        "habilitado": True, "intervalo_minutos": 60, "maximo_recordatorios": 2
+    }
 
 
 def configuracion_tiempos_mensajes() -> dict:

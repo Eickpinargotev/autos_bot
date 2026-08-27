@@ -19,7 +19,7 @@ from src.core.config import settings
 from src.core.plantillas import plantillas
 from src.db.migrate import aplicar_migraciones
 from src.routes import admin, auth, catalogo, envios, negocio, panel, registros, tiempo_real
-from src.services import usuarios
+from src.services import fragmentos, usuarios
 
 @asynccontextmanager
 async def arranque(app: FastAPI):
@@ -32,6 +32,7 @@ async def arranque(app: FastAPI):
         )
 
     aplicar_migraciones()
+    fragmentos.sembrar_catalogos_faltantes()
 
     novedad = usuarios.sincronizar_admin()
     if novedad:

@@ -105,6 +105,8 @@ services:
       - easypanel
     depends_on:
       - postgres
+    volumes:
+      - ./mensajes.json:/mensajes.json:ro
     restart: unless-stopped
 
   bot_agent:

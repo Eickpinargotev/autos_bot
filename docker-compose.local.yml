@@ -132,6 +132,7 @@ services:
       - "${DASHBOARD_PORT:-}:8020"
     volumes:
       - ./services/dashboard:/app
+      - ./mensajes.json:/mensajes.json:ro
     depends_on:
       - postgres
     restart: unless-stopped

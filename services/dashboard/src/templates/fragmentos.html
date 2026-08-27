@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block titulo %}Fragmentos de los agentes{% endblock %}
+
+{% block contenido %}
+<div class="titulo-con-acciones">
+  <div>
+    <h1>Fragmentos</h1>
+    <p class="sub" style="margin-bottom:0">
+      Son cadenas literales que los agentes envían usando referencias como
+      <code>[[frag:QUEJA.Q1]]</code>. El identificador no cambia; cada edición crea una versión recuperable.
+    </p>
+  </div>
+  <button class="boton primario mini" type="button" data-abre="nueva-categoria">Nueva categoría</button>
+</div>
+
+<dialog class="flotante" id="nueva-categoria">
+  <div class="cabecera"><h2>Nueva categoría</h2><button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button></div>
+  <div class="cuerpo">
+    <form method="post" action="/agente/fragmentos/categorias">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="categoria-codigo">Código técnico</label>
+      <input id="categoria-codigo" name="codigo" required pattern="[A-Za-z0-9_]+" placeholder="QUEJA" style="width:100%">
+      <p class="sub">Forma la primera parte de la referencia y queda fijo después de crearla.</p>
+      <label for="categoria-nombre">Nombre visible</label>
+      <input id="categoria-nombre" name="nombre" required placeholder="Quejas" style="width:100%">
+      <div class="linea" style="justify-content:flex-end;margin-top:18px"><button type="button" class="mini" data-cierra>Cancelar</button><button class="primario">Crear</button></div>
+    </form>
+  </div>
+</dialog>
+
+<div class="categorias-fragmentos">
+{% for categoria in categorias %}
+  <section class="panel categoria-fragmentos {{ '' if categoria.activa else 'archivada' }}">
+    <header class="categoria-fragmentos-cabecera">
+      <div>
+        <div class="linea"><h2>{{ categoria.nombre }}</h2><code>{{ categoria.codigo }}</code>{% if not categoria.activa %}<span class="pastilla">Archivada</span>{% endif %}</div>
+        <p class="sub">{{ categoria.fragmentos | length }} fragmento{{ '' if categoria.fragmentos | length == 1 else 's' }}</p>
+      </div>
+      <div class="linea">
+        {% if categoria.activa %}
+        <button class="mini" type="button" data-abre="editar-categoria-{{ categoria.id }}">Editar categoría</button>
+        <button class="boton primario mini" type="button" data-abre="nuevo-fragmento-{{ categoria.id }}">Nuevo fragmento</button>
+        {% else %}
+        <form method="post" action="/agente/fragmentos/categorias/{{ categoria.id }}/estado"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="accion" value="reactivar"><button class="mini">Reactivar categoría</button></form>
+        {% endif %}
+      </div>
+    </header>
+
+    <div class="lista-fragmentos">
+    {% for fragmento in categoria.fragmentos %}
+      <article class="fila-fragmento {{ '' if fragmento.activo and categoria.activa else 'archivada' }}"
+               data-abre="fragmento-{{ fragmento.id }}" data-carga="/agente/fragmentos/{{ fragmento.id }}/detalle" data-carga-en="fragmento-{{ fragmento.id }}-contenido" role="button" tabindex="0">
+        <div>
+          <span class="credencial referencia-fragmento" data-copiar>[[frag:{{ fragmento.fragment_id }}]]</span>
+          {% if fragmento.variante_de_id %}<span class="pastilla">Variante automática</span>{% endif %}
+          <p>{{ fragmento.mensajes[0] | truncate(130) if fragmento.mensajes else 'Sin mensajes' }}</p>
+        </div>
+        <div class="meta-fragmento">
+          <span>v{{ fragmento.version }}</span>
+          <span>{{ fragmento.mensajes | length }} mensaje{{ '' if fragmento.mensajes | length == 1 else 's' }}</span>
+          {% for agente in fragmento.agentes %}<span class="pastilla">{{ nombres_agentes[agente] }}</span>{% endfor %}
+        </div>
+      </article>
+    {% else %}<p class="vacio">Todavía no hay fragmentos en esta categoría.</p>{% endfor %}
+    </div>
+  </section>
+
+  <dialog class="flotante" id="editar-categoria-{{ categoria.id }}">
+    <div class="cabecera"><h2>Editar {{ categoria.codigo }}</h2><button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button></div>
+    <div class="cuerpo">
+      <form method="post" action="/agente/fragmentos/categorias/{{ categoria.id }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label>Identificador técnico</label><input value="{{ categoria.codigo }}" disabled style="width:100%">
+        <label for="nombre-categoria-{{ categoria.id }}" style="margin-top:14px">Nombre visible</label>
+        <input id="nombre-categoria-{{ categoria.id }}" name="nombre" value="{{ categoria.nombre }}" required style="width:100%">
+        <div class="linea" style="justify-content:space-between;margin-top:18px">
+          <button type="button" class="mini peligro" data-abre="archivar-categoria-{{ categoria.id }}">Archivar</button>
+          <span class="linea"><button type="button" class="mini" data-cierra>Cancelar</button><button class="primario">Guardar</button></span>
+        </div>
+      </form>
+    </div>
+  </dialog>
+  <dialog class="flotante" id="archivar-categoria-{{ categoria.id }}">
+    <div class="cabecera"><h2>¿Archivar {{ categoria.codigo }}?</h2><button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button></div>
+    <div class="cuerpo"><p>También desactivará sus fragmentos. Se rechazará si un prompt activo todavía los usa.</p>
+      <form method="post" action="/agente/fragmentos/categorias/{{ categoria.id }}/estado" class="linea" style="justify-content:flex-end"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="accion" value="archivar"><button type="button" class="mini" data-cierra>Cancelar</button><button class="primario">Archivar</button></form>
+    </div>
+  </dialog>
+
+  <dialog class="flotante ancha" id="nuevo-fragmento-{{ categoria.id }}">
+    <div class="cabecera"><div><h2>Nuevo fragmento en {{ categoria.codigo }}</h2><p class="sub">El identificador técnico quedará fijo.</p></div><button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button></div>
+    <div class="cuerpo">
+      <form method="post" action="/agente/fragmentos/categorias/{{ categoria.id }}/fragmentos" data-editor-mensajes>
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="codigo-fragmento-{{ categoria.id }}">Código</label>
+        <div class="linea"><span class="credencial">{{ categoria.codigo }}.</span><input id="codigo-fragmento-{{ categoria.id }}" name="codigo" required pattern="[A-Za-z0-9_]+" placeholder="Q2" style="flex:1"></div>
+        <h3>Mensajes que salen, en orden</h3>
+        <div data-lista-mensajes><div class="editor-mensaje"><span class="numero-mensaje">1</span><textarea name="mensajes" rows="5" required></textarea><span class="controles-mensaje"><button type="button" class="mini" data-mensaje-subir aria-label="Subir">↑</button><button type="button" class="mini" data-mensaje-bajar aria-label="Bajar">↓</button><button type="button" class="mini" data-mensaje-quitar aria-label="Quitar">×</button></span></div></div>
+        <button type="button" class="mini" data-mensaje-agregar>Añadir mensaje</button>
+        <label for="reporte-nuevo-{{ categoria.id }}" style="margin-top:18px">Reporte al responder (opcional)</label>
+        <textarea id="reporte-nuevo-{{ categoria.id }}" name="reporte" rows="3" style="width:100%"></textarea>
+        <p class="sub">Si tiene texto, la siguiente respuesta del cliente queda pendiente de revisión humana.</p>
+        <fieldset class="asignaciones-fragmento"><legend>Agentes autorizados</legend>{% for agente in agentes %}<label><input type="checkbox" name="agentes" value="{{ agente }}"> {{ nombres_agentes[agente] }}</label>{% endfor %}</fieldset>
+        <div class="linea" style="justify-content:flex-end;margin-top:18px"><button type="button" class="mini" data-cierra>Cancelar</button><button class="primario">Crear fragmento</button></div>
+      </form>
+    </div>
+  </dialog>
+{% endfor %}
+</div>
+
+{% for categoria in categorias %}{% for fragmento in categoria.fragmentos %}
+<dialog class="flotante ancha" id="fragmento-{{ fragmento.id }}" data-carga-inicial="/agente/fragmentos/{{ fragmento.id }}/detalle" data-carga-en="fragmento-{{ fragmento.id }}-contenido" {{ 'data-abrir-al-cargar' if abierto == fragmento.id }}>
+  <div id="fragmento-{{ fragmento.id }}-contenido"><p class="sub">Cargando…</p></div>
+</dialog>
+{% endfor %}{% endfor %}
+{% endblock %}

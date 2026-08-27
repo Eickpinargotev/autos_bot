@@ -108,6 +108,7 @@ SECCIONES_NEGOCIO: list[dict[str, Any]] = [
         "titulo": "Agente IA",
         "paginas": [
             {"etiqueta": "Prompts", "url": "/agente/instrucciones", "icono": "ajustes"},
+            {"etiqueta": "Fragmentos", "url": "/agente/fragmentos", "icono": "etiqueta"},
             {"etiqueta": "Conocimiento", "url": "/conocimiento", "icono": "libro"},
             {"etiqueta": "Preguntas", "url": "/preguntas", "icono": "pregunta"},
         ],

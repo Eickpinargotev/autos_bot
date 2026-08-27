@@ -56,6 +56,11 @@ SPECIALIST_AREAS = ("GENERAL", "CURSO_TEORICO", "ALQUILER", "CLASES", "DICTAMEN"
 
 def allowed_fragments(role: str) -> set[str]:
     """Fragmentos que el agente `role` (SUPERVISOR o área) puede enviar."""
+    from src.infrastructure.repositories import fragmentos_repository
+
+    desde_panel = fragmentos_repository.permitidos(role)
+    if desde_panel is not None:
+        return set(desde_panel)
     return set(AREA_FRAGMENTS.get(role, ()))
 
 
@@ -87,13 +92,28 @@ _fragments = _build_fragments()
 
 
 def get_fragment(fragment_id: str) -> Fragment | None:
+    from src.infrastructure.repositories import fragmentos_repository
+
+    desde_panel = fragmentos_repository.obtener(fragment_id)
+    if isinstance(desde_panel, dict):
+        return Fragment(
+            fragment_id=str(desde_panel["fragment_id"]),
+            messages=list(desde_panel.get("mensajes") or []),
+            report=str(desde_panel.get("reporte") or "").strip(),
+            retake=str(desde_panel.get("retomar") or "").strip(),
+        )
+    if desde_panel is None:
+        return None
     return _fragments.get(fragment_id)
 
 
 def resolve_variant(fragment_id: str, user_id: str, channel: Channel | str) -> str:
     """Cambia al fragmento variante cuando el cliente está en el registro de keywords."""
-    variant = _KEYWORD_VARIANTS.get(fragment_id)
-    if not variant or variant not in _fragments:
+    from src.infrastructure.repositories import fragmentos_repository
+
+    desde_panel = fragmentos_repository.variante_de(fragment_id)
+    variant = _KEYWORD_VARIANTS.get(fragment_id) if desde_panel is None else desde_panel
+    if not variant or not get_fragment(variant):
         return fragment_id
     from src.infrastructure.repositories.keyword_registry_repository import KeywordRegistryRepository
 
@@ -110,7 +130,7 @@ def visible_fragment_ids() -> list[str]:
     return [fid for fid in _fragments if fid not in _VARIANT_IDS]
 
 
-def catalog_for_prompt(fragment_ids: list[str] | tuple[str, ...] | None = None) -> str:
+def catalog_for_prompt(fragment_ids: list[str] | tuple[str, ...] | None = None, role: str = "") -> str:
     """Render del catálogo para el mensaje system de un agente.
 
     Incluye el texto LITERAL de cada fragmento para que el modelo sepa
@@ -118,10 +138,11 @@ def catalog_for_prompt(fragment_ids: list[str] | tuple[str, ...] | None = None) 
     Si se pasa `fragment_ids`, solo se renderiza esa partición (el catálogo
     del área). Es contenido estable entre llamadas, así que cachea bien.
     """
-    ids = list(fragment_ids) if fragment_ids is not None else visible_fragment_ids()
+    ids = (sorted(allowed_fragments(role)) if role else
+           list(fragment_ids) if fragment_ids is not None else visible_fragment_ids())
     blocks: list[str] = []
     for fid in ids:
-        frag = _fragments.get(fid)
+        frag = get_fragment(fid)
         if frag is None:
             continue
         if not frag.messages:
