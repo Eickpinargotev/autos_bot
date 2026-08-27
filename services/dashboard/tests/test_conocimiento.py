@@ -146,10 +146,13 @@ def test_la_banda_entera_abre_la_edicion(sesion_cliente):
 def test_borrar_un_chunk_pide_confirmacion(sesion_cliente):
     chunk = trazabilidad.crear_chunk(1, "Cuesta 45.000 colones.")
 
-    cuerpo = sesion_cliente.get("/conocimiento").text
+    listado = sesion_cliente.get("/conocimiento").text
+    assert f'data-carga="/conocimiento/{chunk["id"]}/detalle"' in listado
+
+    cuerpo = sesion_cliente.get(f"/conocimiento/{chunk['id']}/detalle").text
 
     assert f'id="borrar-chunk-{chunk["id"]}"' in cuerpo
-    assert "¿Estás seguro de que quieres eliminar este chunk de información?" in cuerpo
+    assert "no se puede deshacer" in cuerpo
 
 
 def test_desactivar_un_chunk_no_lo_borra(sesion_cliente):

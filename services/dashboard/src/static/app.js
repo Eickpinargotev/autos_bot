@@ -434,7 +434,10 @@
     var abre = e.target.closest && e.target.closest("[data-abre][tabindex]");
     if (!abre || abre !== e.target) return;
     e.preventDefault();
-    abrirDesde(e.target, abre);
+    // click() recorre también los comportamientos de carga diferida asociados
+    // al elemento; llamar solo abrirDesde() abría una ventana vacía al usar
+    // teclado en Mensajes.
+    abre.click();
   });
 
   /* 7b. Ventanas que se abren solas al cargar.
@@ -448,6 +451,7 @@
         debajo, igual que si las hubieras abierto tú. */
   document.querySelectorAll("dialog[data-abrir-al-cargar]").forEach(function (dialogo) {
     if (dialogo.showModal) dialogo.showModal();
+    if (dialogo.hasAttribute("data-carga-inicial")) cargarFragmento(dialogo);
   });
 
   /* 7c. Un switch que enseña u oculta lo que depende de él.
@@ -505,24 +509,44 @@
         Lo usan las sesiones de envío: el detalle de una tanda (qué número falló
         y por qué) se pide al ABRIR su ventana, no al pintar la lista. Con veinte
         sesiones serían veinte consultas en cada refresco de las barras. */
-  document.addEventListener("click", function (e) {
-    var disparador = e.target.closest && e.target.closest("[data-carga]");
-    if (!disparador) return;
+  function cargarFragmento(disparador) {
     var destino = document.getElementById(disparador.getAttribute("data-carga-en"));
-    if (!destino) return;
+    if (!destino) return false;
 
     // Si es un enlace (el «ver solo los que fallaron» de dentro de la ventana),
     // se carga en su sitio en vez de navegar fuera.
-    e.preventDefault();
     destino.innerHTML = '<p class="sub">Cargando…</p>';
-    fetch(disparador.getAttribute("data-carga"), { headers: { "X-Fragmento": "1" } })
+    var url = disparador.getAttribute("data-carga") || disparador.getAttribute("data-carga-inicial");
+    if (!url) return false;
+    fetch(url, { headers: { "X-Fragmento": "1" } })
       .then(function (r) { return r.ok ? r.text() : null; })
       .then(function (html) {
         destino.innerHTML = html === null ? '<p class="vacio">No se pudo cargar.</p>' : html;
+        destino.querySelectorAll("dialog[data-abrir-al-cargar]").forEach(function (dialogo) {
+          if (dialogo.showModal) dialogo.showModal();
+        });
       })
       .catch(function () {
         destino.innerHTML = '<p class="vacio">No se pudo cargar.</p>';
       });
+    return true;
+  }
+
+  document.addEventListener("click", function (e) {
+    var disparador = e.target.closest && e.target.closest("[data-carga]");
+    if (!disparador) return;
+    // Si es un enlace se carga en su sitio en vez de navegar fuera.
+    e.preventDefault();
+    cargarFragmento(disparador);
+  });
+
+  // Los editores cargados por fragmento también pueden revelar sus campos de
+  // adjunto. Delegar el cambio evita tener que volver a registrar listeners.
+  document.addEventListener("change", function (e) {
+    var interruptor = e.target.closest && e.target.closest("[data-revela]");
+    if (!interruptor) return;
+    var destino = document.getElementById(interruptor.getAttribute("data-revela"));
+    if (destino) destino.hidden = !interruptor.checked;
   });
 
   /* 7d. Contador de caracteres.
@@ -789,6 +813,35 @@
     e.preventDefault();
     var q = (form.querySelector("input[name=q]") || {}).value || "";
     actualizarListaConversaciones(form.closest("[data-conv-inicio]"), q);
+  });
+
+  document.addEventListener("click", function (e) {
+    var boton = e.target.closest && e.target.closest("[data-conv-mas]");
+    if (!boton || boton.dataset.enVuelo === "1") return;
+    var contenedor = boton.closest("[data-conv-inicio]");
+    var lista = boton.closest("[data-conv-lista-scroll]");
+    if (!contenedor || !lista) return;
+    boton.dataset.enVuelo = "1";
+    boton.textContent = "Cargando…";
+    var campo = contenedor.querySelector("[data-conv-buscar] input[name=q]");
+    var url = contenedor.getAttribute("data-conv-inicio") +
+      "?cursor=" + encodeURIComponent(boton.getAttribute("data-conv-mas"));
+    if (campo && campo.value) url += "&q=" + encodeURIComponent(campo.value);
+    fetch(url, { headers: { "X-Fragmento": "1" } })
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+      .then(function (html) {
+        var temporal = document.createElement("div");
+        temporal.innerHTML = "<ul>" + html + "</ul>";
+        var filaBoton = boton.closest("li");
+        Array.from(temporal.querySelector("ul").children).forEach(function (fila) {
+          lista.insertBefore(fila, filaBoton);
+        });
+        filaBoton.remove();
+      })
+      .catch(function () {
+        boton.textContent = "No se pudo cargar. Reintentar";
+        delete boton.dataset.enVuelo;
+      });
   });
 
   document.addEventListener("click", function (e) {

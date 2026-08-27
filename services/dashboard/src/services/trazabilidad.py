@@ -3,6 +3,9 @@
 Es lo que sustituye a entrar a NocoDB a mirar tablas.
 """
 
+import base64
+import json
+from datetime import datetime
 from typing import Any
 
 from src.db import pool
@@ -22,7 +25,10 @@ def normalizar_numero(busqueda: str) -> str:
 
 
 def listar_conversaciones(
-    proyecto_id: int, busqueda: str = "", limite: int = 100
+    proyecto_id: int,
+    busqueda: str = "",
+    limite: int = 100,
+    antes_de: tuple[datetime, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Una fila por (cliente, canal) con su última actividad.
 
@@ -47,24 +53,21 @@ def listar_conversaciones(
     condiciones = []
     params: list[Any] = []
     if numero:
-        condiciones.append("m.client_id LIKE %s")
+        condiciones.append("client_id LIKE %s")
         params.append(f"%{numero}%")
-    condiciones.append("m.proyecto_id = %s")
+    condiciones.append("proyecto_id = %s")
     params.append(int(proyecto_id))
+    if antes_de:
+        condiciones.append("(ultima_actividad, ultimo_mensaje_id) < (%s, %s)")
+        params.extend(antes_de)
     where = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
     params.append(int(limite))
     return pool.consultar(
         f"""
-        SELECT m.client_id,
-               m.canal,
-               MAX(m.created_at) AS ultima_actividad,
-               COUNT(*) FILTER (WHERE m.direction <> 'internal') AS mensajes,
-               COUNT(*) FILTER (WHERE m.direction <> 'internal' AND m.author = 'ia') AS respuestas_bot,
-               COUNT(*) FILTER (WHERE m.direction <> 'internal' AND m.author = 'dueño') AS respuestas_dueno,
-               MAX(m.sender_name) FILTER (WHERE m.direction = 'inbound') AS nombre
-        FROM conversation_messages m
+        SELECT client_id, canal, ultima_actividad, ultimo_mensaje_id, mensajes,
+               respuestas_bot, respuestas_dueno, nombre
+        FROM conversation_threads
         {where}
-        GROUP BY m.client_id, m.canal
         ORDER BY ultima_actividad DESC
         LIMIT %s
         """,
@@ -72,10 +75,47 @@ def listar_conversaciones(
     )
 
 
+CONVERSACIONES_POR_PAGINA = 40
+
+
+def _cursor_conversaciones(fecha: datetime, mensaje_id: int) -> str:
+    crudo = json.dumps([fecha.isoformat(), int(mensaje_id)], separators=(",", ":"))
+    return base64.urlsafe_b64encode(crudo.encode()).decode().rstrip("=")
+
+
+def _leer_cursor_conversaciones(cursor: str) -> tuple[datetime, int]:
+    try:
+        relleno = "=" * (-len(cursor) % 4)
+        fecha, mensaje_id = json.loads(base64.urlsafe_b64decode(cursor + relleno).decode())
+        instante = datetime.fromisoformat(fecha)
+        if instante.tzinfo is None:
+            raise ValueError
+        return instante, int(mensaje_id)
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("El cursor de conversaciones no es válido.") from exc
+
+
+def pagina_conversaciones(
+    proyecto_id: int, busqueda: str = "", cursor: str = ""
+) -> dict[str, Any]:
+    antes_de = _leer_cursor_conversaciones(cursor) if cursor else None
+    filas = listar_conversaciones(
+        proyecto_id, busqueda, CONVERSACIONES_POR_PAGINA + 1, antes_de
+    )
+    visibles = filas[:CONVERSACIONES_POR_PAGINA]
+    siguiente = ""
+    if len(filas) > CONVERSACIONES_POR_PAGINA and visibles:
+        ultima = visibles[-1]
+        siguiente = _cursor_conversaciones(
+            ultima["ultima_actividad"], ultima["ultimo_mensaje_id"]
+        )
+    return {"conversaciones": visibles, "siguiente_cursor": siguiente}
+
+
 # Cuántos mensajes trae cada tanda del visor. Una conversación larga puede tener
 # miles de filas (cada llamada a una herramienta es una); cargarlas todas de
 # golpe hace la página pesada y lenta sin que nadie las lea.
-MENSAJES_POR_PAGINA = 60
+MENSAJES_POR_PAGINA = 40
 
 
 def mensajes_de(
@@ -109,6 +149,11 @@ def mensajes_de(
     falso — no hay «anteriores» que cargar detrás de lo que acaba de llegar.
     """
     limite = max(1, min(int(limite), 500))
+    columnas = (
+        "*" if incluir_internos else
+        "id, client_id, canal, direction, author, sender_name, message_type, "
+        "text, event_type, tool_name, status, error, duration_ms, created_at, quoted_text"
+    )
     condiciones = ["proyecto_id = %s", "client_id = %s", "canal = %s"]
     params: list[Any] = [int(proyecto_id), client_id, canal]
 
@@ -127,7 +172,8 @@ def mensajes_de(
         params.append(limite)
         filas = pool.consultar(
             f"""
-            SELECT * FROM conversation_messages
+            SELECT {columnas}
+            FROM conversation_messages
             WHERE {' AND '.join(condiciones)}
             ORDER BY id ASC
             LIMIT %s
@@ -141,7 +187,8 @@ def mensajes_de(
     params.append(limite + 1)
     filas = pool.consultar(
         f"""
-        SELECT * FROM conversation_messages
+        SELECT {columnas}
+        FROM conversation_messages
         WHERE {' AND '.join(condiciones)}
         ORDER BY id DESC
         LIMIT %s
@@ -195,12 +242,9 @@ def resumen_conversacion(proyecto_id: int, client_id: str, canal: str) -> dict[s
     """Cabecera del visor: nombre, cuántos mensajes hay y de cuándo son."""
     fila = pool.consultar_uno(
         """
-        SELECT COUNT(*) FILTER (WHERE direction <> 'internal') AS mensajes,
-               COUNT(*) FILTER (WHERE direction = 'internal')  AS eventos,
-               MIN(created_at) AS primera,
-               MAX(created_at) AS ultima,
-               MAX(sender_name) FILTER (WHERE direction = 'inbound') AS nombre
-        FROM conversation_messages
+        SELECT mensajes, eventos, primera_actividad AS primera,
+               ultima_actividad AS ultima, nombre
+        FROM conversation_threads
         WHERE proyecto_id = %s AND client_id = %s AND canal = %s
         """,
         (int(proyecto_id), client_id, canal),
@@ -288,6 +332,23 @@ def contar_preguntas_pendientes(proyecto_id: int) -> int:
     return int((fila or {}).get("total") or 0)
 
 
+def contar_pendientes(proyecto_id: int) -> dict[str, int]:
+    """Las dos pastillas del menú en un solo viaje a Postgres."""
+    fila = pool.consultar_uno(
+        """
+        SELECT (SELECT COUNT(*) FROM reportes
+                WHERE proyecto_id = %s AND NOT revisado) AS reportes,
+               (SELECT COUNT(*) FROM preguntas_sin_respuesta
+                WHERE proyecto_id = %s AND NOT atendida) AS preguntas
+        """,
+        (int(proyecto_id), int(proyecto_id)),
+    ) or {}
+    return {
+        "reportes": int(fila.get("reportes") or 0),
+        "preguntas": int(fila.get("preguntas") or 0),
+    }
+
+
 # --- Base de conocimiento del RAG --------------------------------------------
 #
 # Un chunk es UN TROZO DE TEXTO. No tiene tema ni título: se vectoriza entero y
@@ -338,6 +399,17 @@ def listar_chunks(proyecto_id: int, busqueda: str = "") -> list[dict[str, Any]]:
         fila["largo"] = len(str(fila.get("contenido") or ""))
         fila["demasiado_largo"] = fila["largo"] > LIMITE_CHUNK
     return filas
+
+
+def obtener_chunk(proyecto_id: int, chunk_id: int) -> dict[str, Any] | None:
+    fila = pool.consultar_uno(
+        "SELECT * FROM rag_chunks WHERE proyecto_id = %s AND id = %s",
+        (int(proyecto_id), int(chunk_id)),
+    )
+    if fila:
+        fila["largo"] = len(str(fila.get("contenido") or ""))
+        fila["demasiado_largo"] = fila["largo"] > LIMITE_CHUNK
+    return fila
 
 
 def crear_chunk(proyecto_id: int, contenido: str) -> dict[str, Any]:

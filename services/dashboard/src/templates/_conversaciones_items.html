@@ -1,0 +1,26 @@
+{% for c in conversaciones %}
+<li>
+  <button type="button" class="conv-item"
+          data-conv="/conversaciones/{{ c.canal }}/{{ c.client_id }}?fragmento=1"
+          data-conv-clave="{{ c.canal }}:{{ c.client_id }}">
+    <span class="conv-id">{{ c.client_id }}</span>
+    {% if c.nombre %}<span class="conv-nombre">{{ c.nombre }}</span>{% endif %}
+    <span class="conv-meta">
+      <span class="pastilla">{{ c.canal }}</span>
+      <time>{{ c.ultima_actividad | fecha }}</time>
+    </span>
+  </button>
+</li>
+{% else %}
+  {% if not es_continuacion %}
+  <li class="vacio">
+    {% if busqueda %}Ningún número de este proyecto coincide con «{{ busqueda }}».
+    {% else %}Todavía no hay conversaciones en este proyecto.{% endif %}
+  </li>
+  {% endif %}
+{% endfor %}
+{% if siguiente_cursor %}
+<li class="conv-mas-fila">
+  <button type="button" class="mini" data-conv-mas="{{ siguiente_cursor }}">Cargar más conversaciones</button>
+</li>
+{% endif %}

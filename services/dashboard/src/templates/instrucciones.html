@@ -34,7 +34,8 @@
           <span>Actualizado: {{ activa.creado_en | fecha if activa.creado_en else 'versión inicial' }}</span>
         </div>
         <div class="acciones-agente">
-          <button type="button" class="mini boton-con-icono" data-abre="historial-{{ tipo }}">
+          <button type="button" class="mini boton-con-icono" data-abre="historial-{{ tipo }}"
+                  data-carga="/agente/prompts/{{ tipo }}/historial" data-carga-en="historial-{{ tipo }}-contenido">
             <span aria-hidden="true">◷</span> Historial
           </button>
           <button type="button" class="mini boton-con-icono" data-abre="editar-{{ tipo }}">
@@ -106,6 +107,11 @@
   </dialog>
 
   <dialog class="flotante ancha historial-dialogo" id="historial-{{ tipo }}">
+    <div id="historial-{{ tipo }}-contenido"><p class="sub">Cargando…</p></div>
+  </dialog>
+
+  {% if false %}
+  <dialog class="flotante ancha historial-dialogo" id="historial-anterior-{{ tipo }}">
     <div class="cabecera">
       <div>
         <h2>Historial: {{ datos.meta.nombre }}</h2>
@@ -139,5 +145,6 @@
       {% endfor %}
     </div>
   </dialog>
+  {% endif %}
 {% endfor %}
 {% endblock %}

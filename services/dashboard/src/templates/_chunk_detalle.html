@@ -1,0 +1,30 @@
+<div class="cabecera">
+  <h2>Editar chunk</h2>
+  <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+</div>
+<div class="cuerpo">
+  <form method="post" action="/conocimiento/{{ chunk.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="contenido-{{ chunk.id }}">Contenido</label>
+    <textarea id="contenido-{{ chunk.id }}" name="contenido" rows="12" required
+              maxlength="{{ limite }}" style="width:100%">{{ chunk.contenido }}</textarea>
+    <p class="contador">{{ chunk.largo }} / {{ limite }}</p>
+    <p class="sub" style="margin:6px 0 0">Un solo asunto por chunk. Si son dos temas distintos, conviene separarlos.</p>
+    <div class="linea" style="justify-content:space-between;margin-top:14px">
+      <button class="icono-accion peligro" type="button" data-abre="borrar-chunk-{{ chunk.id }}"
+              title="Eliminar" aria-label="Eliminar">Eliminar</button>
+      <span class="linea"><button class="mini" type="button" data-cierra>Cancelar</button><button class="primario">Guardar</button></span>
+    </div>
+  </form>
+</div>
+
+<dialog class="flotante" id="borrar-chunk-{{ chunk.id }}">
+  <div class="cabecera"><h2>¿Eliminar este chunk?</h2><button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button></div>
+  <div class="cuerpo">
+    <p style="margin-top:0">El agente dejará de usar esta información y no se puede deshacer.</p>
+    <p class="sub cita">«{{ chunk.contenido | truncate(160) }}»</p>
+    <form method="post" action="/conocimiento/{{ chunk.id }}/eliminar" class="linea" style="justify-content:flex-end">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="mini" type="button" data-cierra>Cancelar</button><button class="primario">Sí, eliminar</button>
+    </form>
+  </div>
+</dialog>

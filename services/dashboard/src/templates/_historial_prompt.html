@@ -1,0 +1,26 @@
+<div class="cabecera">
+  <div>
+    <h2>Historial: {{ meta.nombre }}</h2>
+    <p class="sub codigo-dialogo">Cada rollback crea una versión nueva y conserva las anteriores.</p>
+  </div>
+  <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+</div>
+<div class="cuerpo lista-versiones-prompt">
+  {% for version in historial %}
+  <article class="version-prompt {% if version.activa %}actual{% endif %}">
+    <div class="version-prompt-cabecera">
+      <div><strong>Versión {{ version.version }}</strong>{% if version.activa %}<span class="pastilla">Actual</span>{% endif %}</div>
+      <span class="sub">{{ version.creado_en | fecha }}</span>
+    </div>
+    <p>{{ version.contenido | truncate(360) }}</p>
+    <div class="version-prompt-pie">
+      <span class="sub">{{ version.creado_por or 'Sistema' }}</span>
+      {% if not version.activa and version.contenido | trim %}
+      <form method="post" action="/agente/prompts/{{ tipo }}/{{ version.version }}/activar">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="mini" type="submit">Rollback</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+  {% else %}<p class="vacio">Todavía no hay versiones para este agente.</p>{% endfor %}
+</div>

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from src.core import security
-from src.core.plantillas import render
+from src.core.plantillas import render, render_fragmento
 from src.services import envios as svc_envios
 from src.services import clientes_whatsapp, mensajeria
 
@@ -15,10 +15,13 @@ router = APIRouter()
 
 
 def _proyecto_id(usuario: dict) -> int:
+    if usuario.get("_proyecto"):
+        return int(usuario["_proyecto"]["id"])
     proyecto = clientes_whatsapp.por_usuario(usuario["id"])
     if not proyecto:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Esta cuenta no está vinculada a un proyecto")
+    usuario["_proyecto"] = proyecto
     return int(proyecto["id"])
 
 
@@ -112,7 +115,7 @@ def sesiones(request: Request, usuario=Depends(security.requiere_negocio)):
     Es como avanza la barra de progreso sin websockets ni estado en el servidor:
     una consulta agregada por índice, igual que la de la factura.
     """
-    return render(request, "_envios_sesiones.html", usuario, **_datos_de_envios(usuario))
+    return render_fragmento(request, "_envios_sesiones.html", usuario, **_datos_de_envios(usuario))
 
 
 def _datos_de_envios(usuario: dict) -> dict:
@@ -139,7 +142,7 @@ def destinos(
     veinte fallan quince, más vale enterarse antes de que salgan los ochenta.
     """
     solo_fallidos = request.query_params.get("fallidos") == "1"
-    return render(
+    return render_fragmento(
         request,
         "_envio_destinos.html",
         usuario,

@@ -80,9 +80,11 @@ def usuario_de_sesion(token: str) -> dict[str, Any] | None:
     sesion = pool.consultar_uno(
         """
         SELECT u.id, u.usuario, u.rol, u.activo, u.debe_cambiar_password, s.token,
-               s.suplantando_a, s.usuario_id AS titular_id
+               s.suplantando_a, s.usuario_id AS titular_id,
+               to_jsonb(c) AS proyecto
         FROM dashboard_sesiones s
         JOIN dashboard_usuarios u ON u.id = s.usuario_id
+        LEFT JOIN clientes_whatsapp c ON c.usuario_id = u.id
         WHERE s.token = %s AND s.expira_en > NOW() AND u.activo
         """,
         (token,),
@@ -90,21 +92,36 @@ def usuario_de_sesion(token: str) -> dict[str, Any] | None:
     if not sesion:
         return None
 
+    proyecto_titular = sesion.pop("proyecto", None)
+
     if not sesion.get("suplantando_a"):
-        return {**sesion, "suplantado_por": None, "admin_real_id": sesion["id"]}
+        return {
+            **sesion, "suplantado_por": None, "admin_real_id": sesion["id"],
+            "_proyecto": proyecto_titular,
+        }
 
     # Solo un administrador puede estar suplantando; si el titular dejó de serlo
     # (o se desactivó), la suplantación se ignora y vuelve a ser él mismo.
     if sesion["rol"] != ROL_ADMIN:
-        return {**sesion, "suplantado_por": None, "admin_real_id": sesion["id"]}
+        return {
+            **sesion, "suplantado_por": None, "admin_real_id": sesion["id"],
+            "_proyecto": proyecto_titular,
+        }
 
     objetivo = pool.consultar_uno(
-        "SELECT id, usuario, rol, activo, debe_cambiar_password FROM dashboard_usuarios "
-        "WHERE id = %s AND activo",
+        "SELECT u.id, u.usuario, u.rol, u.activo, u.debe_cambiar_password, "
+        "to_jsonb(c) AS proyecto FROM dashboard_usuarios u "
+        "LEFT JOIN clientes_whatsapp c ON c.usuario_id = u.id "
+        "WHERE u.id = %s AND u.activo",
         (sesion["suplantando_a"],),
     )
     if not objetivo:
-        return {**sesion, "suplantado_por": None, "admin_real_id": sesion["id"]}
+        return {
+            **sesion, "suplantado_por": None, "admin_real_id": sesion["id"],
+            "_proyecto": proyecto_titular,
+        }
+
+    proyecto_objetivo = objetivo.pop("proyecto", None)
 
     return {
         **objetivo,
@@ -114,6 +131,7 @@ def usuario_de_sesion(token: str) -> dict[str, Any] | None:
         "debe_cambiar_password": False,
         "suplantado_por": sesion["usuario"],
         "admin_real_id": sesion["titular_id"],
+        "_proyecto": proyecto_objetivo,
     }
 
 
@@ -171,7 +189,17 @@ def demasiados_intentos(clave: str) -> bool:
 
 def usuario_actual(request: Request) -> dict[str, Any] | None:
     """Usuario de la petición, o None si no hay sesión válida."""
-    return usuario_de_sesion(request.cookies.get(settings.SESSION_COOKIE_NAME, ""))
+    # El middleware de cambio obligatorio de contraseña y la dependencia de la
+    # ruta preguntan por la misma sesión. Sin una caché por PETICIÓN eso eran dos
+    # consultas idénticas a Postgres en absolutamente cada GET y POST. No es una
+    # caché global: una petición nueva vuelve a validar expiración, usuario activo
+    # y suplantación, por lo que cerrar una sesión conserva efecto inmediato.
+    if getattr(request.state, "usuario_resuelto", False):
+        return getattr(request.state, "usuario_actual", None)
+    usuario = usuario_de_sesion(request.cookies.get(settings.SESSION_COOKIE_NAME, ""))
+    request.state.usuario_actual = usuario
+    request.state.usuario_resuelto = True
+    return usuario
 
 
 def requiere_sesion(request: Request) -> dict[str, Any]:

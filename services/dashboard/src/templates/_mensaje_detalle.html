@@ -1,0 +1,118 @@
+{% import "_iconos.html" as iconos %}
+<div class="cabecera">
+  <h2>{{ plantilla.clave }}</h2>
+  <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+</div>
+<div class="cuerpo">
+  <form method="post" action="/mensajes/{{ plantilla.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="clave-{{ plantilla.id }}">Clave</label>
+    <div class="linea">
+      <input id="clave-{{ plantilla.id }}" name="clave" value="{{ plantilla.clave }}" required style="flex:1">
+      <button class="mini">Guardar</button>
+    </div>
+    <p class="sub" style="margin:6px 0 0">No puede repetirse: es lo que identifica el mensaje.</p>
+  </form>
+
+  <hr class="separador">
+  <h3 style="margin-top:0">Mensajes que salen, en orden</h3>
+  {% if plantilla.problemas %}
+  <ul class="lista-problemas">
+    {% for problema in plantilla.problemas %}<li>{{ problema }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  <div class="piezas">
+    {% for parte in plantilla.partes %}
+    <span class="pieza {{ 'listo' if not parte.problema else 'roto' }}">
+      <button type="button" class="pieza-abrir" data-abre="parte-{{ plantilla.id }}-{{ parte.orden }}">
+        Mensaje {{ parte.orden }}
+        {% if parte.media_ref %}<span class="pieza-clip" title="Lleva adjunto">◉</span>{% endif %}
+      </button>
+      <button type="button" class="pieza-quitar" data-abre="quitar-{{ parte.id }}"
+              title="Eliminar el mensaje {{ parte.orden }}" aria-label="Eliminar el mensaje {{ parte.orden }}">×</button>
+    </span>
+    {% else %}
+    <p class="sub" style="margin:0">Todavía no tiene ningún mensaje.</p>
+    {% endfor %}
+  </div>
+
+  <div class="linea" style="margin-top:16px">
+    <form method="post" action="/mensajes/{{ plantilla.id }}/parte">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="boton mini">Añadir mensaje</button>
+    </form>
+    <form method="post" action="/mensajes/{{ plantilla.id }}/revisar">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="mini">Volver a comprobar los adjuntos</button>
+    </form>
+    <span style="flex:1"></span>
+    <button class="icono-accion peligro" data-abre="borrar-{{ plantilla.id }}"
+            title="Eliminar el mensaje entero" aria-label="Eliminar el mensaje entero">{{ iconos.icono('basura') }}</button>
+  </div>
+</div>
+
+{% for parte in plantilla.partes %}
+<dialog class="flotante" id="parte-{{ plantilla.id }}-{{ parte.orden }}"
+        {{ 'data-abrir-al-cargar' if parte_abierta == parte.orden }}>
+  <div class="cabecera">
+    <h2>{{ plantilla.clave }} · mensaje {{ parte.orden }}</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <div class="cuerpo">
+    {% if parte.problema %}<div class="mensaje aviso" style="margin-top:0">{{ parte.problema }}</div>{% endif %}
+    <form method="post" action="/mensajes/{{ plantilla.id }}/parte/{{ parte.orden }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="texto-{{ parte.id }}">Texto</label>
+      <textarea id="texto-{{ parte.id }}" name="texto" rows="8" style="width:100%">{{ parte.texto }}</textarea>
+      <label class="switch" style="margin-top:14px">
+        <input type="checkbox" name="con_media" value="1" data-revela="media-{{ parte.id }}"
+               {{ 'checked' if parte.media_ref }}>
+        <span class="switch-pista"><span class="switch-bola"></span></span>
+        <span>Incluye imagen o video</span>
+      </label>
+      <div id="media-{{ parte.id }}" class="campos" style="margin-top:12px" {{ '' if parte.media_ref else 'hidden' }}>
+        <div>
+          <label for="tipo-{{ parte.id }}">Qué es</label>
+          <select id="tipo-{{ parte.id }}" name="media_tipo" style="width:100%">
+            <option value="imagen" {{ 'selected' if parte.media_tipo != 'video' }}>Imagen</option>
+            <option value="video" {{ 'selected' if parte.media_tipo == 'video' }}>Video</option>
+          </select>
+        </div>
+        <div>
+          <label for="ref-{{ parte.id }}">ID de Google Drive</label>
+          <input id="ref-{{ parte.id }}" name="media_ref" value="{{ parte.media_ref }}" style="width:100%"
+                 placeholder="Pega el enlace de Drive o el ID; se extrae solo">
+        </div>
+      </div>
+      <p class="sub" style="margin:10px 0 0">Al guardar se comprueba que el archivo existe y es público.</p>
+      <div class="linea" style="justify-content:space-between;margin-top:16px">
+        <button class="icono-accion peligro" type="button" data-abre="quitar-{{ parte.id }}"
+                title="Eliminar este mensaje" aria-label="Eliminar este mensaje">{{ iconos.icono('basura') }}</button>
+        <span class="linea"><button class="mini" type="button" data-cierra>Cancelar</button><button class="primario">Guardar</button></span>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog class="flotante" id="quitar-{{ parte.id }}">
+  <div class="cabecera"><h2>¿Eliminar el mensaje {{ parte.orden }}?</h2><button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button></div>
+  <div class="cuerpo">
+    <p style="margin-top:0">Se quita de la cadena de «{{ plantilla.clave }}». Los envíos ya hechos conservan su copia.</p>
+    <form method="post" action="/mensajes/parte/{{ parte.id }}/eliminar" class="linea" style="justify-content:flex-end">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="plantilla_id" value="{{ plantilla.id }}">
+      <button class="mini" type="button" data-cierra>Cancelar</button><button class="primario">Sí, eliminar</button>
+    </form>
+  </div>
+</dialog>
+{% endfor %}
+
+<dialog class="flotante" id="borrar-{{ plantilla.id }}">
+  <div class="cabecera"><h2>¿Eliminar «{{ plantilla.clave }}»?</h2><button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button></div>
+  <div class="cuerpo">
+    <p style="margin-top:0">Se borra con todos sus mensajes y no se puede deshacer.</p>
+    <form method="post" action="/mensajes/{{ plantilla.id }}/eliminar" class="linea" style="justify-content:flex-end">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="mini" type="button" data-cierra>Cancelar</button><button class="primario">Sí, eliminar</button>
+    </form>
+  </div>
+</dialog>

@@ -130,6 +130,7 @@
 <div class="msgs">
   {% for p in plantillas %}
   <article class="msg {{ 'listo' if not p.problemas else 'roto' }}" data-abre="msg-{{ p.id }}"
+           data-carga="/mensajes/{{ p.id }}/detalle" data-carga-en="msg-{{ p.id }}-contenido"
            role="button" tabindex="0" aria-label="Abrir {{ p.clave }}">
     <span class="clave">{{ p.clave }}</span>
     <span class="msg-resumen">{{ p.partes[0].texto | truncate(90) if p.partes else 'Sin mensajes' }}</span>
@@ -144,6 +145,20 @@
   {% endfor %}
 </div>
 
+{# El armazón de cada ventana pesa muy poco. Su formulario y los editores de
+   todas sus partes se solicitan solo cuando se abre esa plantilla. #}
+{% for p in plantillas %}
+<dialog class="flotante" id="msg-{{ p.id }}"
+        data-carga-inicial="/mensajes/{{ p.id }}/detalle{{ '?parte=' ~ parte_abierta if abierto == p.id and parte_abierta else '' }}"
+        data-carga-en="msg-{{ p.id }}-contenido"
+        {{ 'data-abrir-al-cargar' if abierto == p.id }}>
+  <div id="msg-{{ p.id }}-contenido"><p class="sub">Cargando…</p></div>
+</dialog>
+{% endfor %}
+
+{# Implementación anterior conservada temporalmente como referencia de marcado.
+   No se renderiza: el contenido equivalente vive en _mensaje_detalle.html. #}
+{% if false %}
 {# --- Nivel 2: la ventana de un mensaje ------------------------------------ #}
 {% for p in plantillas %}
 <dialog class="flotante" id="msg-{{ p.id }}" {{ 'data-abrir-al-cargar' if abierto == p.id }}>
@@ -304,6 +319,7 @@
   </div>
 </dialog>
 {% endfor %}
+{% endif %}
 
 <dialog class="flotante" id="nuevo-mensaje">
   <div class="cabecera">

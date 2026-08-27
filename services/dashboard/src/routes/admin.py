@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 
 from src.core import security
 from src.core.config import settings
-from src.core.plantillas import render
+from src.core.plantillas import render, render_fragmento
 from src.services import (
     clientes_whatsapp,
     mensajeria,
@@ -95,7 +95,7 @@ def negocio_resumen(request: Request, negocio_id: int, usuario=Depends(security.
     negocio = clientes_whatsapp.obtener(negocio_id)
     if not negocio:
         raise HTTPException(status_code=404, detail="Ese cliente ya no existe")
-    return render(
+    return render_fragmento(
         request,
         "_negocio_resumen.html",
         usuario,
@@ -318,7 +318,7 @@ def incidencias(request: Request, usuario=Depends(security.requiere_admin)):
 @router.get("/incidencias/lista")
 def incidencias_lista(request: Request, usuario=Depends(security.requiere_admin)):
     """Las tarjetas solas, para que una incidencia recién escalada salga sola."""
-    return render(request, "_incidencias_lista.html", usuario, **_datos_incidencias(request))
+    return render_fragmento(request, "_incidencias_lista.html", usuario, **_datos_incidencias(request))
 
 
 @router.post("/incidencias/{incidencia_id}/revisada")

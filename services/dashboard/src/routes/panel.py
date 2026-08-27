@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Request
 
 from src.core import security
-from src.core.plantillas import render
+from src.core.plantillas import render, render_fragmento
 from src.services import facturacion
 
 router = APIRouter()
@@ -33,7 +33,7 @@ def costos(request: Request, usuario=Depends(security.requiere_admin)):
 
 @router.get("/admin/costos/totales")
 def costos_totales(request: Request, usuario=Depends(security.requiere_admin)):
-    return render(
+    return render_fragmento(
         request,
         "_costos_totales.html",
         usuario,

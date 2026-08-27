@@ -28,8 +28,19 @@ def listar_plantillas(proyecto_id: int) -> list[dict[str, Any]]:
         "SELECT * FROM plantillas_mensaje WHERE proyecto_id = %s ORDER BY clave",
         (int(proyecto_id),),
     )
+    # Una consulta para todas las hijas. El bucle anterior llamaba partes_de()
+    # una vez por plantilla (81 plantillas = 82 viajes a Postgres) aunque todas
+    # pertenecen al mismo proyecto y caben holgadamente en una sola respuesta.
+    partes_por_plantilla: dict[int, list[dict[str, Any]]] = {}
+    for parte in pool.consultar(
+        "SELECT * FROM plantilla_partes WHERE proyecto_id = %s "
+        "ORDER BY plantilla_id, orden",
+        (int(proyecto_id),),
+    ):
+        parte["problema"] = problema_de_parte(parte)
+        partes_por_plantilla.setdefault(int(parte["plantilla_id"]), []).append(parte)
     for plantilla in plantillas:
-        plantilla["partes"] = partes_de(proyecto_id, plantilla["id"])
+        plantilla["partes"] = partes_por_plantilla.get(int(plantilla["id"]), [])
         plantilla["problemas"] = problemas_de(plantilla)
     return plantillas
 

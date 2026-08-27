@@ -75,10 +75,13 @@ def test_la_pagina_muestra_una_tarjeta_y_modales_por_agente(sesion_cliente):
         assert meta["nombre"] in html
         assert meta["codigo"] in html
     assert "Editar agente: Alquiler" in html
-    assert "Historial: Supervisor" in html
+    assert 'data-carga="/agente/prompts/supervisor/historial"' in html
     assert "Recordatorios automáticos activos" in html
-    assert "Rollback" in html
     assert "CUÁNDO NO ENVIAR" in html
+
+    historial = sesion_cliente.get("/agente/prompts/supervisor/historial").text
+    assert "Historial: Supervisor" in historial
+    assert "Rollback" in historial
 
 
 def test_las_rutas_guardan_prompt_y_configuracion(sesion_cliente):

@@ -167,7 +167,9 @@ plantillas.env.filters["dia_largo"] = _dia_largo
 plantillas.env.filters["dia_clave"] = _dia_clave
 
 
-def _proyecto_de(usuario: dict[str, Any] | None, es_admin: bool) -> dict[str, Any] | None:
+def _proyecto_de(
+    request: Request, usuario: dict[str, Any] | None, es_admin: bool
+) -> dict[str, Any] | None:
     """El proyecto al que pertenece la cuenta con la que se está dentro.
 
     Va en el contexto común y no en cada ruta porque lo pinta el ARMAZÓN (la
@@ -181,7 +183,14 @@ def _proyecto_de(usuario: dict[str, Any] | None, es_admin: bool) -> dict[str, An
     """
     if not usuario or es_admin:
         return None
-    return clientes_whatsapp.por_usuario(usuario["id"])
+    if usuario.get("_proyecto"):
+        return usuario["_proyecto"]
+    if getattr(request.state, "proyecto_resuelto", False):
+        return getattr(request.state, "proyecto_actual", None)
+    proyecto = clientes_whatsapp.por_usuario(usuario["id"])
+    request.state.proyecto_actual = proyecto
+    request.state.proyecto_resuelto = True
+    return proyecto
 
 
 def pendientes_de(es_admin: bool, proyecto: dict[str, Any] | None = None) -> dict[str, int]:
@@ -195,10 +204,8 @@ def pendientes_de(es_admin: bool, proyecto: dict[str, Any] | None = None) -> dic
         return {"/admin/incidencias": mensajeria.contar_incidencias_abiertas()}
     if not proyecto:
         return {}
-    return {
-        "/reportes": trazabilidad.contar_reportes_pendientes(proyecto["id"]),
-        "/preguntas": trazabilidad.contar_preguntas_pendientes(proyecto["id"]),
-    }
+    conteos = trazabilidad.contar_pendientes(proyecto["id"])
+    return {"/reportes": conteos["reportes"], "/preguntas": conteos["preguntas"]}
 
 
 def render(request: Request, nombre: str, usuario: dict[str, Any] | None, **contexto):
@@ -207,7 +214,11 @@ def render(request: Request, nombre: str, usuario: dict[str, Any] | None, **cont
     es_admin = bool(usuario and usuario["rol"] == security.ROL_ADMIN)
     secciones = navegacion.secciones_para(es_admin, request.url.path) if usuario else []
     seccion_actual, pagina_actual = navegacion.ubicacion(secciones)
-    proyecto_actual = _proyecto_de(usuario, es_admin)
+    # Si la ruta ya tuvo que resolver el proyecto, se reutiliza: sobrescribirlo
+    # al final del diccionario no evitaba que antes se hiciera otra consulta.
+    proyecto_actual = contexto.get("proyecto") if "proyecto" in contexto else _proyecto_de(
+        request, usuario, es_admin
+    )
     datos = {
         "request": request,
         "usuario": usuario,
@@ -234,4 +245,28 @@ def render(request: Request, nombre: str, usuario: dict[str, Any] | None, **cont
     }
     # Starlette moderno espera (request, nombre, contexto): la firma vieja
     # (nombre, contexto) interpreta el nombre como el request.
+    return plantillas.TemplateResponse(request, nombre, datos)
+
+
+def render_fragmento(
+    request: Request, nombre: str, usuario: dict[str, Any] | None, **contexto
+):
+    """Renderiza HTML parcial sin reconstruir el armazón de la página.
+
+    Los fragmentos nunca pintan menú, migas ni pastillas de pendientes. Antes
+    pagaban igualmente la búsqueda del proyecto y dos COUNT del lateral en cada
+    refresco en vivo. Solo se conserva el contexto realmente compartido: sesión,
+    CSRF, avisos y el proyecto que la ruta ya conozca para los filtros de fecha.
+    """
+    token_sesion = request.cookies.get(settings.SESSION_COOKIE_NAME, "")
+    datos = {
+        "request": request,
+        "usuario": usuario,
+        "csrf": security.token_csrf(token_sesion) if token_sesion else "",
+        "es_admin": bool(usuario and usuario["rol"] == security.ROL_ADMIN),
+        "proyecto": contexto.get("proyecto"),
+        "aviso": request.query_params.get("aviso", ""),
+        "error": request.query_params.get("error", ""),
+        **contexto,
+    }
     return plantillas.TemplateResponse(request, nombre, datos)

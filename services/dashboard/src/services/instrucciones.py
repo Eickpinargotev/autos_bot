@@ -111,6 +111,48 @@ def historial(
     )
 
 
+def todas_para_panel(proyecto_id: int, limite_historial: int = 20) -> dict[str, dict[str, Any]]:
+    """Prompts activos e historiales de todos los agentes en una consulta."""
+    filas = pool.consultar(
+        """
+        SELECT * FROM (
+            SELECT i.*, ROW_NUMBER() OVER (
+                PARTITION BY tipo ORDER BY version DESC
+            ) AS posicion
+            FROM proyecto_instrucciones i
+            WHERE proyecto_id = %s AND tipo = ANY(%s)
+        ) versiones
+        WHERE posicion <= %s
+        ORDER BY tipo, version DESC
+        """,
+        (int(proyecto_id), list(TIPOS_EDITABLES), int(limite_historial)),
+    )
+    salida: dict[str, dict[str, Any]] = {}
+    for tipo in TIPOS_EDITABLES:
+        historial_tipo = [fila for fila in filas if fila["tipo"] == tipo]
+        activa_tipo = next((fila for fila in historial_tipo if fila["activa"]), None) or {
+            "version": 0, "tipo": tipo, "contenido": "", "activa": True
+        }
+        salida[tipo] = {"activa": activa_tipo, "historial": historial_tipo}
+    return salida
+
+
+def activas_para_panel(proyecto_id: int) -> dict[str, dict[str, Any]]:
+    """Los ocho prompts vigentes; los historiales se cargan al abrirlos."""
+    filas = pool.consultar(
+        "SELECT * FROM proyecto_instrucciones "
+        "WHERE proyecto_id = %s AND activa AND tipo = ANY(%s)",
+        (int(proyecto_id), list(TIPOS_EDITABLES)),
+    )
+    por_tipo = {fila["tipo"]: fila for fila in filas}
+    return {
+        tipo: por_tipo.get(tipo) or {
+            "version": 0, "tipo": tipo, "contenido": "", "activa": True
+        }
+        for tipo in TIPOS_EDITABLES
+    }
+
+
 def guardar(
     proyecto_id: int, contenido: str, usuario: str, tipo: str = "principal"
 ) -> dict[str, Any]:

@@ -2,11 +2,11 @@
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 
 from src.core import security
-from src.core.plantillas import render
+from src.core.plantillas import render, render_fragmento
 from src.services import bot_interno
 from src.services import (
     archivos_catalogo,
@@ -22,10 +22,13 @@ router = APIRouter()
 
 
 def _proyecto_id(usuario: dict) -> int:
+    if usuario.get("_proyecto"):
+        return int(usuario["_proyecto"]["id"])
     proyecto = clientes_whatsapp.por_usuario(usuario["id"])
     if not proyecto:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Esta cuenta no está vinculada a un proyecto")
+    usuario["_proyecto"] = proyecto
     return int(proyecto["id"])
 
 
@@ -70,6 +73,27 @@ def listar_plantillas(request: Request, usuario=Depends(security.requiere_negoci
         tiempos_publicidad=publicidad,
         config_recordatorios=recordatorios,
         abierto=int(abierto) if abierto.isdigit() else None,
+        parte_abierta=int(parte) if parte.isdigit() else None,
+    )
+
+
+@router.get("/mensajes/{plantilla_id}/detalle")
+def detalle_plantilla(
+    request: Request,
+    plantilla_id: int,
+    usuario=Depends(security.requiere_negocio),
+):
+    """Editor de una sola plantilla, cargado al abrir su ventana."""
+    proyecto_id = _proyecto_id(usuario)
+    plantilla = mensajeria.obtener_plantilla(proyecto_id, plantilla_id)
+    if not plantilla:
+        raise HTTPException(status_code=404, detail="Ese mensaje ya no existe")
+    parte = request.query_params.get("parte", "")
+    return render_fragmento(
+        request,
+        "_mensaje_detalle.html",
+        usuario,
+        plantilla=plantilla,
         parte_abierta=int(parte) if parte.isdigit() else None,
     )
 
@@ -467,6 +491,18 @@ def _volver_a_palabra(
 
 
 # --- Base de conocimiento (la administra el NEGOCIO) -------------------------
+
+@router.get("/conocimiento/{chunk_id}/detalle")
+def detalle_chunk(
+    request: Request, chunk_id: int, usuario=Depends(security.requiere_negocio)
+):
+    chunk = trazabilidad.obtener_chunk(_proyecto_id(usuario), chunk_id)
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Ese chunk ya no existe")
+    return render_fragmento(
+        request, "_chunk_detalle.html", usuario,
+        chunk=chunk, limite=trazabilidad.LIMITE_CHUNK,
+    )
 
 @router.post("/conocimiento")
 def crear_chunk(

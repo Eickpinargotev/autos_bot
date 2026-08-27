@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from src.core import security
-from src.core.plantillas import render
+from src.core.plantillas import render, render_fragmento
 from src.services import (
     bloqueos as bloqueos_temporales,
     bloqueos_permanentes,
@@ -30,9 +30,12 @@ router = APIRouter()
 
 
 def _proyecto_del_usuario(usuario: dict) -> dict:
+    if usuario.get("_proyecto"):
+        return usuario["_proyecto"]
     proyecto = clientes_whatsapp.por_usuario(usuario["id"])
     if not proyecto:
         raise HTTPException(status_code=404, detail="Esta cuenta no está vinculada a un proyecto")
+    usuario["_proyecto"] = proyecto
     return proyecto
 
 
@@ -41,6 +44,7 @@ def _proyecto_del_usuario(usuario: dict) -> dict:
 @router.get("/agente/instrucciones")
 def instrucciones_del_agente(request: Request, usuario=Depends(security.requiere_negocio)):
     proyecto = _proyecto_del_usuario(usuario)
+    prompts = instrucciones.activas_para_panel(proyecto["id"])
     config_recordatorios = instrucciones.configuracion_recordatorios(proyecto["id"])
     minutos = int(config_recordatorios.get("intervalo_minutos") or 60)
     if minutos % 60 == 0:
@@ -54,16 +58,28 @@ def instrucciones_del_agente(request: Request, usuario=Depends(security.requiere
         "instrucciones.html",
         usuario,
         prompts={
-            tipo: {
-                "activa": instrucciones.activa(proyecto["id"], tipo),
-                "historial": instrucciones.historial(proyecto["id"], tipo),
-                "meta": instrucciones.METADATOS[tipo],
-            }
+            tipo: {"activa": prompts[tipo], "meta": instrucciones.METADATOS[tipo]}
             for tipo in instrucciones.TIPOS_EDITABLES
         },
         tipos=instrucciones.TIPOS_EDITABLES,
         config_recordatorios=config_recordatorios,
         limite=instrucciones.LIMITE,
+    )
+
+
+@router.get("/agente/prompts/{tipo}/historial")
+def historial_del_agente(
+    request: Request, tipo: str, usuario=Depends(security.requiere_negocio)
+):
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        historial = instrucciones.historial(proyecto["id"], tipo)
+        meta = instrucciones.METADATOS[tipo]
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=404, detail="Tipo de agente desconocido") from exc
+    return render_fragmento(
+        request, "_historial_prompt.html", usuario,
+        tipo=tipo, historial=historial, meta=meta,
     )
 
 
@@ -132,12 +148,17 @@ def guardar_configuracion_recordatorios(
 def _datos_lista_conversaciones(request: Request, usuario: dict) -> dict:
     proyecto = _proyecto_del_usuario(usuario)
     busqueda = request.query_params.get("q", "")
-    conversaciones = trazabilidad.listar_conversaciones(proyecto["id"], busqueda)
+    cursor = request.query_params.get("cursor", "")
+    try:
+        pagina = trazabilidad.pagina_conversaciones(proyecto["id"], busqueda, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "proyecto": proyecto,
         "negocio_id": proyecto["id"],
-        "conversaciones": conversaciones,
         "busqueda": busqueda,
+        "es_continuacion": bool(cursor),
+        **pagina,
     }
 
 
@@ -148,11 +169,12 @@ def conversaciones(request: Request, usuario=Depends(security.requiere_negocio))
 
 @router.get("/conversaciones/lista")
 def conversaciones_lista(request: Request, usuario=Depends(security.requiere_negocio)):
-    return render(
+    datos = _datos_lista_conversaciones(request, usuario)
+    return render_fragmento(
         request,
-        "_conversaciones_negocio.html",
+        "_conversaciones_items.html" if datos["es_continuacion"] else "_conversaciones_negocio.html",
         usuario,
-        **_datos_lista_conversaciones(request, usuario),
+        **datos,
     )
 
 
@@ -176,7 +198,7 @@ def conversacion(
     )
 
     if desde.isdigit():
-        return render(
+        return render_fragmento(
             request,
             "_conversacion_burbujas.html",
             usuario,
@@ -189,7 +211,7 @@ def conversacion(
     resumen = trazabilidad.resumen_conversacion(proyecto["id"], client_id, canal)
     if not int(resumen.get("mensajes") or 0) and not int(resumen.get("eventos") or 0):
         raise HTTPException(status_code=404, detail="Esa conversación no pertenece a tu proyecto")
-    return render(
+    return render_fragmento(
         request,
         "_conversacion_hilo.html",
         usuario,
@@ -347,7 +369,7 @@ def _datos_bloqueos(request: Request, usuario: dict) -> dict:
 
 @router.get("/configuracion-proyecto/bloqueos")
 def bloqueos(request: Request, usuario=Depends(security.requiere_negocio)):
-    return render(
+    return render_fragmento(
         request,
         "_configuracion_proyecto_bloqueos.html",
         usuario,
@@ -418,7 +440,7 @@ def reportes_lista(request: Request, usuario=Depends(security.requiere_negocio))
     Es lo que más se espera de esta pantalla: la tienes abierta mientras
     trabajas y el bot deriva una conversación en cualquier momento.
     """
-    return render(request, "_reportes_lista.html", usuario, **_datos_reportes(request, usuario))
+    return render_fragmento(request, "_reportes_lista.html", usuario, **_datos_reportes(request, usuario))
 
 
 @router.post("/reportes/{reporte_id}/revisado")
@@ -464,7 +486,7 @@ def preguntas(request: Request, usuario=Depends(security.requiere_negocio)):
 @router.get("/preguntas/lista")
 def preguntas_lista(request: Request, usuario=Depends(security.requiere_negocio)):
     """La tabla sola: el agente se queda sin respuesta mientras nadie mira."""
-    return render(request, "_preguntas_lista.html", usuario, **_datos_preguntas(usuario))
+    return render_fragmento(request, "_preguntas_lista.html", usuario, **_datos_preguntas(usuario))
 
 
 @router.post("/preguntas/{pregunta_id}/atendida")

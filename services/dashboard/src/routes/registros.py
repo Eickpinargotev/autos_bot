@@ -6,16 +6,19 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from src.core import security
-from src.core.plantillas import render
+from src.core.plantillas import render, render_fragmento
 from src.services import clientes_whatsapp, importacion_registros, registros as svc_registros
 
 router = APIRouter()
 
 
 def _proyecto(usuario: dict) -> dict:
+    if usuario.get("_proyecto"):
+        return usuario["_proyecto"]
     proyecto = clientes_whatsapp.por_usuario(usuario["id"])
     if not proyecto:
         raise HTTPException(status_code=404, detail="Esta cuenta no está vinculada a un proyecto")
+    usuario["_proyecto"] = proyecto
     return proyecto
 
 
@@ -110,7 +113,7 @@ def lista(request: Request, usuario=Depends(security.requiere_negocio)):
         datos = svc_registros.pagina(proyecto["id"], cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return render(
+    return render_fragmento(
         request,
         "_registros_filas.html",
         usuario,

@@ -31,8 +31,24 @@ def listar(proyecto_id: int) -> list[dict[str, Any]]:
         "SELECT * FROM palabras_clave WHERE proyecto_id = %s ORDER BY palabra",
         (int(proyecto_id),),
     )
+    piezas_por_palabra: dict[int, dict[str, list[dict[str, Any]]]] = {}
+    for pieza in pool.consultar(
+        "SELECT * FROM palabra_clave_piezas WHERE proyecto_id = %s "
+        "ORDER BY palabra_id, tipo, orden",
+        (int(proyecto_id),),
+    ):
+        pieza["problema"] = problema_de_pieza(pieza)
+        grupos = piezas_por_palabra.setdefault(
+            int(pieza["palabra_id"]), {"mensaje": [], "recordatorio": []}
+        )
+        grupos[pieza["tipo"]].append(pieza)
     for palabra in palabras:
-        _completar(proyecto_id, palabra)
+        grupos = piezas_por_palabra.get(
+            int(palabra["id"]), {"mensaje": [], "recordatorio": []}
+        )
+        palabra["mensajes"] = grupos["mensaje"]
+        palabra["recordatorios"] = grupos["recordatorio"]
+        palabra["problemas"] = problemas_de(palabra)
     return palabras
 
 

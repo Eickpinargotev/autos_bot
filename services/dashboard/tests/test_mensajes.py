@@ -213,6 +213,11 @@ def test_cada_mensaje_de_la_cadena_es_un_boton_con_su_ventana(sesion_cliente):
     mensajeria.guardar_parte(plantilla["id"], 2, "Segundo", "", "")
 
     cuerpo = sesion_cliente.get("/mensajes").text
+    assert f'data-carga="/mensajes/{plantilla["id"]}/detalle"' in cuerpo
+
+    # Los editores ya no inflan la página inicial: aparecen al abrir esta
+    # plantilla y conservan los mismos botones y ventanas.
+    cuerpo = sesion_cliente.get(f"/mensajes/{plantilla['id']}/detalle").text
 
     assert "Mensaje 1" in cuerpo and "Mensaje 2" in cuerpo
     assert f'data-abre="parte-{plantilla["id"]}-1"' in cuerpo

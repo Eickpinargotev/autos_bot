@@ -70,6 +70,7 @@
   {# `data-abre` en la banda entera: un clic en cualquier parte abre la edición.
      El visto y la papelera de dentro siguen siendo suyos (ver app.js). #}
   <article class="chunk {{ '' if c.activo else 'apagada' }}" data-abre="editar-{{ c.id }}"
+           data-carga="/conocimiento/{{ c.id }}/detalle" data-carga-en="editar-{{ c.id }}-contenido"
            role="button" tabindex="0" aria-label="Editar este chunk">
     <form method="post" action="/conocimiento/{{ c.id }}/activo" class="chunk-estado">
       <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -84,11 +85,16 @@
 
     <div class="chunk-meta">
       <span class="chunk-largo {{ 'alerta' if c.demasiado_largo }}">{{ c.largo }}/{{ limite }}</span>
-      <button class="icono-accion peligro" data-abre="borrar-chunk-{{ c.id }}"
+      <button class="icono-accion peligro" data-abre="editar-{{ c.id }}"
               title="Eliminar" aria-label="Eliminar">{{ iconos.icono('basura') }}</button>
     </div>
   </article>
 
+  <dialog class="flotante ancha" id="editar-{{ c.id }}">
+    <div id="editar-{{ c.id }}-contenido"><p class="sub">Cargando…</p></div>
+  </dialog>
+
+  {% if false %}
   <dialog class="flotante ancha" id="editar-{{ c.id }}">
     <div class="cabecera">
       <h2>Editar chunk</h2>
@@ -134,6 +140,7 @@
       </form>
     </div>
   </dialog>
+  {% endif %}
   {% else %}
   <div class="panel vacio">
     {% if busqueda %}Nada coincide con «{{ busqueda }}».
