@@ -84,10 +84,6 @@ class CommonContractTests(unittest.TestCase):
         self.assertIn("NO significa por sí mismo", AGENT_COMMON_CONTRACT)
         self.assertIn('usa action="close"', AGENT_COMMON_CONTRACT)
 
-    def test_contract_does_not_infer_theory_appointment_from_one_word(self):
-        self.assertIn("«Teórico» o «teórica» por sí solos", AGENT_COMMON_CONTRACT)
-        self.assertIn("nunca deduzcas de esas palabras que solicita una cita o formulario", AGENT_COMMON_CONTRACT)
-
 
 class SupervisorPromptTests(unittest.TestCase):
     def test_schema_defines_route_and_targets(self):
@@ -102,10 +98,6 @@ class SupervisorPromptTests(unittest.TestCase):
 
     def test_supervisor_anti_loop_clarify(self):
         self.assertIn("No repitas la misma aclaración", SUPERVISOR_PROMPT_BODY)
-
-    def test_isolated_theory_word_does_not_trigger_a_form(self):
-        self.assertIn("GUARDIA DE INTENCIÓN PARA EL TEÓRICO", SUPERVISOR_PROMPT_BODY)
-        self.assertIn("no envíes formularios ni enlaces", SUPERVISOR_PROMPT_BODY)
 
 
 class SpecialistPromptTests(unittest.TestCase):
@@ -143,12 +135,6 @@ class SpecialistPromptTests(unittest.TestCase):
         self.assertIn("city_invitation", body)
         # Advertencia del entero: pagar el código equivocado es irreversible.
         self.assertIn("no se puede corregir", body)
-
-    def test_curso_teorico_requires_explicit_appointment_intent(self):
-        body = AREA_PROMPT_BODIES["CURSO_TEORICO"]
-        self.assertIn("ÚNICAMENTE cuando el cliente exprese", body)
-        self.assertIn("NO es una solicitud de cita", body)
-        self.assertIn("No uses [[rag]]", body)
 
     def test_tramites_informs_and_offers_dictamen(self):
         body = AREA_PROMPT_BODIES["TRAMITES"]

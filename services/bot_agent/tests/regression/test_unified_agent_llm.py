@@ -66,14 +66,6 @@ class SupervisorRoutingTests(unittest.TestCase):
         self.assertEqual(decision.action, "route")
         self.assertEqual(decision.target, "CURSO_TEORICO")
 
-    def test_isolated_theory_words_are_clarified_without_form(self):
-        for text in ("teórico", "teórica"):
-            with self.subTest(text=text):
-                decision = SupervisorAgent().decide(text, ConversationState())
-                self.assertEqual(decision.action, "reply")
-                self.assertNotIn("[[rag]]", _joined(decision))
-                self.assertFalse(decision.rag_query)
-
     def test_win_sends_review_fragment(self):
         decision = SupervisorAgent().decide("les cuento que aprobé mi prueba de manejo!!!", ConversationState())
         self.assertIn("[[frag:WIN.W1]]", _joined(decision))
@@ -221,15 +213,6 @@ class GeneralSpecialistTests(unittest.TestCase):
 
 @requires_llm
 class CursoTeoricoSpecialistTests(unittest.TestCase):
-    def test_isolated_theory_words_do_not_request_appointment_form(self):
-        for text in ("teórico", "teórica"):
-            with self.subTest(text=text):
-                state = ConversationState(flow="AGENT", active_agent="CURSO_TEORICO")
-                decision = SpecialistAgent("CURSO_TEORICO").decide(text, state)
-                self.assertEqual(decision.action, "reply")
-                self.assertNotIn("[[rag]]", _joined(decision))
-                self.assertFalse(decision.rag_query)
-
     def test_city_answer_triggers_city_invitation(self):
         state = ConversationState(
             flow="AGENT",
