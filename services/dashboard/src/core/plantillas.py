@@ -197,8 +197,8 @@ def pendientes_de(es_admin: bool, proyecto: dict[str, Any] | None = None) -> dic
     """Cuántas cosas sin atender tiene cada página del menú, para su pastilla.
 
     Solo lo que se puede quedar esperando sin que nadie lo mire: son bandejas
-    que llena el bot. Son dos cuentas sobre tablas que se purgan solas (7 días y
-    24 horas), no un recuento de todo el histórico.
+    que llena el bot. Son dos cuentas sobre tablas cuyo contenido atendido se
+    purga solo a las 24 horas, no un recuento de todo el histórico.
     """
     if es_admin:
         return {"/admin/incidencias": mensajeria.contar_incidencias_abiertas()}

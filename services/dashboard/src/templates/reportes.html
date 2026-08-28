@@ -6,7 +6,7 @@
 <p class="sub">
   Conversaciones que el bot derivó a una persona. Lo que falta por atender va
   arriba, y lo más reciente primero. Al marcar uno como revisado baja al final y
-  <strong>se borra solo a los {{ retencion_dias }} días</strong>; lo pendiente no
+  <strong>se borra solo después de {{ retencion_dias }} día{% if retencion_dias != 1 %}s{% endif %}</strong>; lo pendiente no
   caduca nunca.
   {% if solo_pendientes %}<a href="/reportes">Ver todos</a>
   {% else %}<a href="/reportes?pendientes=1">Ver solo sin revisar</a>{% endif %}

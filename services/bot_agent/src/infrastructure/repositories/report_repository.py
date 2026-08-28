@@ -11,7 +11,7 @@ from src.application.project_context import proyecto_actual
 # pendiente no caduca: que nadie lo haya mirado en un mes no lo hace menos
 # urgente. El valor tiene que coincidir con `REPORTES_RETENCION_DIAS` del
 # dashboard, que es quien lo enseña.
-REPORTES_RETENCION_DIAS = 7
+REPORTES_RETENCION_DIAS = 1
 
 
 class ReportRepository:

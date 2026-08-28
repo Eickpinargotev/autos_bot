@@ -23,3 +23,15 @@ def test_crear_reporte_inserta_reporte_y_evento_en_una_operacion():
     assert "report_created" in sql
     assert "conversation_messages" in sql
     assert params[6:9] == ("50688888888", "whatsapp", "Necesita ayuda humana")
+
+
+def test_un_reporte_revisado_caduca_despues_de_un_dia():
+    with patch(
+        "src.infrastructure.repositories.report_repository.ejecutar", return_value=1
+    ) as ejecutar:
+        borrados = ReportRepository.purge_reviewed()
+
+    assert borrados == 1
+    sql, params = ejecutar.call_args.args
+    assert "revisado_en < NOW()" in sql
+    assert params == (1,)

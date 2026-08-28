@@ -139,7 +139,7 @@ def test_lo_pendiente_va_arriba_aunque_sea_mas_viejo():
 
 
 def test_marcar_revisado_arranca_el_plazo_y_no_se_reinicia():
-    """Volver a pulsar el botón no puede regalarle otros 7 días."""
+    """Volver a pulsar el botón no puede regalarle otro día."""
     reporte_id = _crear_reporte("algo")
     trazabilidad.marcar_reporte_revisado(reporte_id)
     primera = pool.consultar_uno("SELECT revisado_en FROM reportes WHERE id = %s", (reporte_id,))
@@ -151,11 +151,11 @@ def test_marcar_revisado_arranca_el_plazo_y_no_se_reinicia():
     assert primera["revisado_en"] == segunda["revisado_en"]
 
 
-def test_un_reporte_revisado_caduca_a_los_siete_dias():
+def test_un_reporte_revisado_caduca_a_las_24_horas():
     caduco = _crear_reporte("resuelto hace tiempo", revisado=True)
     reciente = _crear_reporte("resuelto hoy", revisado=True)
     pool.ejecutar(
-        "UPDATE reportes SET revisado_en = NOW() - INTERVAL '8 days' WHERE id = %s", (caduco,)
+        "UPDATE reportes SET revisado_en = NOW() - INTERVAL '25 hours' WHERE id = %s", (caduco,)
     )
 
     borrados = trazabilidad.purgar_reportes_revisados()

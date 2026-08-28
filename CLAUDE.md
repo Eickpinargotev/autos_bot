@@ -478,7 +478,7 @@ Los prompts (`core/prompts.py`) son la lógica de negocio más sensible del sist
   respaldo). Una página de administrador que muestre datos de UN proyecto debe
   pasarle `proyecto=` para que sus horas cuadren con las que ve su dueño.
 - **Lo ATENDIDO de las dos bandejas caduca; lo pendiente no, nunca.** Reportes
-  revisados a los 7 días (`revisado_en`, migración 013) y preguntas entendidas a las
+  revisados a las 24 horas (`revisado_en`, migración 013) y preguntas entendidas a las
   24 horas (`atendida_en`, migración 014). El plazo cuenta desde que se atendió, no
   desde que llegó, y marcar dos veces no lo reinicia (`WHERE NOT revisado`). Quien
   borra es el bot: la tarea `purge_bandejas` corre **cada hora** en Celery beat,

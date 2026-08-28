@@ -810,7 +810,7 @@ def purge_expired_conversations():
 def purge_bandejas():
     """Caduca lo ya atendido de las dos bandejas del panel del proyecto.
 
-    Los reportes revisados (7 días) y las preguntas entendidas (24 horas) no son
+    Los reportes revisados (24 horas) y las preguntas entendidas (24 horas) no son
     historial: son cosas por hacer, y una lista de cosas por hacer llena de
     cosas hechas deja de servir. Lo PENDIENTE no se toca en ninguna de las dos,
     tenga la edad que tenga.

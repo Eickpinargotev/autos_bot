@@ -255,8 +255,8 @@ def resumen_conversacion(proyecto_id: int, client_id: str, canal: str) -> dict[s
 # --- Reportes al asesor ------------------------------------------------------
 
 # Cuánto sobrevive un reporte YA REVISADO. Lo pendiente no caduca nunca: un
-# cliente esperando respuesta no deja de esperar porque pase una semana.
-REPORTES_RETENCION_DIAS = 7
+# cliente esperando respuesta no deja de esperar porque pase el tiempo.
+REPORTES_RETENCION_DIAS = 1
 
 
 def listar_reportes(proyecto_id: int, solo_pendientes: bool = False, limite: int = 200) -> list[dict[str, Any]]:
@@ -306,7 +306,7 @@ def marcar_reporte_revisado(proyecto_id: int, reporte_id: int) -> int:
     """Lo baja al final de la lista y le arranca el plazo de caducidad.
 
     `revisado_en` solo se pone la PRIMERA vez (`WHERE NOT revisado`): volver a
-    pulsar el botón no debe regalarle otros 7 días a algo ya resuelto.
+    pulsar el botón no debe regalarle otro día a algo ya resuelto.
     """
     return pool.ejecutar(
         "UPDATE reportes SET revisado = TRUE, revisado_en = NOW() "
