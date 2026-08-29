@@ -7,11 +7,10 @@ y el dashboard lo formatea al mostrarlo.
 from src.infrastructure.repositories.postgres_conn import ejecutar
 from src.application.project_context import proyecto_actual
 
-# Cuánto sobrevive un reporte YA REVISADO, desde que se marcó como tal. Lo
-# pendiente no caduca: que nadie lo haya mirado en un mes no lo hace menos
-# urgente. El valor tiene que coincidir con `REPORTES_RETENCION_DIAS` del
-# dashboard, que es quien lo enseña.
+# Plazos de los reportes revisados y pendientes. Deben coincidir con los del
+# dashboard, que es quien muestra sus fechas de caducidad.
 REPORTES_RETENCION_DIAS = 1
+REPORTES_PENDIENTES_RETENCION_DIAS = 2
 
 
 class ReportRepository:
@@ -52,8 +51,11 @@ class ReportRepository:
             return False, str(e)
 
     @staticmethod
-    def purge_reviewed(days: int = REPORTES_RETENCION_DIAS) -> int:
-        """Borra los reportes revisados que ya cumplieron su plazo.
+    def purge_expired(
+        reviewed_days: int = REPORTES_RETENCION_DIAS,
+        pending_days: int = REPORTES_PENDIENTES_RETENCION_DIAS,
+    ) -> int:
+        """Borra reportes revisados vencidos y pendientes de más de dos días.
 
         La purga vive AQUÍ y no en el dashboard porque el que tiene reloj es el
         bot: Celery beat ya dispara la retención de conversaciones. El dashboard
@@ -63,9 +65,11 @@ class ReportRepository:
         return ejecutar(
             """
             DELETE FROM reportes
-            WHERE revisado
-              AND revisado_en IS NOT NULL
-              AND revisado_en < NOW() - (%s || ' days')::interval
+            WHERE (revisado
+                   AND revisado_en IS NOT NULL
+                   AND revisado_en < NOW() - (%s || ' days')::interval)
+               OR (NOT revisado
+                   AND creado_en < NOW() - (%s || ' days')::interval)
             """,
-            (int(days),),
+            (int(reviewed_days), int(pending_days)),
         )

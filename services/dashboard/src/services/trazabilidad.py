@@ -254,9 +254,10 @@ def resumen_conversacion(proyecto_id: int, client_id: str, canal: str) -> dict[s
 
 # --- Reportes al asesor ------------------------------------------------------
 
-# Cuánto sobrevive un reporte YA REVISADO. Lo pendiente no caduca nunca: un
-# cliente esperando respuesta no deja de esperar porque pase el tiempo.
+# Un reporte revisado se conserva un día desde que se atendió. Un pendiente
+# tiene un plazo independiente, contado desde que se creó.
 REPORTES_RETENCION_DIAS = 1
+REPORTES_PENDIENTES_RETENCION_DIAS = 2
 
 
 def listar_reportes(proyecto_id: int, solo_pendientes: bool = False, limite: int = 200) -> list[dict[str, Any]]:
@@ -271,34 +272,47 @@ def listar_reportes(proyecto_id: int, solo_pendientes: bool = False, limite: int
     return pool.consultar(
         f"""
         SELECT *,
-               revisado_en + (%s || ' days')::interval AS caduca_en
+               CASE
+                 WHEN revisado THEN revisado_en + (%s || ' days')::interval
+                 ELSE creado_en + (%s || ' days')::interval
+               END AS caduca_en
         FROM reportes {where}
         ORDER BY revisado, creado_en DESC
         LIMIT %s
         """,
-        (REPORTES_RETENCION_DIAS, int(proyecto_id), int(limite)),
+        (
+            REPORTES_RETENCION_DIAS,
+            REPORTES_PENDIENTES_RETENCION_DIAS,
+            int(proyecto_id),
+            int(limite),
+        ),
     )
 
 
-def purgar_reportes_revisados(dias: int = REPORTES_RETENCION_DIAS) -> int:
-    """Borra los reportes revisados que ya cumplieron su plazo.
+def purgar_reportes_vencidos(
+    dias_revisados: int = REPORTES_RETENCION_DIAS,
+    dias_pendientes: int = REPORTES_PENDIENTES_RETENCION_DIAS,
+) -> int:
+    """Borra los reportes que ya cumplieron su plazo.
 
     Un reporte revisado ya hizo su trabajo: alguien lo leyó y contactó a esa
     persona. Guardarlo para siempre solo alarga la lista con cosas resueltas
     hasta que lo que importa deja de verse.
 
-    Lo pendiente NUNCA se borra, sea de cuando sea: que nadie lo haya mirado en
-    un mes no lo hace menos urgente, lo hace más. El plazo cuenta desde
-    `revisado_en`, no desde que llegó (ver migración 013).
+    Los pendientes vencen a los dos días desde `creado_en`, aunque nadie los
+    haya revisado. Para los revisados, el plazo sigue contando desde
+    `revisado_en` (ver migración 013).
     """
     return pool.ejecutar(
         """
         DELETE FROM reportes
-        WHERE revisado
-          AND revisado_en IS NOT NULL
-          AND revisado_en < NOW() - (%s || ' days')::interval
+        WHERE (revisado
+               AND revisado_en IS NOT NULL
+               AND revisado_en < NOW() - (%s || ' days')::interval)
+           OR (NOT revisado
+               AND creado_en < NOW() - (%s || ' days')::interval)
         """,
-        (int(dias),),
+        (int(dias_revisados), int(dias_pendientes)),
     )
 
 

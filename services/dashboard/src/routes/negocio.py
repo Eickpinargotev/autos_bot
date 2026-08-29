@@ -577,6 +577,7 @@ def _datos_reportes(request: Request, usuario: dict) -> dict:
         "reportes": trazabilidad.listar_reportes(proyecto["id"], solo_pendientes=pendientes),
         "solo_pendientes": pendientes,
         "retencion_dias": trazabilidad.REPORTES_RETENCION_DIAS,
+        "retencion_pendientes_dias": trazabilidad.REPORTES_PENDIENTES_RETENCION_DIAS,
     }
 
 

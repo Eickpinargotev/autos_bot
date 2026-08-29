@@ -109,7 +109,7 @@ celery_app.conf.beat_schedule = {
         "task": "src.infrastructure.tasks.celery_app.purge_expired_conversations",
         "schedule": crontab(hour=8, minute=0),
     },
-    # Las bandejas del panel (reportes revisados, preguntas entendidas) caducan
+    # Las bandejas del panel (reportes vencidos, preguntas entendidas) caducan
     # cada hora y no una vez al día: el panel promete «se borra en 24 horas» y
     # con una pasada diaria podían ser 48.
     "purgar-bandejas-atendidas": {
@@ -808,12 +808,11 @@ def purge_expired_conversations():
 
 @celery_app.task
 def purge_bandejas():
-    """Caduca lo ya atendido de las dos bandejas del panel del proyecto.
+    """Caduca los elementos vencidos de las bandejas del proyecto.
 
-    Los reportes revisados (24 horas) y las preguntas entendidas (24 horas) no son
-    historial: son cosas por hacer, y una lista de cosas por hacer llena de
-    cosas hechas deja de servir. Lo PENDIENTE no se toca en ninguna de las dos,
-    tenga la edad que tenga.
+    Los reportes revisados duran 24 horas desde su revisión y los pendientes
+    expiran a las 48 horas desde que fueron creados. Las preguntas entendidas
+    duran 24 horas; las preguntas pendientes conservan su política actual.
 
     Va aparte de la retención de conversaciones y **cada hora**, no una vez al
     día: con una pasada diaria, «se borra en 24 horas» podía tardar 48, y lo que
@@ -824,7 +823,7 @@ def purge_bandejas():
         UnansweredQuestionRepository,
     )
 
-    reportes = ReportRepository.purge_reviewed()
+    reportes = ReportRepository.purge_expired()
     preguntas = UnansweredQuestionRepository.purge_answered()
     if reportes or preguntas:
         print(f"[retención] Bandejas: {reportes} reportes y {preguntas} preguntas caducados")

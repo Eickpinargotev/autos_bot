@@ -158,7 +158,7 @@ def test_un_reporte_revisado_caduca_a_las_24_horas():
         "UPDATE reportes SET revisado_en = NOW() - INTERVAL '25 hours' WHERE id = %s", (caduco,)
     )
 
-    borrados = trazabilidad.purgar_reportes_revisados()
+    borrados = trazabilidad.purgar_reportes_vencidos()
 
     assert borrados == 1
     ids = {r["id"] for r in trazabilidad.listar_reportes()}
@@ -166,15 +166,17 @@ def test_un_reporte_revisado_caduca_a_las_24_horas():
     assert reciente in ids
 
 
-def test_lo_pendiente_no_caduca_nunca():
-    """Que nadie lo haya mirado en un mes no lo hace menos urgente."""
+def test_un_reporte_pendiente_caduca_a_las_48_horas():
     antiguo = _crear_reporte("nadie lo miró")
+    reciente = _crear_reporte("todavía hay tiempo")
     pool.ejecutar(
-        "UPDATE reportes SET creado_en = NOW() - INTERVAL '90 days' WHERE id = %s", (antiguo,)
+        "UPDATE reportes SET creado_en = NOW() - INTERVAL '49 hours' WHERE id = %s", (antiguo,)
     )
 
-    assert trazabilidad.purgar_reportes_revisados() == 0
-    assert antiguo in {r["id"] for r in trazabilidad.listar_reportes()}
+    assert trazabilidad.purgar_reportes_vencidos() == 1
+    ids = {r["id"] for r in trazabilidad.listar_reportes()}
+    assert antiguo not in ids
+    assert reciente in ids
 
 
 # --- La hora es la del proyecto ----------------------------------------------
