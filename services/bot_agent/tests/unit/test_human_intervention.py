@@ -86,7 +86,7 @@ def test_el_bloqueo_ocurre_aunque_falle_el_registro_del_mensaje():
     repo.block_user.assert_called_once()
 
 
-def test_despues_de_escribir_el_dueno_ninguna_rama_del_bot_interviene():
+def test_despues_de_escribir_el_dueno_las_ramas_no_prioritarias_no_intervienen():
     class RepoConEstado:
         bloqueado_por_humano = False
 
@@ -111,7 +111,6 @@ def test_despues_de_escribir_el_dueno_ninguna_rama_del_bot_interviene():
     )
     entradas = (
         (MessageType.TEXT, "una consulta normal"),
-        (MessageType.TEXT, "tareas"),
         (MessageType.TEXT, "mira https://ejemplo.com"),
         (MessageType.AUDIO, ""),
         (MessageType.IMAGE, ""),
@@ -143,8 +142,6 @@ def test_despues_de_escribir_el_dueno_ninguna_rama_del_bot_interviene():
         "src.infrastructure.repositories.bloqueos_permanentes_repository.esta_bloqueado",
         return_value=False,
     ), patch.object(
-        ConversationOrchestrator, "_handle_text"
-    ) as texto, patch.object(
         ConversationOrchestrator, "_responder_por_media"
     ) as media, patch.object(
         ConversationOrchestrator, "_handle_audio"
@@ -172,6 +169,5 @@ def test_despues_de_escribir_el_dueno_ninguna_rama_del_bot_interviene():
         )
         assert ConversationOrchestrator().handle(ingreso_grupo) == []
 
-    texto.assert_not_called()
     media.assert_not_called()
     audio.assert_not_called()

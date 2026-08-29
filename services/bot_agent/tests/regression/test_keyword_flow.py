@@ -8,6 +8,7 @@ os.environ.setdefault("POSTGRES_URL", "postgresql://user:pass@localhost:5432/tes
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("OPENAI_API_KEY", "")
 
+from src.application import human_intervention
 from src.application.conversation_orchestrator import ConversationOrchestrator
 from src.domain.entities import Channel, InboundMessage, MessageType
 
@@ -167,6 +168,73 @@ class KeywordFlowTests(unittest.TestCase):
                 self.assertIn(expected_text, actions[0].text)
                 if unexpected_text:
                     self.assertNotIn(unexpected_text, actions[0].text)
+
+    def test_keyword_works_during_owner_intervention_pause(self):
+        for keyword, expected_text in (
+            ("tareas", "curso teórico"),
+            ("transporte", "transporte público"),
+        ):
+            with self.subTest(keyword=keyword):
+                repo = MagicMock()
+                repo.is_blocked_for_reason.return_value = True
+
+                with patch(
+                    "src.application.conversation_orchestrator.PostgresUserRepo",
+                    return_value=repo,
+                ), patch(
+                    "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+                ), patch(
+                    "src.application.conversation_orchestrator.register_keyword_context"
+                ), patch(
+                    "src.application.conversation_orchestrator.schedule_keyword_programmed_messages.apply_async"
+                ) as schedule_mock, patch(
+                    "src.application.conversation_orchestrator.KeywordRegistryRepository.register_if_missing"
+                ), patch("src.application.conversation_orchestrator.cancel_scheduled_tasks"):
+                    actions = ConversationOrchestrator().handle(self._message(keyword))
+
+                repo.is_blocked_for_reason.assert_not_called()
+                repo.block_user.assert_called_once_with(
+                    "50688888888",
+                    reason=f"Flujo keyword {keyword}",
+                    channel=Channel.WHATSAPP,
+                )
+                schedule_mock.assert_called_once()
+                self.assertEqual(len(actions), 1)
+                self.assertIn(expected_text, actions[0].text)
+
+    def test_non_keyword_stays_silent_during_owner_intervention_pause(self):
+        repo = MagicMock()
+        repo.is_blocked_for_reason.return_value = True
+
+        with patch("src.application.conversation_orchestrator.PostgresUserRepo", return_value=repo), patch(
+            "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+        ), patch("src.application.conversation_orchestrator.BufferService.add_message") as add_message:
+            actions = ConversationOrchestrator().handle(self._message("Necesito ayuda"))
+
+        repo.is_blocked_for_reason.assert_called_once_with(
+            "50688888888",
+            human_intervention.MOTIVO_PAUSA_IA,
+            channel=Channel.WHATSAPP,
+        )
+        add_message.assert_not_called()
+        self.assertEqual(actions, [])
+
+    def test_permanent_block_still_suppresses_keyword(self):
+        repo = MagicMock()
+
+        with patch("src.application.conversation_orchestrator.PostgresUserRepo", return_value=repo), patch(
+            "src.application.conversation_orchestrator.ConversationLogRepository.log_inbound"
+        ), patch(
+            "src.infrastructure.repositories.bloqueos_permanentes_repository.esta_bloqueado",
+            return_value=True,
+        ), patch(
+            "src.application.conversation_orchestrator.schedule_keyword_programmed_messages.apply_async"
+        ) as schedule_mock:
+            actions = ConversationOrchestrator().handle(self._message("transporte"))
+
+        repo.block_user.assert_not_called()
+        schedule_mock.assert_not_called()
+        self.assertEqual(actions, [])
 
     def test_new_keyword_cancels_previous_scheduled_keyword_reminders(self):
         repo = MagicMock()

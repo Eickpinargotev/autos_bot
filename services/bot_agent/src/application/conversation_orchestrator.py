@@ -122,6 +122,13 @@ class ConversationOrchestrator:
             return []
 
         repo = PostgresUserRepo()
+
+        # Los textos resuelven primero las palabras clave. Incluso una pausa
+        # iniciada porque escribió el dueño debe permitir esos disparadores;
+        # el bloqueo permanente, comprobado arriba, sigue siendo absoluto.
+        if message.message_type == MessageType.TEXT:
+            return self._handle_text(message, repo=repo)
+
         if repo.is_blocked_for_reason(
             message.user_id,
             human_intervention.MOTIVO_PAUSA_IA,
@@ -158,9 +165,6 @@ class ConversationOrchestrator:
             self._branch(message, "temporary_block")
             return []
 
-        if message.message_type == MessageType.TEXT:
-            return self._handle_text(message)
-
         if message.message_type in _NODO_POR_MEDIA:
             self._branch(message, "media_auto_reply", {"message_type": message.message_type.value})
             return self._responder_por_media(message, _NODO_POR_MEDIA[message.message_type])
@@ -193,9 +197,32 @@ class ConversationOrchestrator:
         )
         return []
 
-    def _handle_text(self, message: InboundMessage) -> list[OrchestratorAction]:
+    def _handle_text(
+        self,
+        message: InboundMessage,
+        repo: PostgresUserRepo | None = None,
+    ) -> list[OrchestratorAction]:
         text = message.text or ""
-        repo = PostgresUserRepo()
+        repo = repo or PostgresUserRepo()
+
+        # Las palabras clave las administra el negocio desde el panel; ya no
+        # están escritas aquí. El match sigue siendo exacto y sobre el mensaje
+        # entero, que es lo que hace que sea un disparador y no interpretación.
+        # Se evalúan antes de cualquier pausa temporal, incluida la causada por
+        # una intervención del dueño. El bloqueo permanente ya fue aplicado en
+        # `handle` y es el único que impide iniciar este flujo.
+        palabra = palabras_clave_repository.buscar(text)
+        if palabra:
+            self._branch(message, "keyword", {"keyword": palabra.get("palabra", "")})
+            return self._handle_keyword_flow(message, palabra, repo)
+
+        if repo.is_blocked_for_reason(
+            message.user_id,
+            human_intervention.MOTIVO_PAUSA_IA,
+            channel=message.channel,
+        ) is True:
+            self._branch(message, "temporary_block", {"source": "human_intervention"})
+            return []
 
         if text == "/d":
             ConversationLogRepository.delete_conversation(message.user_id, message.channel)
@@ -214,14 +241,6 @@ class ConversationOrchestrator:
             if not has_ad_context(message.channel, message.user_id):
                 return []
             return self._handle_group_join(message)
-
-        # Las palabras clave las administra el negocio desde el panel; ya no
-        # están escritas aquí. El match sigue siendo exacto y sobre el mensaje
-        # entero, que es lo que hace que sea un disparador y no interpretación.
-        palabra = palabras_clave_repository.buscar(text)
-        if palabra:
-            self._branch(message, "keyword", {"keyword": palabra.get("palabra", "")})
-            return self._handle_keyword_flow(message, palabra, repo)
 
         if repo.is_blocked(message.user_id, channel=message.channel, include_permanent=False):
             self._branch(message, "temporary_block")
