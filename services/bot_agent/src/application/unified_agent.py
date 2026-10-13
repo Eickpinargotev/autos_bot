@@ -241,7 +241,13 @@ class _DecisionAgent:
                 model=self.modelo,
                 response_format=response_format,
                 messages=messages,
-                **kwargs_de_decision(self.modelo),
+                **kwargs_de_decision(
+                    self.modelo,
+                    reasoning_effort=(
+                        settings.OPENAI_REASONING_EFFORT_SUPERVISOR
+                        if self.role == "SUPERVISOR" else None
+                    ),
+                ),
             )
             seguimiento_service.registrar_uso_llm(
                 client_id,

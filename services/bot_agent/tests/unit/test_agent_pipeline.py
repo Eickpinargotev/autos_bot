@@ -579,6 +579,9 @@ class DecisionValidationTests(unittest.TestCase):
             decision = agent.decide("hola", ConversationState())
 
         self.assertEqual(decision.action, "reply")
+        self.assertEqual(create_mock.call_args.kwargs["model"], "gpt-6.1-sol")
+        self.assertEqual(create_mock.call_args.kwargs["reasoning_effort"], "low")
+        self.assertNotIn("temperature", create_mock.call_args.kwargs)
         fmt = create_mock.call_args.kwargs["response_format"]
         self.assertEqual(fmt["type"], "json_schema")
         self.assertTrue(fmt["json_schema"]["strict"])
@@ -633,6 +636,38 @@ class DecisionValidationTests(unittest.TestCase):
         self.assertEqual(kwargs_de_decision("gpt-5.6-terra"), {"reasoning_effort": "none"})
         # gpt-4o: ni siquiera conoce reasoning_effort.
         self.assertEqual(kwargs_de_decision("gpt-4o-mini"), {"temperature": 0})
+
+    def test_sol_normaliza_esfuerzos_no_soportados_y_conserva_los_validos(self):
+        from src.core.modelos import kwargs_de_decision
+
+        for esfuerzo in ("", "none", "minimal", "low"):
+            with self.subTest(esfuerzo=esfuerzo):
+                self.assertEqual(
+                    kwargs_de_decision("gpt-6.1-sol", reasoning_effort=esfuerzo),
+                    {"reasoning_effort": "low"},
+                )
+        self.assertEqual(
+            kwargs_de_decision("gpt-6.1-sol", reasoning_effort="high"),
+            {"reasoning_effort": "high"},
+        )
+
+    def test_esfuerzo_supervisor_no_cambia_el_especialista(self):
+        fake = MagicMock()
+        fake.choices[0].message.content = (
+            '{"action": "reply", "messages": ["hola"], "rag_query": "", "pending": "",'
+            ' "report": "", "city": "", "target": "", "confidence": 1.0}'
+        )
+        with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "sk-test"), patch(
+            "src.application.unified_agent.settings.OPENAI_REASONING_EFFORT_SUPERVISOR", "high"
+        ), patch(
+            "src.application.unified_agent.client.chat.completions.create", return_value=fake
+        ) as create_mock:
+            SupervisorAgent().decide("hola", ConversationState())
+            self.assertEqual(create_mock.call_args.kwargs["reasoning_effort"], "high")
+            SpecialistAgent("ALQUILER").decide("hola", ConversationState())
+            self.assertEqual(create_mock.call_args.kwargs["model"], "gpt-5.4-mini")
+            self.assertEqual(create_mock.call_args.kwargs["reasoning_effort"], "none")
+            self.assertEqual(create_mock.call_args.kwargs["temperature"], 0)
 
     def test_cada_agente_usa_el_modelo_de_su_nivel(self):
         """El precio entre niveles difiere hasta 10x: no pueden compartir modelo."""

@@ -11,15 +11,15 @@ class Settings(BaseSettings):
     #
     # - SUPERVISOR: enruta y decide sobre el prompt grande (>2000 tokens). Es la
     #   llamada que más se beneficia del prompt caching y la que más daño hace
-    #   si se equivoca. `gpt-5.6-terra` cuesta menos que `gpt-5.4` completo
-    #   ($2.00 vs $2.50 por millón de entrada) y cachea igual al 90%.
+    #   si se equivoca. GPT-6.1 Sol usa razonamiento low para esta tarea.
     # - ESPECIALISTA: ya sabe de qué área habla; el trabajo es más acotado.
     # - AUXILIAR: decisiones chicas (recordatorio) y redacción del RAG.
     #
-    # OJO con `temperature`: gpt-5.6 la RECHAZA (400 si se manda 0), mientras
+    # OJO con `temperature`: Sol con razonamiento y gpt-5.6 la RECHAZAN, mientras
     # que gpt-5.4-mini/nano la aceptan. Por eso el determinismo se pide por
     # modelo y no globalmente — ver `MODELOS_SIN_TEMPERATURE`.
-    OPENAI_MODEL_SUPERVISOR: str = "gpt-5.6-terra"
+    OPENAI_MODEL_SUPERVISOR: str = "gpt-6.1-sol"
+    OPENAI_REASONING_EFFORT_SUPERVISOR: str = "low"
     OPENAI_MODEL_ESPECIALISTA: str = "gpt-5.4-mini"
     OPENAI_MODEL_AUXILIAR: str = "gpt-5.4-nano"
     # Transcripción de notas de voz. Se cobra por MINUTO de audio, no por token.

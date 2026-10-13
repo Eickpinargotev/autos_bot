@@ -70,6 +70,15 @@ Requiere un archivo `.env` en la raíz (no versionado). Variables principales:
 e `INTERNAL_API_TOKEN` para el reindexado inmediato del RAG. Ver los compose para la
 lista completa.
 
+El supervisor usa `gpt-6.1-sol` con razonamiento `low`. Se puede cambiar con
+`OPENAI_MODEL_SUPERVISOR` y `OPENAI_REASONING_EFFORT_SUPERVISOR` en `.env`;
+ambos compose pasan estas opciones a los servicios del bot. Sol no admite
+razonamiento `none` ni `minimal`, y se omite `temperature` al llamarlo.
+Los especialistas siguen con `gpt-5.4-mini` y el auxiliar con `gpt-5.4-nano`.
+Cambiar únicamente `OPENAI_MODEL` no cambia estos modelos por tarea.
+Después de modificar la configuración, recrea los servicios del bot; el
+dashboard aplica al arrancar la migración que registra el precio de Sol.
+
 > Las credenciales de WhatsApp **no** van en el `.env`: son de cada negocio y se
 > administran desde el panel, en el perfil del cliente. El `.env` solo lleva lo que
 > es del despliegue entero.

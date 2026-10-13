@@ -21,10 +21,10 @@ from src.core.config import settings
 # Modelos que rechazan `temperature`. Es una lista por FAMILIA porque el
 # comportamiento es de la familia, no de la versión concreta: así un
 # `gpt-5.6-luna` nuevo entra solo, sin que nadie se acuerde de añadirlo.
-FAMILIAS_SIN_TEMPERATURE = ("gpt-5.6", "gpt-5.5", "o1", "o3", "o4")
+FAMILIAS_SIN_TEMPERATURE = ("gpt-6.1-sol", "gpt-5.6", "gpt-5.5", "o1", "o3", "o4")
 
 # Modelos que aceptan `reasoning_effort`. Enviarlo a un gpt-4o lo hace fallar.
-FAMILIAS_CON_RAZONAMIENTO = ("gpt-5",)
+FAMILIAS_CON_RAZONAMIENTO = ("gpt-6.1-sol", "gpt-5")
 
 
 def acepta_temperature(modelo: str) -> bool:
@@ -35,17 +35,22 @@ def acepta_razonamiento(modelo: str) -> bool:
     return str(modelo or "").startswith(FAMILIAS_CON_RAZONAMIENTO)
 
 
-def kwargs_de_decision(modelo: str) -> dict:
+def kwargs_de_decision(modelo: str, *, reasoning_effort: str | None = None) -> dict:
     """Parámetros extra de una llamada de DECISIÓN, según lo que el modelo admita.
 
     `temperature=0` donde se pueda: es lo que hace que la misma conversación se
     enrute igual dos veces. Donde el modelo no la acepte, el determinismo se
-    apoya solo en `reasoning_effort="none"` y en el esquema estricto de salida,
+    apoya en el razonamiento configurado y en el esquema estricto de salida,
     que fija la FORMA de la respuesta aunque no la elección.
     """
     extra: dict = {}
     if acepta_temperature(modelo):
         extra["temperature"] = 0
-    if settings.OPENAI_REASONING_EFFORT and acepta_razonamiento(modelo):
-        extra["reasoning_effort"] = settings.OPENAI_REASONING_EFFORT
+    esfuerzo = settings.OPENAI_REASONING_EFFORT if reasoning_effort is None else reasoning_effort
+    # Sol no admite none ni minimal. Incluso con la configuración histórica,
+    # usamos low explícitamente para evitar errores y el default medium.
+    if str(modelo or "").startswith("gpt-6.1-sol") and esfuerzo in ("", "none", "minimal"):
+        esfuerzo = "low"
+    if esfuerzo and acepta_razonamiento(modelo):
+        extra["reasoning_effort"] = esfuerzo
     return extra
