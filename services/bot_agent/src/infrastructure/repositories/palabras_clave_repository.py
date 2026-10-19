@@ -15,6 +15,7 @@ conversación entera por una consulta caída lo rompe.
 """
 
 import time
+import unicodedata
 from typing import Any
 
 from src.infrastructure.repositories.postgres_conn import consultar
@@ -53,18 +54,93 @@ def _activas() -> dict[str, dict[str, Any]]:
     return indice
 
 
-def buscar(texto: str) -> dict[str, Any] | None:
-    """La palabra clave que dispara ESE texto, o None.
+def _sin_puntuacion_exterior(texto: str) -> str:
+    """Quita signos exteriores, conservando tildes, símbolos y signos internos."""
+    texto = " ".join(str(texto or "").split()).lower()
+    inicio, fin = 0, len(texto)
+    while inicio < fin and (texto[inicio].isspace() or unicodedata.category(texto[inicio]).startswith("P")):
+        inicio += 1
+    while fin > inicio and (texto[fin - 1].isspace() or unicodedata.category(texto[fin - 1]).startswith("P")):
+        fin -= 1
+    return texto[inicio:fin]
 
-    El match es exacto y sobre el mensaje entero, con los espacios de los bordes
-    quitados y sin distinguir mayúsculas: «Examen» y «examen» son la misma, pero
-    «tengo dudas del examen» no dispara nada. Es un disparador anunciado por el
-    negocio, no interpretación de lenguaje natural (ver CLAUDE.md §5).
+
+def _formas_simples(palabra: str) -> set[str]:
+    """Solo vocal + s: no intenta resolver toda la morfología del español."""
+    formas = {palabra}
+    vocales = "aeiouáéíóúü"
+    if len(palabra) >= 5 and palabra[-1] in vocales:
+        formas.add(palabra + "s")
+    elif len(palabra) >= 6 and palabra.endswith("s") and palabra[-2] in vocales:
+        formas.add(palabra[:-1])
+    return formas
+
+
+def _distancia_hasta_un_cambio(a: str, b: str) -> int:
+    """Levenshtein acotada: 0, 1 o 2 (más de un cambio), en tiempo lineal."""
+    if abs(len(a) - len(b)) > 1:
+        return 2
+    i = j = cambios = 0
+    while i < len(a) and j < len(b):
+        if a[i] == b[j]:
+            i += 1
+            j += 1
+            continue
+        cambios += 1
+        if cambios > 1:
+            return 2
+        if len(a) >= len(b):
+            i += 1
+        if len(b) >= len(a):
+            j += 1
+    return cambios + int(i < len(a) or j < len(b))
+
+
+def buscar(texto: str) -> dict[str, Any] | None:
+    """Busca el disparador completo y devuelve siempre su fila original.
+
+    La coincidencia histórica gana; después se toleran signos exteriores y,
+    solo en palabras individuales de cinco letras o más, plural simple y un
+    error de escritura. Un empate no dispara nada. No interpreta frases.
     """
     limpio = " ".join(str(texto or "").split()).lower()
     if not limpio:
         return None
-    return _activas().get(limpio)
+    activas = _activas()
+    if limpio in activas:
+        return activas[limpio]
+    # Nunca convertir un comando desconocido en una palabra clave al quitar /.
+    if limpio.startswith("/"):
+        return None
+
+    normalizado = _sin_puntuacion_exterior(limpio)
+    if not normalizado:
+        return None
+    candidatas = [(fila, _sin_puntuacion_exterior(clave)) for clave, fila in activas.items()]
+    exactas = [fila for fila, clave in candidatas if clave == normalizado]
+    if exactas:
+        return exactas[0] if len(exactas) == 1 else None
+
+    # Las frases configuradas conservan la coincidencia completa, pero nunca
+    # reciben tolerancia a errores. El límite acota el trabajo por mensaje.
+    if not normalizado.isalpha() or not 5 <= len(normalizado) <= 61:
+        return None
+    formas = _formas_simples(normalizado)
+    mejores = []
+    menor_distancia = 2
+    for fila, clave in candidatas:
+        if not clave.isalpha() or len(clave) < 5:
+            continue
+        distancia = min(
+            _distancia_hasta_un_cambio(a, b)
+            for a in formas for b in _formas_simples(clave)
+        )
+        if distancia < menor_distancia:
+            menor_distancia = distancia
+            mejores = [fila]
+        elif distancia == menor_distancia and distancia < 2:
+            mejores.append(fila)
+    return mejores[0] if len(mejores) == 1 else None
 
 
 def piezas_de(palabra_id: int, tipo: str) -> list[dict[str, Any]]:

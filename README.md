@@ -179,6 +179,16 @@ aceptan un `proyecto_id` enviado por el navegador y responden 404 ante ids ajeno
 403 aunque escriba la URL a mano, y los tests recorren la lista completa de rutas
 `/admin/*` para que no se escape ninguna.
 
+### Palabras clave
+
+En «Palabras clave» basta crear la palabra correcta con sus mensajes y recordatorios.
+El bot prioriza las coincidencias exactas y reconoce signos exteriores; para palabras
+individuales de cinco letras o más tolera plural simple en `s` y un error de una letra.
+Así, una sola entrada `tareas` reconoce también `tarea`, `tareas.`, `tares`, `terea`
+y `tereas`. No busca palabras dentro de frases y los empates no activan ningún flujo.
+Una palabra distinta muy parecida también puede coincidir. No se borran ni agrupan
+entradas existentes automáticamente. Ver [reglas, pruebas y despliegue](docs/palabras_clave.md).
+
 ### Cómo se factura
 
 Dos categorías, porque no cuestan lo mismo:

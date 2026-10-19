@@ -206,8 +206,8 @@ class ConversationOrchestrator:
         repo = repo or PostgresUserRepo()
 
         # Las palabras clave las administra el negocio desde el panel; ya no
-        # están escritas aquí. El match sigue siendo exacto y sobre el mensaje
-        # entero, que es lo que hace que sea un disparador y no interpretación.
+        # están escritas aquí. El buscador tolera errores acotados sobre la
+        # palabra completa y devuelve la fila original, nunca interpreta frases.
         # Se evalúan antes de cualquier pausa temporal, incluida la causada por
         # una intervención del dueño. El bloqueo permanente ya fue aplicado en
         # `handle` y es el único que impide iniciar este flujo.
