@@ -1,0 +1,102 @@
+<dialog class="flotante ancha configuracion-mensajes" id="configuracion-tiempos"
+        {{ 'data-abrir-al-cargar' if configuracion_abierta or request.query_params.get('configuracion') == '1' }}>
+  <div class="cabecera">
+    <h2>Configuración de mensajes</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <form method="post" action="/mensajes/configuracion" data-configuracion-mensajes>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="dialogo-secciones" data-pestanas>
+      <nav class="dialogo-nav" aria-label="Secciones de configuración">
+        <button type="button" class="activo" data-pestana="cfg-publicidad">Publicidad</button>
+        <button type="button" data-pestana="cfg-pausa">Pausa entre mensajes</button>
+        <button type="button" data-pestana="cfg-seguimiento">Seguimiento inteligente</button>
+      </nav>
+      <div class="dialogo-cuerpo">
+        {% if error_configuracion %}
+        <p class="mensaje error" role="alert" id="configuracion-error">{{ error_configuracion }}</p>
+        {% endif %}
+        <section id="cfg-publicidad" data-panel>
+          <h3>Recordatorios de publicidad</h3>
+          <p class="sub">Estos tres mensajes se usan para todas las ciudades de tu negocio. Los tiempos se cuentan desde la entrada del cliente por el anuncio.</p>
+          {% set titulos = ['Retomar conversación', 'Resolver dudas', 'Recordar información del curso'] %}
+          {% for valor in tiempos_publicidad %}
+          {% set i = loop.index %}
+          {% set campo = 'publicidad_' ~ i ~ '_texto' %}
+          <article class="recordatorio-publicidad" data-editor-publicidad>
+            <h3><span class="pastilla">{{ i }}</span> {{ titulos[i - 1] }}</h3>
+            <label for="publicidad-{{ i }}">Enviar después de</label>
+            <div class="linea">
+              <input id="publicidad-{{ i }}" name="publicidad_{{ i }}_cantidad" type="number"
+                     min="1" required value="{{ valor.cantidad }}"
+                     {{ 'aria-invalid=true aria-describedby=configuracion-error' if campo_error == 'publicidad_' ~ i ~ '_cantidad' }}>
+              <select name="publicidad_{{ i }}_unidad" aria-label="Unidad del recordatorio {{ i }}"
+                      {{ 'aria-invalid=true aria-describedby=configuracion-error' if campo_error == 'publicidad_' ~ i ~ '_unidad' }}>
+                {% for unidad, etiqueta in [('segundos', 'segundos'), ('minutos', 'minutos'), ('horas', 'horas'), ('dias', 'días')] %}
+                <option value="{{ unidad }}" {{ 'selected' if valor.unidad == unidad }}>{{ etiqueta }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <label for="publicidad-texto-{{ i }}">Texto del recordatorio {{ i }}</label>
+            <textarea id="publicidad-texto-{{ i }}" name="{{ campo }}" rows="{{ 6 if i == 3 else 4 }}"
+                      required maxlength="2000" data-texto-publicidad
+                      {% if campo_error == campo %}aria-invalid="true" aria-describedby="error-{{ campo }}"{% endif %}>{{ textos_publicidad[i - 1] }}</textarea>
+            {% if campo_error == campo %}<p class="mensaje error" id="error-{{ campo }}">{{ error_configuracion }}</p>{% endif %}
+            <div class="linea variables-publicidad" aria-label="Insertar datos del curso">
+              <span class="sub">Insertar:</span>
+              {% for variable, etiqueta in [('dia', 'Fecha'), ('hora', 'Hora'), ('valor', 'Valor'), ('enlace', 'Enlace del grupo')] %}
+              <button type="button" class="mini" data-inserta-variable="{{ variable }}">{{ etiqueta }}</button>
+              {% endfor %}
+            </div>
+            <p class="sub">Hasta 2.000 caracteres. Los datos insertados se completan con la información de cada curso.</p>
+            <details class="previa-publicidad">
+              <summary>Vista previa · datos de ejemplo</summary>
+              <div data-previa-publicidad>{{ textos_publicidad[i - 1] | replace('{dia}', 'lunes 26 de octubre') | replace('{hora}', '8:00 a. m.') | replace('{valor}', '10000') | replace('{enlace}', 'https://chat.whatsapp.com/EJEMPLO') }}</div>
+            </details>
+          </article>
+          {% endfor %}
+          <p class="sub">Cada recordatorio debe salir después del anterior. La lógica de respuestas y cancelaciones se mantiene.</p>
+        </section>
+        <section id="cfg-pausa" data-panel>
+          <h3>Pausa entre mensajes</h3>
+          <p class="sub">Se aplica cuando el sistema, el agente o una publicidad envían varios mensajes seguidos.</p>
+          <label for="intervalo-mensajes">Pausa entre un mensaje y el siguiente</label>
+          <div class="linea">
+            <input id="intervalo-mensajes" name="intervalo_mensajes_segundos" type="number"
+                   min="1" max="60" required value="{{ tiempos.intervalo_mensajes_segundos }}"
+                   {{ 'aria-invalid=true aria-describedby=configuracion-error' if campo_error == 'intervalo_mensajes_segundos' }}>
+            <span>segundos</span>
+          </div>
+        </section>
+        <section id="cfg-seguimiento" data-panel>
+          <h3>Seguimiento inteligente</h3>
+          <p class="sub">Seguimiento de conversaciones con una respuesta pendiente. Su texto lo genera el agente.</p>
+          <label class="switch">
+            <input type="checkbox" name="recordatorio_habilitado" value="1"
+                   {{ 'checked' if config_recordatorios.habilitado }}>
+            <span class="switch-pista"><span class="switch-bola"></span></span>
+            <span>Activar seguimiento inteligente</span>
+          </label>
+          <label for="seguimiento-cantidad">Enviar después de</label>
+          <div class="linea">
+            <input id="seguimiento-cantidad" name="recordatorio_cantidad" type="number" min="1" required
+                   value="{{ config_recordatorios.cantidad }}"
+                   {{ 'aria-invalid=true aria-describedby=configuracion-error' if campo_error == 'recordatorio_cantidad' }}>
+            <select name="recordatorio_unidad" aria-label="Unidad del seguimiento inteligente"
+                    {{ 'aria-invalid=true aria-describedby=configuracion-error' if campo_error == 'recordatorio_unidad' }}>
+              <option value="minutos" {{ 'selected' if config_recordatorios.unidad == 'minutos' }}>minutos</option>
+              <option value="horas" {{ 'selected' if config_recordatorios.unidad == 'horas' }}>horas</option>
+            </select>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="configuracion-mensajes-pie">
+      <p class="sub">Los cambios se aplican a nuevos recordatorios. Los ya programados conservan su texto y su hora.</p>
+      <div class="linea">
+        <button class="mini" type="button" data-cierra>Cancelar</button>
+        <button class="primario">Guardar configuración</button>
+      </div>
+    </div>
+  </form>
+</dialog>

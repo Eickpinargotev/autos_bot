@@ -77,3 +77,45 @@ def configuracion_tiempos_mensajes() -> dict:
 def intervalo_entre_mensajes() -> int:
     config = configuracion_tiempos_mensajes()
     return max(1, min(int(config.get("intervalo_mensajes_segundos") or 5), 60))
+
+
+TEXTOS_PUBLICIDAD_ORIGINALES = (
+    '📌 Hola!!!  No recibí respuesta a nuestra conversación.  Podemos continuar???',
+    (
+        '👋🏻Vi que no se unió al grupo👋🏻\n'
+        '\n'
+        '*¿¿¿Tiene alguna duda duda antes de unirse al grupo???'
+    ),
+    (
+        '📌Hola!!!\n'
+        '\n'
+        'Le comparto la información de nuestro curso.\n'
+        '\n'
+        'Fecha: {dia}\n'
+        '\n'
+        'Hora: {hora}\n'
+        'Valor: {valor} colones\n'
+        '\n'
+        'Unirse al grupo: {enlace}\n'
+        '\n'
+        'Le esperamos'
+    ),
+)
+
+
+def textos_recordatorios_publicidad() -> list[str]:
+    """Lee al programar, nunca al enviar: las tareas pendientes guardan su copia."""
+    proyecto_id = proyecto_actual()
+    fila = None
+    if proyecto_id:
+        try:
+            fila = consultar_uno(
+                "SELECT publicidad_recordatorio_1_texto, publicidad_recordatorio_2_texto, "
+                "publicidad_recordatorio_3_texto FROM proyecto_tiempos_mensajes WHERE proyecto_id = %s",
+                (proyecto_id,),
+            )
+        except Exception as exc:
+            # Permite actualizar el bot antes de que arranque la migración del panel.
+            print(f"Error leyendo textos de publicidad: {exc}")
+    return [(fila or {}).get(f"publicidad_recordatorio_{i}_texto") or original
+            for i, original in enumerate(TEXTOS_PUBLICIDAD_ORIGINALES, 1)]

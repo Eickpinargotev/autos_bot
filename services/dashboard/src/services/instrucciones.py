@@ -247,13 +247,14 @@ def guardar_configuracion_recordatorios(
     unidad: str,
     usuario: str,
     maximo_recordatorios: int | str | None = None,
+    *, consultar=None,
 ) -> dict[str, Any]:
     minutos = validar_configuracion_recordatorios(cantidad, unidad)
     maximo = (
         validar_maximo_recordatorios(maximo_recordatorios)
         if maximo_recordatorios not in (None, "") else None
     )
-    return pool.consultar_uno(
+    return (consultar or pool.consultar_uno)(
         """
         INSERT INTO proyecto_recordatorios
             (proyecto_id, habilitado, intervalo_minutos, maximo_recordatorios,

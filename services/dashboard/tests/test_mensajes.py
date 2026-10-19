@@ -202,7 +202,7 @@ def test_la_lista_no_despliega_nada_y_cada_clave_abre_su_ventana(sesion_cliente)
     assert f'data-abre="msg-{plantilla["id"]}"' in cuerpo
     assert f'id="msg-{plantilla["id"]}"' in cuerpo
     # El acordeón se fue: ya no hay <details> en la lista.
-    assert "<details" not in cuerpo
+    assert "<details" not in cuerpo.split('<div class="msgs">', 1)[1].split("<dialog", 1)[0]
     # Y no queda ningún campo «nombre» que rellenar.
     assert 'name="nombre"' not in cuerpo
 
@@ -364,6 +364,7 @@ def test_rechaza_recordatorios_de_publicidad_fuera_de_orden(sesion_cliente):
         follow_redirects=False,
     )
 
-    assert respuesta.status_code == 303
-    assert "configuracion=1" in respuesta.headers["location"]
+    assert respuesta.status_code == 422
+    assert 'id="configuracion-tiempos"\n        data-abrir-al-cargar' in respuesta.text
+    assert 'min="1" required value="3"' in respuesta.text
     assert tiempos_mensajes.configuracion(1)["publicidad_recordatorio_1_segundos"] == 7200

@@ -63,10 +63,11 @@ def guardar(
     intervalo_mensajes_segundos: Any,
     recordatorios: list[tuple[Any, str]],
     usuario: str,
+    *, consultar=None,
 ) -> dict[str, Any]:
     intervalo, segundos = validar(intervalo_mensajes_segundos, recordatorios)
 
-    return pool.consultar_uno(
+    return (consultar or pool.consultar_uno)(
         """
         INSERT INTO proyecto_tiempos_mensajes (
             proyecto_id, intervalo_mensajes_segundos,

@@ -750,10 +750,14 @@ def create_flow_report_and_block(channel: str, user_id: str, report_reason: str)
 
 @celery_app.task
 def schedule_ad_programmed_messages(channel: str, user_id: str, dia: str, valor: str, hora: str, enlace: str):
-    # This prepares the 3 messages with the extracted details
-    msg1 = "📌 Hola!!!  No recibí respuesta a nuestra conversación.  Podemos continuar???"
-    msg2 = "👋🏻Vi que no se unió al grupo👋🏻\n\n*¿¿¿Tiene alguna duda duda antes de unirse al grupo???"
-    msg3 = f"📌Hola!!!\n\nLe comparto la información de nuestro curso.\n\nFecha: {dia}\n\nHora: {hora}\nValor: {valor} colones\n\nUnirse al grupo: {enlace}\n\nLe esperamos"
+    # Sustitución literal de variables conocidas; no interpreta expresiones ni formato.
+    import re
+
+    datos = {"dia": dia, "valor": valor, "hora": hora, "enlace": enlace}
+    msg1, msg2, msg3 = [
+        re.sub(r"\{(dia|hora|valor|enlace)\}", lambda m: str(datos[m.group(1)]), texto)
+        for texto in instrucciones_repository.textos_recordatorios_publicidad()
+    ]
     
     # El countdown se toma del proyecto al crear la conversación. Cambiarlo en
     # el panel afecta los anuncios nuevos, no mueve tareas que ya estaban en Redis.

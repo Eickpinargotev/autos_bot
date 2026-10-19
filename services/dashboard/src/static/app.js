@@ -649,6 +649,51 @@
     });
   });
 
+  /* Publicidad: los ejemplos son texto literal, nunca HTML ni expresiones. */
+  var ejemplosPublicidad = {
+    dia: "lunes 26 de octubre", hora: "8:00 a. m.", valor: "10000",
+    enlace: "https://chat.whatsapp.com/EJEMPLO"
+  };
+  document.querySelectorAll("[data-editor-publicidad]").forEach(function (editor) {
+    var campo = editor.querySelector("[data-texto-publicidad]");
+    var previa = editor.querySelector("[data-previa-publicidad]");
+    function actualizar() {
+      previa.textContent = campo.value.replace(/\{(dia|hora|valor|enlace)\}/g, function (_, clave) {
+        return ejemplosPublicidad[clave];
+      });
+      var resto = campo.value.replace(/\{(dia|hora|valor|enlace)\}/g, "");
+      campo.setCustomValidity(/[{}]/.test(resto) ? "Usa solamente {dia}, {hora}, {valor} y {enlace}, con sus llaves completas." :
+        (!campo.value.trim() ? "Escribe el texto del recordatorio." : ""));
+    }
+    campo.addEventListener("input", actualizar);
+    editor.querySelectorAll("[data-inserta-variable]").forEach(function (boton) {
+      boton.addEventListener("click", function () {
+        var variable = "{" + boton.getAttribute("data-inserta-variable") + "}";
+        if (campo.value.length - (campo.selectionEnd - campo.selectionStart) + variable.length > 2000) return;
+        campo.setRangeText(variable, campo.selectionStart, campo.selectionEnd, "end");
+        campo.focus();
+        actualizar();
+      });
+    });
+    actualizar();
+  });
+  document.querySelectorAll("[data-configuracion-mensajes]").forEach(function (formulario) {
+    function mostrarCampo(campo) {
+      var panel = campo && campo.closest("[data-panel]");
+      var boton = formulario.querySelector('[data-pestana="' + (panel ? panel.id : "cfg-publicidad") + '"]');
+      if (boton) boton.click();
+    }
+    mostrarCampo(formulario.querySelector('[aria-invalid="true"]'));
+    // Mostrar el primer error, aunque otros controles de secciones ocultas fallen.
+    var mostrandoError = false;
+    formulario.addEventListener("invalid", function (evento) {
+      if (mostrandoError) return;
+      mostrandoError = true;
+      mostrarCampo(evento.target);
+      Promise.resolve().then(function () { mostrandoError = false; });
+    }, true);
+  });
+
   /* 8. Visor de conversaciones del negocio (las dos columnas del <dialog>).
 
         Todo se pide al servidor como fragmento y se inyecta: la lista, el

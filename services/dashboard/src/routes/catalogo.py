@@ -14,6 +14,7 @@ from src.services import (
     instrucciones,
     mensajeria,
     palabras_clave,
+    recordatorios_publicidad,
     tiempos_mensajes,
     trazabilidad,
 )
@@ -50,6 +51,10 @@ def listar_plantillas(request: Request, usuario=Depends(security.requiere_negoci
     sin esto habría que buscar otra vez dónde se estaba. `?parte=<orden>` hace lo
     mismo con la segunda ventana, la del mensaje suelto.
     """
+    return _mostrar_plantillas(request, usuario)
+
+
+def _mostrar_plantillas(request, usuario, formulario=None, error_configuracion="", campo_error=""):
     abierto = request.query_params.get("abierto", "")
     parte = request.query_params.get("parte", "")
     proyecto_id = _proyecto_id(usuario)
@@ -64,6 +69,17 @@ def listar_plantillas(request: Request, usuario=Depends(security.requiere_negoci
     minutos = int(recordatorios.get("intervalo_minutos") or 60)
     recordatorios["cantidad"] = minutos // 60 if minutos % 60 == 0 else minutos
     recordatorios["unidad"] = "horas" if minutos % 60 == 0 else "minutos"
+    textos_publicidad = recordatorios_publicidad.textos_de(tiempos)
+    if formulario is not None:
+        tiempos["intervalo_mensajes_segundos"] = formulario["intervalo_mensajes_segundos"]
+        recordatorios["habilitado"] = bool(formulario["recordatorio_habilitado"])
+        recordatorios["cantidad"] = formulario["recordatorio_cantidad"]
+        recordatorios["unidad"] = formulario["recordatorio_unidad"]
+        for i in range(1, 4):
+            publicidad[i - 1] = {"cantidad": formulario[f"publicidad_{i}_cantidad"],
+                                 "unidad": formulario[f"publicidad_{i}_unidad"]}
+            if formulario[f"publicidad_{i}_texto"] is not None:
+                textos_publicidad[i - 1] = formulario[f"publicidad_{i}_texto"]
     return render(
         request,
         "plantillas.html",
@@ -72,6 +88,10 @@ def listar_plantillas(request: Request, usuario=Depends(security.requiere_negoci
         tiempos=tiempos,
         tiempos_publicidad=publicidad,
         config_recordatorios=recordatorios,
+        textos_publicidad=textos_publicidad,
+        configuracion_abierta=formulario is not None,
+        error_configuracion=error_configuracion,
+        campo_error=campo_error,
         abierto=int(abierto) if abierto.isdigit() else None,
         parte_abierta=int(parte) if parte.isdigit() else None,
     )
@@ -98,6 +118,12 @@ def detalle_plantilla(
     )
 
 
+async def _textos_publicidad_recibidos(request: Request):
+    formulario = await request.form()
+    # None: campo omitido por un cliente anterior; "": texto borrado explícitamente.
+    return [formulario.get(f"publicidad_{i}_texto") for i in range(1, 4)]
+
+
 @router.post("/mensajes/configuracion")
 def guardar_configuracion_de_tiempos(
     request: Request,
@@ -111,43 +137,45 @@ def guardar_configuracion_de_tiempos(
     publicidad_2_unidad: str = Form(""),
     publicidad_3_cantidad: str = Form(""),
     publicidad_3_unidad: str = Form(""),
+    publicidad_1_texto: str | None = Form(None),
+    publicidad_2_texto: str | None = Form(None),
+    publicidad_3_texto: str | None = Form(None),
+    textos=Depends(_textos_publicidad_recibidos),
     csrf: str = Form(""),
     usuario=Depends(security.requiere_negocio),
 ):
-    """Guarda en una sola acción todos los tiempos visibles en Mensajes."""
+    """Guarda configuración y textos del proyecto en una sola transacción."""
     security.verificar_csrf(request, csrf)
     proyecto_id = _proyecto_id(usuario)
-    recordatorios_publicidad = [
+    tiempos_publicidad = [
         (publicidad_1_cantidad, publicidad_1_unidad),
         (publicidad_2_cantidad, publicidad_2_unidad),
         (publicidad_3_cantidad, publicidad_3_unidad),
     ]
+    formulario = {
+        "intervalo_mensajes_segundos": intervalo_mensajes_segundos,
+        "recordatorio_habilitado": recordatorio_habilitado,
+        "recordatorio_cantidad": recordatorio_cantidad,
+        "recordatorio_unidad": recordatorio_unidad,
+    }
+    for i, ((cantidad, unidad), texto) in enumerate(zip(tiempos_publicidad, textos), 1):
+        formulario.update({f"publicidad_{i}_cantidad": cantidad,
+                           f"publicidad_{i}_unidad": unidad, f"publicidad_{i}_texto": texto})
     try:
-        # Se valida todo antes de escribir: un error en el último campo no debe
-        # guardar silenciosamente la primera mitad del formulario.
-        tiempos_mensajes.validar(intervalo_mensajes_segundos, recordatorios_publicidad)
-        instrucciones.validar_configuracion_recordatorios(
-            recordatorio_cantidad, recordatorio_unidad
-        )
-        tiempos_mensajes.guardar(
+        recordatorios_publicidad.guardar_configuracion(
             proyecto_id,
-            intervalo_mensajes_segundos,
-            recordatorios_publicidad,
-            usuario["usuario"],
-        )
-        instrucciones.guardar_configuracion_recordatorios(
-            proyecto_id,
-            bool(recordatorio_habilitado),
-            recordatorio_cantidad,
-            recordatorio_unidad,
-            usuario["usuario"],
+            intervalo_mensajes_segundos, tiempos_publicidad,
+            bool(recordatorio_habilitado), recordatorio_cantidad, recordatorio_unidad,
+            usuario["usuario"], textos,
         )
     except ValueError as exc:
-        return RedirectResponse(
-            url=f"/mensajes?configuracion=1&error={quote(str(exc))}", status_code=303
+        respuesta = _mostrar_plantillas(
+            request, usuario, formulario, str(exc), getattr(exc, "campo", "")
         )
+        respuesta.status_code = 422
+        return respuesta
     return RedirectResponse(
-        url="/mensajes?aviso=Configuración+de+tiempos+guardada", status_code=303
+        url="/mensajes?configuracion=1&aviso=Configuración+de+mensajes+guardada", status_code=303
     )
 
 
