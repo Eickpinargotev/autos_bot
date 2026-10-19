@@ -22,8 +22,12 @@
   <div>
     <h1>Palabras clave</h1>
     <p class="sub" style="margin-bottom:0">
-      Si el cliente escribe <strong>exactamente</strong> una de estas palabras, y solo
-      la palabra, salen sus mensajes y la conversación pasa a manos tuyas: el agente
+      Escribe la palabra correcta una sola vez. El bot reconoce mayúsculas y signos
+      exteriores; en palabras de cinco letras o más también reconoce el plural simple
+      en «s» y errores de una letra. Solo se compara el mensaje completo, no palabras
+      dentro de una frase. Una coincidencia exacta tiene prioridad y los empates no
+      activan ningún flujo. Una palabra distinta muy parecida también puede coincidir.
+      Al reconocerla, salen sus mensajes y la conversación pasa a manos tuyas: el agente
       deja de responder hasta que tú intervengas. Después salen los recordatorios que
       hayas programado, contados desde ese momento.
     </p>
@@ -77,8 +81,9 @@
         <button class="mini">Guardar</button>
       </div>
       <p class="sub" style="margin:6px 0 0">
-        Tiene que llegar sola y exacta: «{{ p.palabra }}» dispara el flujo,
-        «tengo dudas del {{ p.palabra }}» no. Da igual con mayúsculas o sin ellas.
+        Tiene que llegar sola: «{{ p.palabra }}» dispara el flujo,
+        «tengo dudas del {{ p.palabra }}» no. Se reconocen mayúsculas y signos exteriores;
+        con cinco letras o más también se tolera plural simple en «s» y un error de una letra.
       </p>
     </form>
 

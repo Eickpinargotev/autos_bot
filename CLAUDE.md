@@ -211,9 +211,11 @@ El **dashboard** (`services/dashboard/src/`) sigue la misma separación:
   TÚ a quien elijas y una palabra clave la dispara el CLIENTE escribiéndola, y
   arrastra el bloqueo de la conversación y unos recordatorios. Ya no están escritas
   en el bot: `palabras_clave_repository.buscar` las lee de la base (con caché de 30 s
-  porque corre con cada mensaje entrante). El match sigue siendo EXACTO y sobre el
-  mensaje entero — eso es reconocer un disparador anunciado, no interpretar lenguaje
-  natural (§5).
+  porque corre con cada mensaje entrante). La coincidencia EXACTA tiene prioridad;
+  después se toleran signos exteriores y, en palabras individuales de cinco letras
+  o más, plural simple en `s` y un cambio de Levenshtein. Un empate no activa nada.
+  Siempre se compara el mensaje entero, nunca se interpretan frases (§5). Ver
+  `docs/palabras_clave.md` para los límites y el despliegue.
 - **La publicidad por ciudad sale de «Mensajes»: la CLAVE es el nombre de la
   ciudad.** Hubo una tabla aparte (`invitaciones_ciudades`, cinco columnas de
   texto por ciudad) con los mismos textos y las mismas claves; la migración 018
@@ -320,7 +322,8 @@ El reto del sistema es mezclar **mensajes curados del negocio** (plantillas lite
   Interpretar intención es responsabilidad exclusiva del LLM con instrucciones contextuales.
   *Excepción consciente:* comandos estructurados (`/d`, `/block`, `grupo["…"]`, `add["…"]`) y
   disparadores de keyword del negocio ("tareas"/"transporte") NO son interpretación de NL; ahí
-  el match exacto es intencional.
+  se compara el mensaje completo, con prioridad exacta y tolerancia ortográfica
+  acotada para las palabras clave; nunca se detecta intención dentro de una frase.
 
 ## 6. Política de edición de prompts (OBLIGATORIA)
 

@@ -27,7 +27,7 @@ from src.infrastructure.channels.outbound_coordinator import PrioridadSalida
 
 
 class MatchDeLaPalabraTests(unittest.TestCase):
-    """Exacto y sobre el mensaje entero: es un disparador, no interpretación."""
+    """Sobre el mensaje entero: es un disparador, no interpretación."""
 
     def setUp(self):
         palabras_clave_repository.limpiar_cache()
@@ -58,6 +58,133 @@ class MatchDeLaPalabraTests(unittest.TestCase):
         palabras_clave_repository.limpiar_cache()
         with patch.object(palabras_clave_repository, "consultar", side_effect=Exception("caída")):
             self.assertIsNone(palabras_clave_repository.buscar("examen"))
+
+
+class VariantesDeLaPalabraTests(unittest.TestCase):
+    def setUp(self):
+        palabras_clave_repository.limpiar_cache()
+        self.addCleanup(palabras_clave_repository.limpiar_cache)
+        self.fila = {"id": 1, "palabra": "tareas"}
+        parche = patch.object(palabras_clave_repository, "consultar", return_value=[self.fila])
+        self.consultar = parche.start()
+        self.addCleanup(parche.stop)
+
+    def test_una_sola_entrada_cubre_las_variantes(self):
+        for texto in ("tareas", "tarea", "TAREAS", "tareas.", " ¡TAREAS! ",
+                      "«tareas»", "¿ tareas ?", "tares", "terea", "tereas", "tareass"):
+            with self.subTest(texto=texto):
+                self.assertIs(palabras_clave_repository.buscar(texto), self.fila)
+        self.consultar.assert_called_once()
+
+    def test_singular_configurado_tambien_acepta_plural(self):
+        self.fila["palabra"] = "tarea"
+        self.assertIs(palabras_clave_repository.buscar("tareas"), self.fila)
+
+    def test_no_interpreta_frases_comandos_signos_internos_ni_dos_errores(self):
+        for texto in ("quiero tareas", "no quiero tareas", "tareas por favor", "/tareas",
+                      "/block", 'grupo["tareas"]', "ta.reas", "t@reas", "tareas2",
+                      "😀tareas", "teora", "", "!!!", "a" * 10000):
+            with self.subTest(texto=texto):
+                self.assertIsNone(palabras_clave_repository.buscar(texto))
+
+    def test_las_entradas_existentes_exactas_ganan(self):
+        filas = [{"id": i, "palabra": palabra} for i, palabra in enumerate(
+            ("tarea", "tareas", "tareas.", "tares", "terea", "tereas"), start=1
+        )]
+        self.consultar.return_value = filas
+        for fila in filas:
+            with self.subTest(palabra=fila["palabra"]):
+                self.assertIs(palabras_clave_repository.buscar(fila["palabra"]), fila)
+
+    def test_normalizada_exacta_gana_a_plural_y_a_error(self):
+        otra = {"id": 2, "palabra": "tarea"}
+        self.consultar.return_value = [self.fila, otra]
+        self.assertIs(palabras_clave_repository.buscar("¡tarea!"), otra)
+
+    def test_empate_de_errores_no_elige_segun_orden_de_la_base(self):
+        otra = {"id": 2, "palabra": "mareas"}
+        for filas in ([self.fila, otra], [otra, self.fila]):
+            palabras_clave_repository.limpiar_cache()
+            self.consultar.return_value = filas
+            self.assertIsNone(palabras_clave_repository.buscar("pareas"))
+
+    def test_empate_de_puntuacion_no_elige_una_fila(self):
+        self.consultar.return_value = [self.fila, {"id": 2, "palabra": "tareas."}]
+        self.assertIsNone(palabras_clave_repository.buscar("¡tareas!"))
+
+    def test_plural_sin_error_gana_a_un_error(self):
+        self.consultar.return_value = [self.fila, {"id": 2, "palabra": "terea"}]
+        self.assertIs(palabras_clave_repository.buscar("¡tarea!"), self.fila)
+
+    def test_palabras_cortas_solo_aceptan_puntuacion(self):
+        self.fila["palabra"] = "pago"
+        self.assertIs(palabras_clave_repository.buscar("¡pago!"), self.fila)
+        for texto in ("paga", "pagos", "pgo"):
+            self.assertIsNone(palabras_clave_repository.buscar(texto))
+
+    def test_frase_configurada_conserva_coincidencia_completa(self):
+        self.fila["palabra"] = "curso teorico"
+        for texto in ("curso teorico", "¡curso teorico!"):
+            self.assertIs(palabras_clave_repository.buscar(texto), self.fila)
+        self.assertIsNone(palabras_clave_repository.buscar("curso teorica"))
+
+    def test_conserva_tildes_y_enie(self):
+        self.fila["palabra"] = "teórico"
+        self.assertIsNone(palabras_clave_repository.buscar("teorico" + "x"))
+        self.assertEqual(palabras_clave_repository._sin_puntuacion_exterior("¡AÑO!"), "año")
+        self.assertEqual(palabras_clave_repository._sin_puntuacion_exterior("¡TEÓRICO!"), "teórico")
+
+    def test_solo_consulta_activas_del_proyecto_y_aisla_cache(self):
+        from src.application.project_context import ambito_proyecto
+
+        with ambito_proyecto(10):
+            self.assertIs(palabras_clave_repository.buscar("terea"), self.fila)
+        self.consultar.assert_called_once()
+        sql, parametros = self.consultar.call_args.args
+        self.assertIn("AND activa", sql)
+        self.assertEqual(parametros, (10,))
+        self.consultar.return_value = []
+        with ambito_proyecto(11):
+            self.assertIsNone(palabras_clave_repository.buscar("tareas"))
+        with ambito_proyecto(10):
+            self.assertIs(palabras_clave_repository.buscar("terea"), self.fila)
+        self.assertEqual(self.consultar.call_count, 2)
+
+    def test_desactivar_o_borrar_se_refleja_al_vencer_cache(self):
+        self.assertIs(palabras_clave_repository.buscar("terea"), self.fila)
+        self.consultar.return_value = []
+        with patch.object(palabras_clave_repository.time, "monotonic", return_value=float("inf")):
+            self.assertIsNone(palabras_clave_repository.buscar("terea"))
+
+    def test_sin_proyecto_o_sin_base_no_hay_coincidencia(self):
+        from src.application.project_context import ambito_proyecto
+
+        with ambito_proyecto(None):
+            self.assertIsNone(palabras_clave_repository.buscar("terea"))
+        self.consultar.assert_not_called()
+        self.consultar.side_effect = Exception("caída")
+        self.assertIsNone(palabras_clave_repository.buscar("terea"))
+
+
+class DistanciaAcotadaTests(unittest.TestCase):
+    def test_coincide_con_levenshtein_completa_para_inserciones_borrados_y_cambios(self):
+        from itertools import product
+
+        def distancia_completa(a, b):
+            anterior = list(range(len(b) + 1))
+            for i, letra in enumerate(a, start=1):
+                actual = [i]
+                for j, otra in enumerate(b, start=1):
+                    actual.append(min(actual[-1] + 1, anterior[j] + 1,
+                                      anterior[j - 1] + (letra != otra)))
+                anterior = actual
+            return anterior[-1]
+
+        palabras = ["".join(letras) for largo in range(5) for letras in product("ab", repeat=largo)]
+        for a in palabras:
+            for b in palabras:
+                self.assertEqual(palabras_clave_repository._distancia_hasta_un_cambio(a, b),
+                                 min(2, distancia_completa(a, b)), (a, b))
 
 
 class AgendadoDeRecordatoriosTests(unittest.TestCase):
