@@ -109,7 +109,7 @@
 </div>
 
 {% for categoria in categorias %}{% for fragmento in categoria.fragmentos %}
-<dialog class="flotante ancha" id="fragmento-{{ fragmento.id }}" data-carga-inicial="/agente/fragmentos/{{ fragmento.id }}/detalle" data-carga-en="fragmento-{{ fragmento.id }}-contenido" {{ 'data-abrir-al-cargar' if abierto == fragmento.id }}>
+<dialog class="flotante ancha editor-fragmento" id="fragmento-{{ fragmento.id }}" data-carga-inicial="/agente/fragmentos/{{ fragmento.id }}/detalle" data-carga-en="fragmento-{{ fragmento.id }}-contenido" {{ 'data-abrir-al-cargar' if abierto == fragmento.id }}>
   <div id="fragmento-{{ fragmento.id }}-contenido"><p class="sub">Cargando…</p></div>
 </dialog>
 {% endfor %}{% endfor %}

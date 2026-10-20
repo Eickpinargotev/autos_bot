@@ -1396,3 +1396,36 @@ body:has(.conversaciones-main) { overflow: hidden; }
   .configuracion-mensajes .dialogo-nav { flex-shrink: 0; }
   .recordatorio-publicidad { padding: 12px; }
 }
+
+/* El editor de fragmentos desplaza solo los campos; Guardar queda a la vista. */
+dialog.editor-fragmento[open] {
+  display: flex;
+  flex-direction: column;
+  height: min(80dvh, 760px);
+  max-height: min(80dvh, 760px);
+}
+.editor-fragmento > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.editor-fragmento > div > .cabecera { flex-shrink: 0; }
+.editor-fragmento > div > .cuerpo { flex: 1; min-height: 0; max-height: none; }
+.fragmento-acciones {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 14px 20px max(14px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--borde);
+  background: var(--panel);
+}
+.fragmento-acciones > .linea { justify-content: flex-end; }
+@media (max-width: 600px) {
+  dialog.editor-fragmento[open] { height: 100dvh; max-height: 100dvh; }
+  .fragmento-acciones { padding-inline: 14px; gap: 8px; }
+  .fragmento-acciones > .linea { flex: 1; }
+}
