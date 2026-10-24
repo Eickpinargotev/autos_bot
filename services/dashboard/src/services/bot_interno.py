@@ -16,6 +16,7 @@ medias hay que decirlo — el usuario cree que borró algo que el bot todavía
 recuerda.
 """
 
+from src.services.conversation_audit import context
 import httpx
 
 from src.core.config import settings
@@ -56,13 +57,13 @@ def olvidar_conversacion(proyecto_id: int, canal: str, client_id: str) -> str:
     queda historial pero el bot sigue con la conversación en Redis, y al
     siguiente mensaje contestará como si nada se hubiera borrado.
     """
-    return _llamar(f"/internal/proyectos/{proyecto_id}/conversaciones/{canal}/{client_id}/olvidar")
+    return _llamar(f"/internal/proyectos/{proyecto_id}/conversaciones/{canal}/{client_id}/olvidar", {"audit_context": context()})
 
 
 def responder_como_dueno(proyecto_id: int, canal: str, client_id: str, texto: str) -> str:
     """Envía a través del bot; devuelve vacío si salió o un error presentable."""
     return _llamar(
         f"/internal/proyectos/{proyecto_id}/conversaciones/{canal}/{client_id}/responder",
-        {"texto": texto},
+        {"texto": texto, "audit_actor": context().get("actor"), "audit_reference": context().get("correlation_id")},
         tiempo_limite=25.0,
     )

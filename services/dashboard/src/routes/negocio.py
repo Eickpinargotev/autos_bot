@@ -14,6 +14,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
+from src.services import conversation_audit
 from src.core import security
 from src.core.plantillas import render, render_fragmento
 from src.services import (
@@ -381,6 +382,7 @@ def conversacion(
 
 
 @router.post("/conversaciones/{canal}/{client_id}/responder")
+@conversation_audit.actor_from_request
 def responder_conversacion(
     request: Request,
     canal: str,
@@ -443,6 +445,7 @@ def descargar_diagnostico(
 
 
 @router.post("/conversaciones/{canal}/{client_id}/bloqueo")
+@conversation_audit.actor_from_request
 def bloquear_desde_conversacion(
     request: Request,
     canal: str,
@@ -465,6 +468,7 @@ def bloquear_desde_conversacion(
 
 
 @router.post("/conversaciones/{canal}/{client_id}/bloqueo/eliminar")
+@conversation_audit.actor_from_request
 def desbloquear_desde_conversacion(
     request: Request,
     canal: str,
@@ -481,6 +485,7 @@ def desbloquear_desde_conversacion(
 
 
 @router.post("/conversaciones/{canal}/{client_id}/eliminar")
+@conversation_audit.actor_from_request
 def eliminar_conversacion(
     request: Request,
     canal: str,
@@ -530,6 +535,7 @@ def bloqueos(request: Request, usuario=Depends(security.requiere_negocio)):
 
 
 @router.post("/configuracion-proyecto/bloqueos")
+@conversation_audit.actor_from_request
 def agregar_bloqueo(
     request: Request,
     numero: str = Form(""),
@@ -551,6 +557,7 @@ def agregar_bloqueo(
 
 
 @router.post("/configuracion-proyecto/bloqueos/{bloqueo_id}/eliminar")
+@conversation_audit.actor_from_request
 def eliminar_bloqueo(
     request: Request,
     bloqueo_id: int,

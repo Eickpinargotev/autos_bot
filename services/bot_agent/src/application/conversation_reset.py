@@ -19,6 +19,8 @@ Lo que NO se borra aquí, a propósito:
   desbloquearlo sin querer.
 """
 
+from src.infrastructure.repositories import conversation_audit_repository as audit
+
 from src.application.buffer_service import redis_client, scoped_key
 from src.application.reminder_service import ReminderService
 from src.domain.entities import Channel
@@ -39,6 +41,7 @@ def olvidar_conversacion(channel: Channel | str, user_id: str) -> dict[str, int]
     # Primero lo agendado: si se borrara el estado antes, un recordatorio a
     # punto de dispararse podría volver a escribir la clave que acabamos de
     # limpiar.
+    audit.record(user_id, channel, "runtime_cleanup_started")
     ReminderService.cancel(channel, user_id)
     _cancelar_tareas_programadas(channel, user_id)
 
@@ -46,6 +49,7 @@ def olvidar_conversacion(channel: Channel | str, user_id: str) -> dict[str, int]
 
     canal = channel.value if isinstance(channel, Channel) else channel
     borradas = redis_client.delete(*[scoped_key(clave, canal, user_id) for clave in _CLAVES])
+    audit.record(user_id, channel, "runtime_cleanup_completed")
     return {"claves_borradas": int(borradas or 0)}
 
 

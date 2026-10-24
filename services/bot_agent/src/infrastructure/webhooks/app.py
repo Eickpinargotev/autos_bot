@@ -1,3 +1,4 @@
+from src.infrastructure.repositories import conversation_audit_repository as audit
 import hmac
 from typing import Any
 
@@ -110,6 +111,12 @@ def _trazar_webhook(user_id: str, payload: dict[str, Any], status: str) -> None:
     """Guarda el evento original sanitizado como traza invisible del chat."""
     if not user_id:
         return
+    message = payload.get("data", {}).get("messages", {})
+    provider_id = message.get("id", "") if isinstance(message, dict) else ""
+    with audit.scope(correlation_id=provider_id or audit.new_correlation()):
+        audit.record(user_id, Channel.WHATSAPP, "provider_event", source="whatsapp",
+                     metadata={"status": status, "provider_message_id": provider_id},
+                     dedup_key=f"provider:{provider_id}:{status}" if provider_id else None)
     ConversationLogRepository.log_tool_event(
         client_id=user_id,
         canal=Channel.WHATSAPP,
@@ -222,6 +229,7 @@ def _procesar_evento(
             channel=Channel.WHATSAPP,
             from_me=True,
             message_id=mensaje.message_id,
+            raw_payload=payload,
             proyecto_id=int(cliente_id or 0),
         )
         _trazar_webhook(mensaje.user_id, payload, "human_intervention")
@@ -264,7 +272,7 @@ def sincronizar_chunk(proyecto_id: int, chunk_id: int, token: str = Query(defaul
 
 @app.post("/internal/proyectos/{proyecto_id}/conversaciones/{canal}/{client_id}/olvidar")
 def olvidar_conversacion(
-    proyecto_id: int, canal: str, client_id: str, token: str = Query(default="")
+    proyecto_id: int, canal: str, client_id: str, token: str = Query(default=""), payload: dict[str, Any] | None = None
 ):
     """Suelta lo que el bot recuerda de una conversación que el panel borró.
 
@@ -285,8 +293,12 @@ def olvidar_conversacion(
 
     from src.application.conversation_reset import olvidar_conversacion as olvidar
 
-    with ambito_proyecto(proyecto_id):
-        return {"status": "ok", **olvidar(canal_valido, client_id)}
+    with ambito_proyecto(proyecto_id), audit.scope(**((payload or {}).get("audit_context") or {})):
+        try:
+            return {"status": "ok", **olvidar(canal_valido, client_id)}
+        except Exception as exc:
+            audit.record(client_id, canal_valido, "runtime_cleanup_failed", metadata={"error_code": type(exc).__name__})
+            raise
 
 
 @app.post("/internal/proyectos/{proyecto_id}/conversaciones/{canal}/{client_id}/responder")
@@ -312,7 +324,11 @@ def responder_como_dueno(
     if len(texto) > 4000:
         raise HTTPException(status_code=400, detail="El mensaje supera 4000 caracteres")
 
-    with ambito_proyecto(proyecto_id):
+    with ambito_proyecto(proyecto_id), audit.scope(
+        correlation_id=str(payload.get("audit_reference") or audit.new_correlation()),
+        source="dashboard", actor=payload.get("audit_actor") or {"kind": "dashboard_user"},
+        human_actor=payload.get("audit_actor") or {"kind": "dashboard_user"},
+    ):
         if not clientes_whatsapp_repo.conversacion_pertenece(
             proyecto_id, canal_valido.value, client_id
         ):

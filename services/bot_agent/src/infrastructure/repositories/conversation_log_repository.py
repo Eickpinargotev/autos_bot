@@ -9,6 +9,8 @@ de costo constante, la purga por retención es un DELETE por fecha, y el visor
 de logs del dashboard pagina por índice. La API pública de la clase no cambió.
 """
 
+from src.infrastructure.repositories import conversation_audit_repository as audit
+
 import json
 from datetime import datetime, timedelta
 from typing import Any
@@ -92,6 +94,9 @@ class ConversationLogRepository:
         duration_ms: int | None = None,
         event_type: str = "tool_call",
     ) -> bool:
+        ctx = audit.context()
+        if ctx.get("correlation_id") and isinstance(input_data, dict):
+            input_data = {**input_data, "audit_correlation_id": ctx["correlation_id"]}
         return ConversationLogRepository.append_message(
             client_id=client_id,
             canal=canal,
@@ -189,8 +194,9 @@ class ConversationLogRepository:
             return False
         try:
             ejecutar(
-                "DELETE FROM conversation_messages WHERE proyecto_id = %s AND client_id = %s AND canal = %s",
-                (proyecto_id, str(client_id), canal_value),
+                "WITH audit_context AS MATERIALIZED (SELECT set_config('app.conversation_audit', %s, true)) "
+                "DELETE FROM conversation_messages USING audit_context WHERE proyecto_id = %s AND client_id = %s AND canal = %s",
+                (json.dumps({**audit.context(), "source": "command"}), proyecto_id, str(client_id), canal_value),
             )
             return True
         except Exception as e:
@@ -215,14 +221,16 @@ class ConversationLogRepository:
         try:
             filas = consultar(
                 """
-                WITH vencidas AS (
+                WITH audit_context AS MATERIALIZED (
+                    SELECT set_config('app.conversation_audit', '{"source":"retention","actor":{"kind":"system"}}', true)
+                ), vencidas AS (
                     SELECT proyecto_id, client_id, canal
                     FROM conversation_messages
                     GROUP BY proyecto_id, client_id, canal
                     HAVING MAX(created_at) < %s
                 ), borradas AS (
                     DELETE FROM conversation_messages m
-                    USING vencidas v
+                    USING vencidas v, audit_context
                     WHERE m.proyecto_id = v.proyecto_id AND m.client_id = v.client_id AND m.canal = v.canal
                     RETURNING m.proyecto_id, m.client_id, m.canal
                 )

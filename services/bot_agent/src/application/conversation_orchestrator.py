@@ -1,3 +1,4 @@
+from src.infrastructure.repositories import conversation_audit_repository as audit
 import re
 
 from src.application import seguimiento_service
@@ -81,6 +82,9 @@ _ENLACE = re.compile(
 class ConversationOrchestrator:
     @staticmethod
     def _branch(message: InboundMessage, branch: str, data: dict | None = None) -> None:
+        audit.record(message.user_id, message.channel,
+                     "decision_blocked" if branch in ("temporary_block", "permanent_block") else "decision",
+                     metadata={"branch": branch})
         ConversationLogRepository.log_tool_event(
             client_id=message.user_id,
             canal=message.channel,
@@ -93,6 +97,24 @@ class ConversationOrchestrator:
         )
 
     def handle(self, message: InboundMessage) -> list[OrchestratorAction]:
+        correlation = message.message_id or audit.context().get("correlation_id") or audit.new_correlation()
+        from datetime import datetime, timezone
+        raw = (message.raw_payload or {}).get("data", {}).get("messages", {})
+        sent_at = raw.get("messageTimestamp") if isinstance(raw, dict) else None
+        try:
+            sent_at = datetime.fromtimestamp(float(sent_at), timezone.utc).isoformat() if sent_at else None
+        except (ValueError, TypeError, OverflowError):
+            sent_at = None
+        actor = {"kind": "business_account"} if message.from_me else {"kind": "client"}
+        with audit.scope(correlation_id=correlation, source="whatsapp" if message.channel == Channel.WHATSAPP else "telegram", actor=actor):
+            event = audit.record(message.user_id, message.channel,
+                "human_message" if message.from_me else ("group_event" if message.event_type in ("group_join", "group_leave") else "message_received"),
+                metadata={"message_type": message.message_type.value, "provider_sent_at": sent_at, "status": message.event_type},
+                dedup_key=f"message:{message.message_id}" if message.message_id else None)
+            with audit.scope(event_id=event, actor={"kind": "system"}):
+                return self._handle_audited(message)
+
+    def _handle_audited(self, message: InboundMessage) -> list[OrchestratorAction]:
         if message.from_me:
             self._branch(message, "human_intervention")
             return self._handle_intervencion_humana(message)
@@ -227,12 +249,14 @@ class ConversationOrchestrator:
         if text == "/d":
             ConversationLogRepository.delete_conversation(message.user_id, message.channel)
             KeywordRegistryRepository.delete(message.user_id, message.channel)
-            repo.unblock_user(message.user_id, channel=message.channel)
+            with audit.scope(source="command"):
+                repo.unblock_user(message.user_id, channel=message.channel)
             clear_user_runtime_context(message.channel, message.user_id, cancel_scheduled=True, clear_reports=True)
             return [self._send(message, "Historial y bloqueos limpiados.", skip_conversation_log=True)]
 
         if text.startswith("/block"):
-            repo.block_user(message.user_id, reason="Bloqueado por comando", channel=message.channel)
+            with audit.scope(source="command"):
+                repo.block_user(message.user_id, reason="Bloqueado por comando", channel=message.channel)
             clear_user_runtime_context(message.channel, message.user_id, cancel_scheduled=True, clear_reports=True)
             return [self._send(message, "Usuario bloqueado.")]
 
@@ -338,12 +362,10 @@ class ConversationOrchestrator:
             link_whatsapp=f"https://wa.me/{message.user_id}",
             canal=message.channel.value,
         )
-        PostgresUserRepo().block_user(
-            message.user_id,
-            reason=reason,
-            days=12,
-            channel=message.channel,
-        )
+        with audit.scope(reason_code="media_review"):
+            PostgresUserRepo().block_user(
+                message.user_id, reason=reason, days=12, channel=message.channel,
+            )
         seguimiento_service.registrar_derivacion(message.user_id, message.channel)
         clear_user_runtime_context(
             message.channel,
@@ -471,6 +493,7 @@ class ConversationOrchestrator:
         callado sería lo peor de los dos mundos — el cliente escribió y no
         recibió nada, y encima el agente ya no le va a contestar.
         """
+        audit.record(message.user_id, message.channel, "keyword_detected", metadata={"keyword_id": palabra["id"]})
         keyword = palabra["palabra"]
         first_messages = palabras_clave_repository.textos_de(palabra["id"])
         if not first_messages:

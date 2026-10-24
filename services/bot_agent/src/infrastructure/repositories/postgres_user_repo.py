@@ -1,4 +1,5 @@
 import datetime
+from src.infrastructure.repositories import conversation_audit_repository as audit
 
 from src.application.project_context import proyecto_actual
 from src.domain.entities import Channel
@@ -29,9 +30,10 @@ class PostgresUserRepo:
         def op(conn):
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO users_blocked (proyecto_id, user_id, reason, expires_at) VALUES (%s, %s, %s, %s) "
+                    "WITH audit_context AS MATERIALIZED (SELECT set_config('app.conversation_audit', %s, true)) "
+                    "INSERT INTO users_blocked (proyecto_id, user_id, reason, expires_at) SELECT %s, %s, %s, %s FROM audit_context "
                     "ON CONFLICT (proyecto_id, user_id) DO UPDATE SET reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at",
-                    (proyecto_id, blocked_id, reason, expires_at),
+                    (audit.sql_context(), proyecto_id, blocked_id, reason, expires_at),
                 )
 
         run_query(op)
@@ -45,8 +47,9 @@ class PostgresUserRepo:
         def op(conn):
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM users_blocked WHERE proyecto_id = %s AND user_id IN (%s, %s)",
-                    (proyecto_id, blocked_id, user_id),
+                    "WITH audit_context AS MATERIALIZED (SELECT set_config('app.conversation_audit', %s, true)) "
+                    "DELETE FROM users_blocked USING audit_context WHERE proyecto_id = %s AND user_id IN (%s, %s)",
+                    (audit.sql_context(), proyecto_id, blocked_id, user_id),
                 )
 
         run_query(op)
@@ -77,8 +80,9 @@ class PostgresUserRepo:
                     if expires_at and datetime.datetime.now() > expires_at:
                         # Block expired, delete it
                         cur.execute(
-                            "DELETE FROM users_blocked WHERE proyecto_id = %s AND user_id = %s",
-                            (proyecto_id, stored_user_id),
+                            "WITH audit_context AS MATERIALIZED (SELECT set_config('app.conversation_audit', %s, true)) "
+                            "DELETE FROM users_blocked USING audit_context WHERE proyecto_id = %s AND user_id = %s",
+                            (audit.sql_context(), proyecto_id, stored_user_id),
                         )
                         return False
                     return True
@@ -128,8 +132,9 @@ class PostgresUserRepo:
                 stored_user_id, expires_at = row
                 if expires_at and datetime.datetime.now() > expires_at:
                     cur.execute(
-                        "DELETE FROM users_blocked WHERE proyecto_id = %s AND user_id = %s",
-                        (proyecto_id, stored_user_id),
+                        "WITH audit_context AS MATERIALIZED (SELECT set_config('app.conversation_audit', %s, true)) "
+                        "DELETE FROM users_blocked USING audit_context WHERE proyecto_id = %s AND user_id = %s",
+                        (audit.sql_context(), proyecto_id, stored_user_id),
                     )
                     return False
                 return True

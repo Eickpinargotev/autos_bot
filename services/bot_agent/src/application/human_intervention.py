@@ -1,5 +1,6 @@
 """Efectos únicos de una intervención del dueño, venga del teléfono o del panel."""
 
+from src.infrastructure.repositories import conversation_audit_repository as audit
 from src.application import seguimiento_service
 from src.application.buffer_service import BufferService
 from src.application.runtime_context import clear_user_runtime_context
@@ -24,12 +25,11 @@ def registrar(
     # Este es el efecto crítico y debe ocurrir ANTES que trazabilidad, métricas
     # o limpieza. Si alguno de esos efectos secundarios falla, el bot igual
     # queda en silencio desde el instante en que el dueño tomó la conversación.
-    PostgresUserRepo().block_user(
-        user_id,
-        reason=MOTIVO_PAUSA_IA,
-        days=DIAS_PAUSA_IA,
-        channel=canal,
-    )
+    with audit.scope(actor=audit.context().get("human_actor", {"kind": "business_account"})):
+        PostgresUserRepo().block_user(
+            user_id, reason=MOTIVO_PAUSA_IA, days=DIAS_PAUSA_IA, channel=canal,
+        )
+        audit.record(user_id, canal, "human_intervention")
 
     efectos = (
         lambda: clear_user_runtime_context(

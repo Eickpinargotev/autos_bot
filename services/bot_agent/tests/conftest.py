@@ -33,6 +33,7 @@ import pytest
 # Módulos que hablan con Postgres. Si añades un repositorio nuevo, agrégalo aquí
 # o sus tests escribirán en la base real.
 _MODULOS_CON_POSTGRES = (
+    "src.infrastructure.repositories.conversation_audit_repository",
     "src.infrastructure.repositories.conversation_log_repository",
     "src.infrastructure.repositories.seguimiento_repository",
     "src.infrastructure.repositories.keyword_registry_repository",
@@ -103,6 +104,11 @@ def _aisla_servicios(monkeypatch):
             continue
         if hasattr(modulo, "redis_client"):
             monkeypatch.setattr(modulo, "redis_client", redis_falso)
+
+    # El constructor del repositorio calienta la conexión aun con run_query
+    # sustituido. No debe crear tablas ni conectar a una base real en unitarios.
+    from src.infrastructure.repositories.postgres_conn import _SharedConnection
+    monkeypatch.setattr(_SharedConnection, "get", MagicMock(name="isolated_connection"))
 
     # Nada sale hacia el worker. Se parchea en la clase base de Celery para que
     # cubra TODAS las tareas, presentes y futuras, sin lista que mantener.

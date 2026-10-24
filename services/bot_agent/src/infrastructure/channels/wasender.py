@@ -12,6 +12,8 @@ que tolera varias formas del mismo dato y se puede ajustar en un solo sitio
 cuando haya una cuenta real contra la que verificar.
 """
 
+from src.infrastructure.repositories import conversation_audit_repository as audit
+
 import time
 from typing import Any
 
@@ -74,6 +76,8 @@ def enviar(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
             break
 
         espera = _segundos_de_espera(respuesta)
+        audit.record(str(payload.get("to") or ""), Channel.WHATSAPP, "send_retry",
+                     metadata={"attempt": intento + 1, "delay_seconds": espera, "status": "http_429"})
         print(f"WasenderAPI limitó el ritmo de envío; se reintenta en {espera}s.")
         time.sleep(espera)
 

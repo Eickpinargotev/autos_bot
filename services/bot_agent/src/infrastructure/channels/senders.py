@@ -1,3 +1,4 @@
+from src.infrastructure.repositories import conversation_audit_repository as audit
 import httpx
 
 from src.core.config import settings
@@ -17,6 +18,18 @@ from src.infrastructure.channels.outbound_coordinator import (
 )
 from src.infrastructure.repositories import clientes_whatsapp_repo
 from src.infrastructure.repositories.conversation_log_repository import ConversationLogRepository
+
+
+def _observed_send(channel, user_id, operation, send):
+    attempt = audit.record(user_id, channel, "send_attempt", metadata={"operation": operation})
+    with audit.scope(event_id=attempt or audit.context().get("event_id")):
+        try:
+            result = send()
+        except Exception as exc:
+            audit.record(user_id, channel, "send_failed", metadata={"operation": operation, "error_code": type(exc).__name__})
+            raise
+        audit.record(user_id, channel, "send_accepted", metadata={"operation": operation})
+        return result
 
 
 class TelegramSender(ChannelSender):
@@ -119,7 +132,7 @@ class ChannelSenderRegistry:
         parsed = parse_outbound_message(text)
 
         if not parsed.image_ids and not parsed.video_ids:
-            sender.send_message_sync(user_id, text)
+            _observed_send(channel, user_id, "text", lambda: sender.send_message_sync(user_id, text))
             if log_conversation:
                 ConversationLogRepository.log_outbound(client_id=user_id, canal=channel, text=text)
             return
@@ -136,7 +149,7 @@ class ChannelSenderRegistry:
 
         for video_id in parsed.video_ids:
             try:
-                sender.send_video_sync(user_id, video_id, pie_pendiente)
+                _observed_send(channel, user_id, "video", lambda: sender.send_video_sync(user_id, video_id, pie_pendiente))
                 enviado_algo = True
                 pie_pendiente = ""
             except Exception as e:
@@ -144,7 +157,7 @@ class ChannelSenderRegistry:
 
         # Si ninguna media salió, al menos que el cliente reciba el texto.
         if not enviado_algo and parsed.clean_text:
-            sender.send_message_sync(user_id, parsed.clean_text)
+            _observed_send(channel, user_id, "text", lambda: sender.send_message_sync(user_id, parsed.clean_text))
             if log_conversation:
                 ConversationLogRepository.log_outbound(client_id=user_id, canal=channel, text=parsed.clean_text)
             return
@@ -158,7 +171,7 @@ class ChannelSenderRegistry:
         enviar_por_url = getattr(sender, "send_image_url_sync", None)
         if enviar_por_url is not None:
             try:
-                enviar_por_url(user_id, image_id, caption)
+                _observed_send(sender.channel, user_id, "image", lambda: enviar_por_url(user_id, image_id, caption))
                 return True
             except Exception as e:
                 print(f"Error enviando imagen {image_id} por {sender.channel}: {e}")
@@ -168,7 +181,7 @@ class ChannelSenderRegistry:
         if not attachment:
             return False
         try:
-            sender.send_image_sync(user_id, attachment, caption)
+            _observed_send(sender.channel, user_id, "image", lambda: sender.send_image_sync(user_id, attachment, caption))
             return True
         except Exception as e:
             print(f"Error enviando imagen {image_id} por {sender.channel}: {e}")

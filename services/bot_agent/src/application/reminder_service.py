@@ -1,3 +1,4 @@
+from src.infrastructure.repositories import conversation_audit_repository as audit
 from src.application.buffer_service import redis_client, scoped_key
 from src.domain.entities import Channel
 
@@ -21,4 +22,5 @@ class ReminderService:
         task_ids = redis_client.lrange(key, 0, -1)
         for task_id in task_ids:
             celery_app.control.revoke(task_id, terminate=True)
+            audit.record(user_id, channel, "task_cancel_requested", metadata={"task_id": str(task_id)})
         redis_client.delete(key)

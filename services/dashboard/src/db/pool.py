@@ -9,6 +9,7 @@ Toda consulta pasa por `consulta()` / `ejecutar()`, que devuelven la conexión a
 pool pase lo que pase y reconstruyen el pool si Postgres se reinició.
 """
 
+from src.services.conversation_audit import sql_context
 import threading
 from contextlib import contextmanager
 from typing import Any
@@ -70,13 +71,22 @@ def _ejecutar(sql: str, params: Any, modo: str) -> Any:
     def operacion() -> Any:
         with conexion() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(sql, params)
-                if modo == "todos":
-                    return [dict(fila) for fila in cur.fetchall()]
-                if modo == "uno":
-                    fila = cur.fetchone()
-                    return dict(fila) if fila else None
-                return cur.rowcount
+                audit_context = sql_context()
+                if audit_context != "{}":
+                    cur.execute("SELECT set_config('app.conversation_audit', %s, false)", (audit_context,))
+                try:
+                    cur.execute(sql, params)
+                    if modo == "todos":
+                        result = [dict(fila) for fila in cur.fetchall()]
+                    elif modo == "uno":
+                        fila = cur.fetchone()
+                        result = dict(fila) if fila else None
+                    else:
+                        result = cur.rowcount
+                finally:
+                    if audit_context != "{}":
+                        cur.execute("SELECT set_config('app.conversation_audit', '', false)")
+                return result
 
     try:
         return operacion()

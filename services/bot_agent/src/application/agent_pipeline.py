@@ -18,6 +18,8 @@ Grafo por turno (routing pegajoso: con especialista activo se entra directo):
                                    └─ close   ─→ END
 """
 
+from src.infrastructure.repositories import conversation_audit_repository as audit
+
 import re
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
@@ -609,7 +611,8 @@ class AgentPipeline:
             link_whatsapp=f"https://wa.me/{user_id}",
             canal=channel.value,
         )
-        PostgresUserRepo().block_user(user_id, reason=reason, days=12, channel=channel)
+        with audit.scope(reason_code="agent_handoff"):
+            PostgresUserRepo().block_user(user_id, reason=reason, days=12, channel=channel)
 
         from src.application import seguimiento_service
 

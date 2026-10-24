@@ -83,6 +83,7 @@ from src.db.migrate import aplicar_migraciones  # noqa: E402
 _TABLAS = (
     "fragmento_categorias",
     "diagnostico_descargas",
+    "conversation_audit",
     "proyecto_tiempos_mensajes",
     "proyecto_recordatorios",
     "proyecto_instrucciones",

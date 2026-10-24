@@ -1,3 +1,4 @@
+from src.infrastructure.repositories import conversation_audit_repository as audit
 from src.domain.entities import Channel, InboundMessage, MessageType
 from src.application.conversation_orchestrator import ConversationOrchestrator
 import time
@@ -52,7 +53,7 @@ class MessageHandler:
             quoted_text=quoted_text,
             proyecto_id=int(proyecto_id or 0),
         )
-        with ambito_proyecto(proyecto_id):
+        with ambito_proyecto(proyecto_id), audit.scope(correlation_id=message_id or audit.new_correlation(), source="bot"):
             actions = ConversationOrchestrator().handle(inbound)
             enviado = None
             enviados = 0

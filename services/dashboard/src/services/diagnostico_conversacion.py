@@ -14,8 +14,9 @@ from typing import Any, Iterator
 from urllib.parse import urlsplit, urlunsplit
 
 from src.db import pool
+from src.services import conversation_audit_report
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"
 MAX_PROVIDER_BYTES = 256 * 1024
 MAX_MODEL_BYTES = 128 * 1024
 _SECRET_KEY = re.compile(
@@ -87,10 +88,25 @@ def datos(proyecto: dict[str, Any], client_id: str, canal: str) -> dict[str, Any
            ORDER BY fecha_hora ASC, id ASC""",
         (int(proyecto["id"]), client_id, canal),
     )
-    if not mensajes and not shots:
+    auditoria = conversation_audit_report.data(proyecto, client_id, canal)
+    if not mensajes and not shots and not auditoria["audit"]:
         return None
     visibles = [_fila(m) for m in mensajes if m.get("direction") != "internal"]
     eventos = [_fila(m) for m in mensajes if m.get("direction") == "internal"]
+    # Referencias verificables: nunca emparejar mensajes solo por cercanía horaria.
+    trace_ids = {}
+    for event in eventos:
+        entrada = event.get("entrada") or {}
+        if not isinstance(entrada, dict):
+            continue
+        reference = entrada.get("audit_correlation_id")
+        provider_message = entrada.get("data", {}).get("messages", {}) if isinstance(entrada.get("data"), dict) else {}
+        if not reference and isinstance(provider_message, dict):
+            reference = provider_message.get("id")
+        if reference:
+            trace_ids.setdefault(reference, []).append(event["id"])
+    for event in auditoria["audit"]:
+        event["related_trace_ids"] = trace_ids.get(event.get("correlation_id"), [])
     turnos = [
         {**{k: v for k, v in s.items() if k != "shot"}, "shot": sanitizar(s.get("shot"), max_bytes=MAX_MODEL_BYTES)}
         for s in shots
@@ -102,6 +118,7 @@ def datos(proyecto: dict[str, Any], client_id: str, canal: str) -> dict[str, Any
     )
     timeline.sort(key=lambda item: str(item.get("created_at") or item.get("fecha_hora") or ""))
     return {
+        **auditoria,
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now().astimezone().isoformat(),
         "project": {
@@ -133,9 +150,23 @@ def _reporte_html(info: dict[str, Any]) -> str:
             elementos.append(f"<article><h3>{momento} · {nombre}</h3><pre>{contenido}</pre></article>")
         return f"<section><h2>{html.escape(titulo)}</h2>{''.join(elementos) or '<p>Sin datos retenidos.</p>'}</section>"
 
+    def auditoria_html():
+        eventos = []
+        for item in info["audit"]:
+            actor = item.get("actor") or {}
+            responsable = actor.get("username") or {
+                "business_account": "Cuenta del negocio (persona no identificada por WhatsApp)",
+                "client": "Cliente", "system": "Sistema", "dashboard_user": "Usuario del dashboard",
+            }.get(actor.get("kind"), "Responsable desconocido")
+            details = html.escape(json.dumps(item, ensure_ascii=False, indent=2, default=_json_default))
+            eventos.append(f"<article><h3>{html.escape(item['occurred_at_local'])} · Evento {item['id']}</h3>"
+                           f"<p>{html.escape(item['description'])}</p><p>Responsable: {html.escape(responsable)} · Origen: {html.escape(item['source'])}</p>"
+                           f"<details><summary>Metadatos y referencias</summary><pre>{details}</pre></details></article>")
+        return "<section><h2>Auditoría descriptiva de los últimos tres meses</h2>" + "".join(eventos) + "</section>"
+
     conv = info["conversation"]
     return """<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Diagnóstico de conversación</title><style>body{font:14px system-ui;margin:0;background:#f5f5f5;color:#171717}main{max-width:1100px;margin:auto;padding:32px}header,article{background:white;border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}h1,h2,h3{line-height:1.2}h3{font-size:14px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f7f7f7;padding:12px;border-radius:8px;font-size:12px}</style></head><body><main>""" + f"<header><h1>Diagnóstico de conversación</h1><p>Proyecto: {html.escape(str(info['project']['name']))}</p><p>{html.escape(str(conv['channel']))} · {html.escape(str(conv['client_id']))}</p><p>Generado: {html.escape(info['generated_at'])}</p></header>" + bloque("Cronología completa", info["timeline"]) + "</main></body></html>"
+<title>Diagnóstico de conversación</title><style>body{font:14px system-ui;margin:0;background:#f5f5f5;color:#171717}main{max-width:1100px;margin:auto;padding:32px}header,article{background:white;border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}h1,h2,h3{line-height:1.2}h3{font-size:14px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f7f7f7;padding:12px;border-radius:8px;font-size:12px}</style></head><body><main>""" + f"<header><h1>Diagnóstico de conversación</h1><p>Proyecto: {html.escape(str(info['project']['name']))}</p><p>{html.escape(str(conv['channel']))} · {html.escape(str(conv['client_id']))}</p><p>Generado: {html.escape(info['generated_at'])}</p></header>" + auditoria_html() + bloque("Cobertura y limitaciones", [info["audit_coverage"]]) + bloque("Estado actual de bloqueos", info["block_state"]) + bloque("Cronología del chat todavía conservada", info["timeline"]) + "</main></body></html>"
 
 
 def crear_zip(proyecto: dict[str, Any], client_id: str, canal: str):
@@ -149,8 +180,10 @@ def crear_zip(proyecto: dict[str, Any], client_id: str, canal: str):
         zipf.writestr(
             "README.txt",
             "Diagnóstico autocontenido de una conversación.\n\n"
-            "diagnostico.json: datos estructurados (schema_version 1.0).\n"
-            "reporte.html: vista cronológica para abrir sin conexión.\n\n"
+            "diagnostico.json: datos estructurados (schema_version 2.0).\n"
+            "reporte.html: auditoría descriptiva y vista cronológica para abrir sin conexión.\n\n"
+            "La auditoría conserva metadatos sin contenido del chat durante tres meses calendario por suceso.\n"
+            "Sobrevive al borrado del historial. No reconstruye hechos anteriores a su despliegue.\n\n"
             "Seguridad: se redactaron credenciales, tokens, encabezados sensibles, base64, binarios y URLs firmadas. "
             "No se incluye razonamiento privado del modelo; sí entradas, decisiones estructuradas, herramientas y salidas guardadas. "
             "Los datos anteriores al despliegue pueden no tener payloads completos.\n",

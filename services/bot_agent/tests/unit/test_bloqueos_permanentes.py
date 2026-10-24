@@ -55,7 +55,9 @@ class BloqueosPermanentesTests(unittest.TestCase):
             "src.application.conversation_orchestrator.PostgresUserRepo", return_value=repo
         ), patch(
             "src.application.conversation_orchestrator.cancel_scheduled_tasks"
-        ) as cancelar, patch.object(
+        ) as cancelar, patch(
+            "src.application.conversation_orchestrator.BufferService.get_and_clear_buffer"
+        ), patch.object(
             ConversationOrchestrator, "_send"
         ) as enviar:
             acciones = ConversationOrchestrator()._handle_group_join(mensaje)

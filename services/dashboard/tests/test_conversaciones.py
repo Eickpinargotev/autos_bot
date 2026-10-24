@@ -389,7 +389,7 @@ def test_el_admin_suplantando_descarga_zip_sanitizado_y_deja_auditoria(sesion_ad
         assert set(archivo.namelist()) == {"reporte.html", "diagnostico.json", "README.txt"}
         diagnostico = archivo.read("diagnostico.json").decode()
         datos = json.loads(diagnostico)
-        assert datos["schema_version"] == "1.0"
+        assert datos["schema_version"] == "2.0"
         assert datos["project"]["id"] == 1
         assert datos["conversation"]["client_id"] == "50688888888"
         assert "prompt efectivo" in diagnostico

@@ -8,6 +8,8 @@ dentro del texto). Un mensaje se identifica por su CLAVE, y esa clave es lo que
 se reconoce aquí.
 """
 
+from src.infrastructure.repositories import conversation_audit_repository as audit
+
 import json
 import re
 import time
@@ -55,13 +57,17 @@ class PublicidadService:
             lambda encontrada: f"Invitación por ciudad encontrada: {bool(encontrada)}",
         )
         if not clave:
+            audit.record(user_id, channel_value, "flow_unavailable", metadata={"status": "ad_template_missing"})
             print(f"No hay ningún mensaje cuya clave coincida con '{city_text}'.")
             return False
+
+        audit.record(user_id, channel_value, "advertising_detected", metadata={"template_id": clave})
 
         # La cadena viene del panel con el adjunto ya incrustado como marcador
         # (`Imagen=<ref>`), que es el formato que entiende el envío.
         messages_to_send = plantillas_repository.textos_de(clave)
         if not messages_to_send:
+            audit.record(user_id, channel_value, "flow_unavailable", metadata={"status": "template_empty", "template_id": clave})
             print(f"El mensaje '{clave}' no tiene ningún texto que enviar.")
             return False
 

@@ -47,7 +47,8 @@ class ReinicioDeChatTests(unittest.TestCase):
         sql, params = ejecutar_mock.call_args.args
         self.assertIn("DELETE FROM conversation_messages", sql)
         self.assertNotIn("uso_eventos", sql)
-        self.assertEqual(params, (7, "5061", "whatsapp"))
+        self.assertEqual(params[1:], (7, "5061", "whatsapp"))
+        self.assertIn('"source": "command"', params[0])
 
 
 class EventoLlmTests(unittest.TestCase):

@@ -1,7 +1,8 @@
+from src.infrastructure.repositories import conversation_audit_repository as audit
 import time
 
 from celery import Celery, Task
-from celery.signals import before_task_publish
+from celery.signals import before_task_publish, after_task_publish
 from celery.schedules import crontab
 from src.core.config import settings
 from src.application.buffer_service import BufferService, redis_client, scoped_key
@@ -59,18 +60,53 @@ class TareaDeProyecto(Task):
 
     def __call__(self, *args, **kwargs):
         headers = getattr(self.request, "headers", None) or {}
-        with ambito_proyecto(headers.get("proyecto_id", proyecto_actual())):
-            return self.run(*args, **kwargs)
+        ctx = headers.get("conversation_audit") or {}
+        with ambito_proyecto(headers.get("proyecto_id", proyecto_actual())), audit.scope(
+            **{**ctx, "source": "worker", "actor": {"kind": "system"}, "task_id": self.request.id, "task_name": self.name}
+        ):
+            target = _audit_task_target(args, kwargs)
+            if target:
+                audit.record(target[1], target[0], "task_started", metadata={"task_id": self.request.id, "task_name": self.name, "attempt": self.request.retries})
+            try:
+                result = self.run(*args, **kwargs)
+                if target:
+                    audit.record(target[1], target[0], "task_completed", metadata={"task_id": self.request.id, "task_name": self.name, "attempt": self.request.retries})
+                return result
+            except Exception as exc:
+                if target:
+                    audit.record(target[1], target[0], "task_retry_requested" if type(exc).__name__ == "Retry" else "task_failed", metadata={"task_id": self.request.id, "task_name": self.name, "error_code": type(exc).__name__})
+                raise
 
 
 celery_app = Celery("bot_agent_tasks", broker=settings.REDIS_URL, task_cls=TareaDeProyecto)
 
 
+def _audit_task_target(args, kwargs):
+    channel = args[0] if args else kwargs.get("channel")
+    user_id = args[1] if len(args) > 1 else kwargs.get("user_id")
+    if channel in ("whatsapp", "telegram") and isinstance(user_id, str):
+        return channel, user_id
+    return None
+
+
 @before_task_publish.connect
-def _propagar_proyecto(headers=None, **_kwargs):
+def _propagar_proyecto(headers=None, body=None, **_kwargs):
     """Añade el ámbito sin reemplazar `Task.apply_async` ni el aislamiento de tests."""
     if headers is not None:
         headers.setdefault("proyecto_id", proyecto_actual())
+        headers.setdefault("conversation_audit", audit.context())
+
+
+@after_task_publish.connect
+def _auditar_tarea_publicada(headers=None, body=None, **_kwargs):
+    if headers and isinstance(body, (list, tuple)) and len(body) >= 2:
+        target = _audit_task_target(body[0], body[1])
+        if target:
+            with ambito_proyecto(headers.get("proyecto_id", proyecto_actual())), audit.scope(**(headers.get("conversation_audit") or {})):
+                audit.record(target[1], target[0], "task_scheduled", metadata={
+                    "task_id": headers.get("id"), "task_name": headers.get("task"),
+                    "attempt": headers.get("retries"), "reference": headers.get("eta"),
+                }, dedup_key=f"scheduled:{headers.get('id')}:{headers.get('retries', 0)}")
 
 # Con broker Redis, una tarea con countdown/ETA queda "sin ack" hasta que se
 # ejecuta. Si el countdown supera el visibility_timeout (1h por defecto), Redis
@@ -164,6 +200,7 @@ def _process_buffered_messages_locked(channel_value: Channel, user_id: str, user
     # el debounce). No basta con comprobarla en el webhook: una tarea vieja no
     # debe hacer hablar al agente después del handoff.
     if PostgresUserRepo().is_blocked(user_id, channel=channel_value):
+        audit.record(user_id, channel_value, "decision_blocked")
         BufferService.get_and_clear_buffer(user_id, channel_value)
         return
 
@@ -254,6 +291,7 @@ def transcribir_nota_de_voz(channel: str, user_id: str, user_name: str, payload:
     canal = Channel(channel)
     repo = PostgresUserRepo()
     if repo.is_blocked(user_id, channel=canal):
+        audit.record(user_id, canal, "decision_blocked")
         ConversationLogRepository.log_inbound(
             client_id=user_id,
             canal=canal,
@@ -278,6 +316,7 @@ def transcribir_nota_de_voz(channel: str, user_id: str, user_name: str, payload:
     # recibido para que el asesor lo vea, pero no enviamos acuse ni lo pasamos
     # al agente.
     if repo.is_blocked(user_id, channel=canal):
+        audit.record(user_id, canal, "decision_blocked")
         ConversationLogRepository.log_inbound(
             client_id=user_id,
             canal=canal,
@@ -351,11 +390,13 @@ def send_ad_reminder(
     aplazado_por_silencio: bool | None = None,
 ):
     if not has_ad_context(channel, user_id):
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "ad_context_missing"})
         return
     # La revocación puede cruzarse con una tarea que ya despertó. La respuesta
     # del cliente también se comprueba aquí para que nunca salgan las etapas
     # intermedias; el tercer recordatorio se conserva por regla de publicidad.
     if stage < 3 and ad_report_consumed(channel, user_id):
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "ad_reply_already_received"})
         return
     espera = segundos_hasta_horario_permitido()
     if espera:
@@ -415,10 +456,12 @@ def send_keyword_reminder(
     sirva de algo para los que ya estaban agendados.
     """
     if not has_keyword_context(channel, user_id):
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "keyword_context_missing"})
         return
 
     pieza = palabras_clave_repository.pieza(pieza_id)
     if not pieza or not pieza.get("activo"):
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "template_disabled_or_missing"})
         return
 
     texto = palabras_clave_repository.texto_para_enviar(pieza)
@@ -515,6 +558,7 @@ def _reagendar_ad(
     *,
     motivo: str,
 ) -> None:
+    audit.record(user_id, channel, "task_retry_requested", metadata={"status": motivo, "delay_seconds": espera})
     espera = max(1, int(espera))
     task = send_ad_reminder.apply_async(
         (channel, user_id, message, stage, aplazado_por_silencio), countdown=espera
@@ -536,6 +580,7 @@ def _reagendar_keyword(
     *,
     motivo: str,
 ) -> None:
+    audit.record(user_id, channel, "task_retry_requested", metadata={"status": motivo, "delay_seconds": espera})
     espera = max(1, int(espera))
     task = send_keyword_reminder.apply_async(
         (channel, user_id, pieza_id, stage, aplazado_por_silencio), countdown=espera
@@ -554,12 +599,14 @@ def cancel_scheduled_tasks(channel: str, user_id: str):
     if task_ids:
         for tid in task_ids:
             celery_app.control.revoke(tid, terminate=True)
+            audit.record(user_id, channel, "task_cancel_requested", metadata={"task_id": str(tid)})
         redis_client.delete(key)
 
 def cancel_ad_reminder_stage(channel: str, user_id: str, stage: int):
     task_id = get_ad_task_id(channel, user_id, stage)
     if task_id:
         celery_app.control.revoke(task_id, terminate=True)
+        audit.record(user_id, channel, "task_cancel_requested", metadata={"task_id": str(task_id)})
         redis_client.delete(f"{scoped_key('ad_reminder_task', channel, user_id)}:{stage}")
 
 def schedule_smart_reminder_for_result(channel: Channel | str, user_id: str, reminder: dict):
@@ -591,6 +638,7 @@ def send_smart_reminder(
     """
     config_recordatorios = instrucciones_repository.configuracion_recordatorios()
     if not config_recordatorios.get("habilitado", True):
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "reminders_disabled"})
         return
     maximo_recordatorios = max(
         1,
@@ -605,19 +653,25 @@ def send_smart_reminder(
     # recordatorio: el process_buffered_messages pendiente cancelará/reagendará
     # según el nuevo estado.
     if BufferService.has_pending(user_id, channel):
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "client_message_pending"})
         return
 
     if PostgresUserRepo().is_blocked(user_id, channel=channel):
+        audit.record(user_id, channel, "decision_blocked")
         return
 
     state = ConversationStateRepo.get(channel, user_id)
     if not state.awaiting_reply or not state.last_question:
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "no_reply_pending"})
         return
     if state.reminder_level >= maximo_recordatorios:
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "reminder_limit_reached"})
         return
     if level > maximo_recordatorios:
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "reminder_limit_reached"})
         return
     if state.reminder_level >= level:
+        audit.record(user_id, channel, "task_skipped", metadata={"status": "obsolete_task"})
         return  # Tarea vieja: este nivel ya se envió.
 
     # Se comprueba al despertar, además de ajustar la hora al agendar. Esto
@@ -726,6 +780,7 @@ def _reagendar_smart(
     *,
     motivo: str,
 ) -> None:
+    audit.record(user_id, channel, "task_retry_requested", metadata={"status": motivo, "delay_seconds": espera})
     espera = max(1, int(espera))
     task = send_smart_reminder.apply_async(
         (channel, user_id, level, aplazado_por_silencio), countdown=espera
@@ -743,7 +798,8 @@ def create_flow_report_and_block(channel: str, user_id: str, report_reason: str)
         link_whatsapp=f"https://wa.me/{user_id}",
         canal=channel,
     )
-    PostgresUserRepo().block_user(user_id, reason=report_reason, days=12, channel=channel)
+    with audit.scope(reason_code="scheduled_handoff"):
+        PostgresUserRepo().block_user(user_id, reason=report_reason, days=12, channel=channel)
     from src.application.runtime_context import clear_user_runtime_context
 
     clear_user_runtime_context(channel, user_id, cancel_scheduled=False, clear_reports=False)
@@ -793,6 +849,7 @@ def purge_expired_conversations():
     limpia el registro durable en Postgres (log de conversaciones y shots).
     La agenda la dispara Celery beat a diario.
     """
+    audit.purge()
     days = settings.CONVERSATION_RETENTION_DAYS
     conversations = ConversationLogRepository.purge_older_than(days)
     shots = ConversationShotRepository.purge_older_than(days)
