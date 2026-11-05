@@ -725,65 +725,104 @@
       });
   }
 
+  function terminarCargaLista(contenedor, panel) {
+    delete panel.dataset.enVuelo;
+    if (panel.dataset.consultaPendiente !== undefined) {
+      var consulta = panel.dataset.consultaPendiente;
+      delete panel.dataset.consultaPendiente;
+      delete panel.dataset.listaPendiente;
+      delete panel.dataset.masPendiente;
+      actualizarListaConversaciones(contenedor, consulta);
+    } else if (panel.dataset.masPendiente === "1") {
+      delete panel.dataset.masPendiente;
+      var boton = panel.querySelector("[data-conv-mas]");
+      if (boton) boton.click();
+      else if (panel.dataset.listaPendiente === "1") {
+        delete panel.dataset.listaPendiente;
+        actualizarListaConversaciones(contenedor);
+      }
+    } else if (panel.dataset.listaPendiente === "1") {
+      delete panel.dataset.listaPendiente;
+      actualizarListaConversaciones(contenedor);
+    }
+  }
+
   function actualizarListaConversaciones(contenedor, consulta) {
     if (!contenedor) return;
     if (contenedor.tagName === "DIALOG" && !contenedor.open) return;
     var panel = contenedor.querySelector("[data-conv-panel]");
     var base = contenedor.getAttribute("data-conv-inicio");
     if (!panel || !base) return;
+    var filtrar = typeof consulta === "string";
 
     if (panel.dataset.enVuelo === "1") {
-      // Un chat puede producir varios avisos seguidos. El último no se pierde
-      // aunque la consulta anterior ya hubiera salido hacia Postgres.
+      // Compartir el bloqueo con «Cargar más»: ninguna respuesta puede borrar
+      // una tanda que acaba de incorporarse. Conservar también filtros nuevos.
       panel.dataset.listaPendiente = "1";
+      if (filtrar) panel.dataset.consultaPendiente = consulta;
       return;
     }
 
-    if (typeof consulta !== "string") {
-      var campo = panel.querySelector("[data-conv-buscar] input[name=q]");
-      consulta = campo ? campo.value : "";
-    }
-
+    var campo = panel.querySelector("[data-conv-buscar] input[name=q]");
+    if (!filtrar) consulta = panel.dataset.consulta || "";
     panel.dataset.enVuelo = "1";
     var listaAnterior = panel.querySelector("[data-conv-lista-scroll]");
-    var desplazado = listaAnterior ? listaAnterior.scrollTop : 0;
-    var activa = contenedor.dataset.convActiva || "";
-    var url = base + (consulta ? "?q=" + encodeURIComponent(consulta) : "");
+    var items = panel.querySelectorAll("[data-conv-hasta]");
+    var url = base + "?q=" + encodeURIComponent(consulta);
+    if (!filtrar && items.length) {
+      url += "&hasta=" + encodeURIComponent(items[items.length - 1].getAttribute("data-conv-hasta"));
+    }
 
     fetch(url, { headers: { "X-Fragmento": "1" } })
-      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
       .then(function (html) {
-        if (html === null) {
-          panel.innerHTML = '<p class="vacio">No se pudo cargar.</p>';
-          return;
+        // Tomar la posición al recibir la respuesta: se puede seguir leyendo
+        // o abrir otro chat mientras la petición viaja.
+        var desplazado = listaAnterior ? listaAnterior.scrollTop : 0;
+        var anclas = [];
+        if (!filtrar && listaAnterior && desplazado > 0) {
+          var borde = listaAnterior.getBoundingClientRect().top;
+          listaAnterior.querySelectorAll("[data-conv-clave]").forEach(function (item) {
+            var rect = item.getBoundingClientRect();
+            if (rect.bottom > borde && rect.top < borde + listaAnterior.clientHeight) {
+              anclas.push({ clave: item.getAttribute("data-conv-clave"), y: rect.top - borde });
+            }
+          });
         }
+        var borrador = campo ? campo.value : consulta;
         panel.innerHTML = html;
+        panel.dataset.consulta = consulta;
+        var campoNuevo = panel.querySelector("[data-conv-buscar] input[name=q]");
+        if (!filtrar && campoNuevo) campoNuevo.value = borrador;
         var listaNueva = panel.querySelector("[data-conv-lista-scroll]");
-        if (listaNueva) listaNueva.scrollTop = desplazado;
+        if (listaNueva) {
+          listaNueva.scrollTop = filtrar ? 0 : desplazado;
+          anclas.some(function (ancla) {
+            var item = listaNueva.querySelector('[data-conv-clave="' + CSS.escape(ancla.clave) + '"]');
+            if (!item) return false;
+            listaNueva.scrollTop += item.getBoundingClientRect().top -
+              listaNueva.getBoundingClientRect().top - ancla.y;
+            return true;
+          });
+        }
 
-        // Repintar la lista no debe borrar qué conversación está abierta.
+        var activa = contenedor.dataset.convActiva || "";
         panel.querySelectorAll("[data-conv]").forEach(function (item) {
           item.classList.toggle(
             "activo",
             (item.getAttribute("data-conv-clave") || item.getAttribute("data-conv")) === activa
           );
         });
-        if (activa && !panel.querySelector('[data-conv-clave="' + CSS.escape(activa) + '"]')) {
-          contenedor.dataset.convActiva = "";
-          contenedor.querySelector("[data-conv-detalle]").innerHTML =
-            '<p class="vacio">La conversación ya no está disponible.</p>';
-        }
+        // Que un filtro no incluya el chat abierto no significa que fue borrado.
+        // Solo la acción explícita de eliminar limpia el detalle.
       })
       .catch(function () {
-        panel.innerHTML = '<p class="mensaje error">No se pudo cargar. <button type="button" class="mini" data-reintenta-conversaciones>Reintentar</button></p>';
-      })
-      .then(function () {
-        delete panel.dataset.enVuelo;
-        if (panel.dataset.listaPendiente === "1") {
-          delete panel.dataset.listaPendiente;
-          actualizarListaConversaciones(contenedor);
+        // Una caída transitoria no debe borrar lo que se estaba leyendo.
+        if (!listaAnterior) {
+          panel.innerHTML = '<p class="mensaje error">No se pudo cargar. <button type="button" class="mini" data-reintenta-conversaciones>Reintentar</button></p>';
         }
-      });
+      })
+      .then(function () { terminarCargaLista(contenedor, panel); });
   }
 
   function actualizarListasConversaciones() {
@@ -908,12 +947,17 @@
     var contenedor = boton.closest("[data-conv-inicio]");
     var lista = boton.closest("[data-conv-lista-scroll]");
     if (!contenedor || !lista) return;
+    var panel = contenedor.querySelector("[data-conv-panel]");
+    if (panel.dataset.enVuelo === "1") {
+      panel.dataset.masPendiente = "1";
+      return;
+    }
+    panel.dataset.enVuelo = "1";
     boton.dataset.enVuelo = "1";
     boton.textContent = "Cargando…";
-    var campo = contenedor.querySelector("[data-conv-buscar] input[name=q]");
     var url = contenedor.getAttribute("data-conv-inicio") +
       "?cursor=" + encodeURIComponent(boton.getAttribute("data-conv-mas"));
-    if (campo && campo.value) url += "&q=" + encodeURIComponent(campo.value);
+    if (panel.dataset.consulta) url += "&q=" + encodeURIComponent(panel.dataset.consulta);
     fetch(url, { headers: { "X-Fragmento": "1" } })
       .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
       .then(function (html) {
@@ -928,7 +972,8 @@
       .catch(function () {
         boton.textContent = "No se pudo cargar. Reintentar";
         delete boton.dataset.enVuelo;
-      });
+      })
+      .then(function () { terminarCargaLista(contenedor, panel); });
   });
 
   document.addEventListener("click", function (e) {

@@ -2,6 +2,7 @@
 <li>
   <button type="button" class="conv-item"
           data-conv="/conversaciones/{{ c.canal }}/{{ c.client_id }}?fragmento=1"
+          data-conv-hasta="{{ c.cursor_lista }}"
           data-conv-clave="{{ c.canal }}:{{ c.client_id }}">
     <span class="conv-id">{{ c.client_id }}</span>
     {% if c.nombre %}<span class="conv-nombre">{{ c.nombre }}</span>{% endif %}

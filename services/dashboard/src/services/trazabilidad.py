@@ -27,8 +27,9 @@ def normalizar_numero(busqueda: str) -> str:
 def listar_conversaciones(
     proyecto_id: int,
     busqueda: str = "",
-    limite: int = 100,
+    limite: int | None = 100,
     antes_de: tuple[datetime, int] | None = None,
+    hasta_de: tuple[datetime, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Una fila por (cliente, canal) con su última actividad.
 
@@ -60,15 +61,18 @@ def listar_conversaciones(
     if antes_de:
         condiciones.append("(ultima_actividad, ultimo_mensaje_id) < (%s, %s)")
         params.extend(antes_de)
+    if hasta_de:
+        condiciones.append("(ultima_actividad, ultimo_mensaje_id) >= (%s, %s)")
+        params.extend(hasta_de)
     where = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
-    params.append(int(limite))
+    params.append(int(limite) if limite is not None else None)
     return pool.consultar(
         f"""
         SELECT client_id, canal, ultima_actividad, ultimo_mensaje_id, mensajes,
                respuestas_bot, respuestas_dueno, nombre
         FROM conversation_threads
         {where}
-        ORDER BY ultima_actividad DESC
+        ORDER BY ultima_actividad DESC, ultimo_mensaje_id DESC
         LIMIT %s
         """,
         tuple(params),
@@ -96,19 +100,28 @@ def _leer_cursor_conversaciones(cursor: str) -> tuple[datetime, int]:
 
 
 def pagina_conversaciones(
-    proyecto_id: int, busqueda: str = "", cursor: str = ""
+    proyecto_id: int, busqueda: str = "", cursor: str = "", hasta: str = ""
 ) -> dict[str, Any]:
-    antes_de = _leer_cursor_conversaciones(cursor) if cursor else None
-    filas = listar_conversaciones(
-        proyecto_id, busqueda, CONVERSACIONES_POR_PAGINA + 1, antes_de
-    )
-    visibles = filas[:CONVERSACIONES_POR_PAGINA]
-    siguiente = ""
-    if len(filas) > CONVERSACIONES_POR_PAGINA and visibles:
-        ultima = visibles[-1]
-        siguiente = _cursor_conversaciones(
-            ultima["ultima_actividad"], ultima["ultimo_mensaje_id"]
+    if cursor and hasta:
+        raise ValueError("No se puede continuar y refrescar una lista a la vez.")
+    if hasta:
+        # Refrescar todo el tramo leído, aunque entren conversaciones nuevas.
+        # El límite temporal sigue siendo válido si su conversación fue borrada.
+        limite = _leer_cursor_conversaciones(hasta)
+        visibles = listar_conversaciones(proyecto_id, busqueda, None, hasta_de=limite)
+        hay_mas = bool(listar_conversaciones(proyecto_id, busqueda, 1, antes_de=limite))
+    else:
+        antes_de = _leer_cursor_conversaciones(cursor) if cursor else None
+        filas = listar_conversaciones(
+            proyecto_id, busqueda, CONVERSACIONES_POR_PAGINA + 1, antes_de
         )
+        visibles = filas[:CONVERSACIONES_POR_PAGINA]
+        hay_mas = len(filas) > CONVERSACIONES_POR_PAGINA
+    for fila in visibles:
+        fila["cursor_lista"] = _cursor_conversaciones(
+            fila["ultima_actividad"], fila["ultimo_mensaje_id"]
+        )
+    siguiente = visibles[-1]["cursor_lista"] if hay_mas and visibles else ""
     return {"conversaciones": visibles, "siguiente_cursor": siguiente}
 
 

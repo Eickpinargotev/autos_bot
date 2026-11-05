@@ -37,6 +37,78 @@ def _mensaje(client_id: str, texto: str, *, direction="inbound", author="cliente
 
 # --- Paginación --------------------------------------------------------------
 
+def test_refresco_conserva_tandas_y_agrega_conversaciones_nuevas(monkeypatch, sesion_cliente):
+    monkeypatch.setattr(trazabilidad, "CONVERSACIONES_POR_PAGINA", 2)
+    fecha = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    for i in range(7):
+        _mensaje(f"5068000000{i}", "hola", creado=fecha + timedelta(minutes=i))
+    primera = trazabilidad.pagina_conversaciones(1)
+    segunda = trazabilidad.pagina_conversaciones(1, cursor=primera["siguiente_cursor"])
+    hasta = segunda["conversaciones"][-1]["cursor_lista"]
+    leidas = primera["conversaciones"] + segunda["conversaciones"]
+    _mensaje("50689999999", "nuevo", creado=fecha + timedelta(days=1))
+
+    refresco = trazabilidad.pagina_conversaciones(1, hasta=hasta)
+    assert [f["client_id"] for f in refresco["conversaciones"]] == [
+        "50689999999", *[f["client_id"] for f in leidas]
+    ]
+    siguientes = trazabilidad.pagina_conversaciones(1, cursor=refresco["siguiente_cursor"])
+    assert [f["client_id"] for f in siguientes["conversaciones"]] == [
+        "50680000002", "50680000001"
+    ]
+    respuesta = sesion_cliente.get("/conversaciones/lista", params={"hasta": hasta})
+    assert respuesta.status_code == 200
+    assert 'data-conv-lista-scroll' in respuesta.text
+    assert respuesta.text.count('data-conv-clave=') == 5
+
+
+def test_refresco_funciona_si_se_borra_la_conversacion_del_limite(monkeypatch):
+    monkeypatch.setattr(trazabilidad, "CONVERSACIONES_POR_PAGINA", 2)
+    for i in range(5):
+        _mensaje(f"5068000000{i}", "hola")
+    primera = trazabilidad.pagina_conversaciones(1)
+    segunda = trazabilidad.pagina_conversaciones(1, cursor=primera["siguiente_cursor"])
+    ultima = segunda["conversaciones"][-1]
+    pool.ejecutar("DELETE FROM conversation_messages WHERE client_id = %s", (ultima["client_id"],))
+
+    refresco = trazabilidad.pagina_conversaciones(1, hasta=ultima["cursor_lista"])
+    assert len(refresco["conversaciones"]) == 3
+    siguiente = trazabilidad.pagina_conversaciones(1, cursor=refresco["siguiente_cursor"])
+    assert [f["client_id"] for f in siguiente["conversaciones"]] == ["50680000000"]
+    assert siguiente["siguiente_cursor"] == ""
+
+
+def test_refresco_respeta_busqueda_y_proyecto(monkeypatch):
+    monkeypatch.setattr(trazabilidad, "CONVERSACIONES_POR_PAGINA", 2)
+    otro = clientes_whatsapp.crear("Proyecto ajeno")
+    for i in range(3):
+        _mensaje(f"5068111000{i}", "propio")
+    hasta = trazabilidad.pagina_conversaciones(1)["conversaciones"][-1]["cursor_lista"]
+    _mensaje("50682220000", "otro número")
+    _mensaje("50681119999", "ajeno", proyecto_id=otro["id"])
+
+    refresco = trazabilidad.pagina_conversaciones(1, "8111", hasta=hasta)
+    assert {f["client_id"] for f in refresco["conversaciones"]} == {"50681110001", "50681110002"}
+
+
+@pytest.mark.parametrize("parametros", [{"hasta": "invalido"}, {"hasta": "x", "cursor": "y"}])
+def test_refresco_rechaza_cursores_invalidos(sesion_cliente, parametros):
+    assert sesion_cliente.get("/conversaciones/lista", params=parametros).status_code == 400
+
+
+def test_listado_con_fechas_iguales_no_repite_ni_omite_conversaciones(monkeypatch):
+    monkeypatch.setattr(trazabilidad, "CONVERSACIONES_POR_PAGINA", 2)
+    fecha = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    for i in range(5):
+        _mensaje(f"5068000000{i}", "hola", creado=fecha)
+    primera = trazabilidad.pagina_conversaciones(1)
+    segunda = trazabilidad.pagina_conversaciones(1, cursor=primera["siguiente_cursor"])
+    tercera = trazabilidad.pagina_conversaciones(1, cursor=segunda["siguiente_cursor"])
+    assert [f["client_id"] for p in (primera, segunda, tercera) for f in p["conversaciones"]] == [
+        f"5068000000{i}" for i in reversed(range(5))
+    ]
+
+
 def test_la_conversacion_llega_por_tandas_no_entera():
     """Cargar miles de mensajes de golpe es lo que hacía la página inservible."""
     for i in range(10):

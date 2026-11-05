@@ -303,7 +303,9 @@ def _datos_lista_conversaciones(request: Request, usuario: dict) -> dict:
     busqueda = request.query_params.get("q", "")
     cursor = request.query_params.get("cursor", "")
     try:
-        pagina = trazabilidad.pagina_conversaciones(proyecto["id"], busqueda, cursor)
+        pagina = trazabilidad.pagina_conversaciones(
+            proyecto["id"], busqueda, cursor, request.query_params.get("hasta", "")
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
