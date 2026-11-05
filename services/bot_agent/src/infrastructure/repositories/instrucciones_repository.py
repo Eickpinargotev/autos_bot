@@ -5,7 +5,7 @@ from src.infrastructure.repositories.postgres_conn import consultar_uno
 
 TIPOS = frozenset({
     "supervisor", "general", "curso_teorico", "alquiler", "clases",
-    "dictamen", "tramites", "recordatorio",
+    "dictamen", "tramites", "recordatorio", "rag",
 })
 
 

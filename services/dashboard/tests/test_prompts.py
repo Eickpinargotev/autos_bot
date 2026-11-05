@@ -117,3 +117,44 @@ def test_rechaza_una_cantidad_de_recordatorios_fuera_del_limite():
         instrucciones.guardar_configuracion_recordatorios(
             1, True, 60, "minutos", "dueño", maximo_recordatorios=6
         )
+
+
+def test_editor_rag_guarda_historial_y_restaura_sin_cambiar_otros_agentes(sesion_cliente):
+    original = instrucciones.activa(1, "rag")
+    general = instrucciones.activa(1, "general")
+    assert "Responde SOLO" in original["contenido"]
+    assert "{current_message}" not in original["contenido"]
+    html = sesion_cliente.get("/agente/instrucciones").text
+    assert "Respuestas del RAG" in html
+    assert 'id="editar-rag"' in html and 'id="prompt-rag"' in html
+    assert 'data-carga="/agente/prompts/rag/historial"' in html
+    csrf = token_csrf(sesion_cliente)
+    respuesta = sesion_cliente.post(
+        "/agente/prompts/rag", data={"contenido": "Responda con brevedad y sin inventar datos.", "csrf": csrf},
+        follow_redirects=False,
+    )
+    assert respuesta.status_code == 303
+    assert instrucciones.activa(1, "rag")["version"] == 2
+    historial = sesion_cliente.get("/agente/prompts/rag/historial").text
+    assert "Historial: Respuestas del RAG" in historial
+    respuesta = sesion_cliente.post(
+        f"/agente/prompts/rag/{original['version']}/activar", data={"csrf": csrf}, follow_redirects=False,
+    )
+    assert respuesta.status_code == 303
+    assert instrucciones.activa(1, "rag")["version"] == 3
+    assert instrucciones.activa(1, "rag")["contenido"] == original["contenido"]
+    assert instrucciones.activa(1, "general")["contenido"] == general["contenido"]
+
+
+def test_prompt_rag_se_crea_en_proyectos_nuevos_y_la_migracion_no_pisa_ediciones():
+    from pathlib import Path
+    from src.db import pool
+    from src.services import clientes_whatsapp
+    proyecto = clientes_whatsapp.crear("Segundo proyecto")
+    original = instrucciones.activa(proyecto["id"], "rag")
+    assert original["version"] == 1 and "Responde SOLO" in original["contenido"]
+    instrucciones.guardar(1, "Instrucciones propias de mi RAG.", "dueño", "rag")
+    pool.ejecutar(Path("src/db/migrations/041_editor_prompt_rag.sql").read_text())
+    assert instrucciones.activa(1, "rag")["contenido"] == "Instrucciones propias de mi RAG."
+    assert instrucciones.activa(1, "rag")["version"] == 2
+    assert instrucciones.activa(proyecto["id"], "rag")["contenido"] == original["contenido"]

@@ -16,6 +16,7 @@ TIPOS_EDITABLES = (
     "dictamen",
     "tramites",
     "recordatorio",
+    "rag",
 )
 # `principal` se conserva para no perder el historial de la pantalla anterior,
 # pero ya no se aplica al agente ni se muestra: cada playbook es independiente.
@@ -58,6 +59,11 @@ METADATOS = {
         "nombre": "Trámites",
         "codigo": "tramites_agent",
         "descripcion": "Informa y encamina renovaciones, homologaciones, permisos, citas y otros trámites.",
+    },
+    "rag": {
+        "nombre": "Respuestas del RAG",
+        "codigo": "rag_answer",
+        "descripcion": "Redacta las respuestas al cliente con la información recuperada del conocimiento.",
     },
     "recordatorio": {
         "nombre": "Recordatorios",
@@ -138,7 +144,7 @@ def todas_para_panel(proyecto_id: int, limite_historial: int = 20) -> dict[str, 
 
 
 def activas_para_panel(proyecto_id: int) -> dict[str, dict[str, Any]]:
-    """Los ocho prompts vigentes; los historiales se cargan al abrirlos."""
+    """Los prompts vigentes; los historiales se cargan al abrirlos."""
     filas = pool.consultar(
         "SELECT * FROM proyecto_instrucciones "
         "WHERE proyecto_id = %s AND activa AND tipo = ANY(%s)",

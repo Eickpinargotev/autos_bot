@@ -61,8 +61,13 @@
     </div>
     <div class="cuerpo">
       <p class="aviso-contrato">
+        {% if tipo == 'rag' %}
+        Edita las instrucciones para redactar las respuestas del RAG. La consulta del cliente,
+        el historial, la información recuperada y el formato JSON se agregan automáticamente.
+        {% else %}
         Edita el playbook completo de este agente. El contrato de seguridad, el esquema JSON
         y el catálogo técnico se agregan automáticamente y permanecen protegidos.
+        {% endif %}
       </p>
 
       {% if tipo == 'recordatorio' %}

@@ -10,6 +10,38 @@ os.environ.setdefault("OPENAI_API_KEY", "")
 from src.application.rag_service import RagService
 
 
+def test_prompt_rag_lee_version_activa_del_proyecto_en_cada_consulta(monkeypatch):
+    from src.application.project_context import ambito_proyecto
+    from src.infrastructure.repositories import instrucciones_repository
+    contenidos = {1: "Instrucciones del proyecto uno. {precio} es texto literal.", 2: "Instrucciones del proyecto dos."}
+    consultas = []
+
+    def consultar(sql, params):
+        consultas.append(params)
+        assert params[1] == "rag"
+        return {"contenido": contenidos[params[0]]}
+
+    monkeypatch.setattr(instrucciones_repository, "consultar_uno", consultar)
+    service = RagService.__new__(RagService)
+    with ambito_proyecto(1):
+        primero = service._answer_prompt("Consulta", "AGENT", "", [], [], "Cliente")
+        assert contenidos[1] in primero and contenidos[2] not in primero
+        assert "Cliente" in primero and '"has_answer"' in primero
+        contenidos[1] = "Versión restaurada."
+        assert contenidos[1] in service._answer_prompt("Consulta", "AGENT", "", [], [])
+    with ambito_proyecto(2):
+        assert contenidos[2] in service._answer_prompt("Consulta", "AGENT", "", [], [])
+    assert consultas == [(1, "rag"), (1, "rag"), (2, "rag")]
+
+
+def test_prompt_rag_conserva_respaldo_si_no_hay_version_disponible(monkeypatch):
+    from src.application.rag_service import RAG_PROMPT_INICIAL
+    from src.infrastructure.repositories import instrucciones_repository
+    monkeypatch.setattr(instrucciones_repository, "activas", lambda tipo: "")
+    service = RagService.__new__(RagService)
+    assert RAG_PROMPT_INICIAL in service._answer_prompt("Consulta", "AGENT", "", [], [])
+
+
 class RagServiceSourceTests(unittest.TestCase):
     def test_source_summaries_include_chunk_content(self):
         service = RagService.__new__(RagService)
