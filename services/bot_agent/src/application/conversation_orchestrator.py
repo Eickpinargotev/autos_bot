@@ -82,6 +82,14 @@ _ENLACE = re.compile(
 class ConversationOrchestrator:
     @staticmethod
     def _branch(message: InboundMessage, branch: str, data: dict | None = None) -> None:
+        if message.message_type == MessageType.AUDIO and branch in ("temporary_block", "permanent_block"):
+            # La pausa impide responder/transcribir, pero nunca debe ocultar
+            # una nota de voz que el cliente sí envió.
+            ConversationLogRepository.log_inbound(
+                client_id=message.user_id, canal=message.channel,
+                sender_name=message.user_name, message_type=MessageType.AUDIO,
+                event_type="audio_bloqueado",
+            )
         audit.record(message.user_id, message.channel,
                      "decision_blocked" if branch in ("temporary_block", "permanent_block") else "decision",
                      metadata={"branch": branch})

@@ -13,6 +13,9 @@ RUTAS_SOLO_ADMIN = (
     # Las cifras del perfil, que se refrescan solas. Llevan el costo real y el
     # margen: servírselas a un negocio sería enseñarle lo que ganamos con él.
     "/admin/negocios/1/resumen",
+    "/admin/negocios/1/preguntas",
+    "/admin/negocios/1/preguntas/lista",
+    "/admin/negocios/1/preguntas/1/diagnostico.json",
     "/admin/incidencias",
     "/admin/usuarios",
     "/admin/configuracion",
@@ -78,6 +81,8 @@ def test_el_admin_entra_a_lo_suyo(sesion_admin):
     # Hay rutas de la lista que son de UN proyecto (`/admin/negocios/1/...`), y
     # sin ninguno creado responderían 404 antes de llegar a comprobar nada.
     clientes_whatsapp.crear("Escuela de prueba")
+    from src.db import pool
+    pool.ejecutar("INSERT INTO preguntas_sin_respuesta (id, proyecto_id, pregunta) VALUES (1, 1, 'Prueba')")
 
     for ruta in RUTAS_SOLO_ADMIN:
         assert sesion_admin.get(ruta).status_code == 200, ruta

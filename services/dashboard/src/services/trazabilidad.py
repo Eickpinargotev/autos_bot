@@ -51,7 +51,7 @@ def listar_conversaciones(
         # búsqueda; devolver nada deja claro que aquí solo se busca por número.
         return []
 
-    condiciones = []
+    condiciones = ["ultima_actividad_visible IS NOT NULL"]
     params: list[Any] = []
     if numero:
         condiciones.append("client_id LIKE %s")
@@ -59,20 +59,21 @@ def listar_conversaciones(
     condiciones.append("proyecto_id = %s")
     params.append(int(proyecto_id))
     if antes_de:
-        condiciones.append("(ultima_actividad, ultimo_mensaje_id) < (%s, %s)")
+        condiciones.append("(ultima_actividad_visible, ultimo_evento_visible_id) < (%s, %s)")
         params.extend(antes_de)
     if hasta_de:
-        condiciones.append("(ultima_actividad, ultimo_mensaje_id) >= (%s, %s)")
+        condiciones.append("(ultima_actividad_visible, ultimo_evento_visible_id) >= (%s, %s)")
         params.extend(hasta_de)
     where = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
     params.append(int(limite) if limite is not None else None)
     return pool.consultar(
         f"""
-        SELECT client_id, canal, ultima_actividad, ultimo_mensaje_id, mensajes,
+        SELECT client_id, canal, ultima_actividad_visible AS ultima_actividad,
+               ultimo_evento_visible_id AS ultimo_mensaje_id, mensajes,
                respuestas_bot, respuestas_dueno, nombre
         FROM conversation_threads
         {where}
-        ORDER BY ultima_actividad DESC, ultimo_mensaje_id DESC
+        ORDER BY ultima_actividad_visible DESC, ultimo_evento_visible_id DESC
         LIMIT %s
         """,
         tuple(params),
@@ -256,7 +257,7 @@ def resumen_conversacion(proyecto_id: int, client_id: str, canal: str) -> dict[s
     fila = pool.consultar_uno(
         """
         SELECT mensajes, eventos, primera_actividad AS primera,
-               ultima_actividad AS ultima, nombre
+               ultima_actividad_visible AS ultima, nombre
         FROM conversation_threads
         WHERE proyecto_id = %s AND client_id = %s AND canal = %s
         """,
@@ -488,7 +489,7 @@ PREGUNTAS_RETENCION_HORAS = 24
 def listar_preguntas_sin_respuesta(proyecto_id: int, limite: int = 200) -> list[dict[str, Any]]:
     return pool.consultar(
         """
-        SELECT *,
+        SELECT id, pregunta, client_id, canal, atendida, creado_en, atendida_en,
                atendida_en + (%s || ' hours')::interval AS caduca_en
         FROM preguntas_sin_respuesta
         WHERE proyecto_id = %s

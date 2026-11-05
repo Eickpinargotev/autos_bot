@@ -114,7 +114,7 @@ def test_el_proyecto_no_recibe_los_temas_del_administrador():
 
 def test_el_administrador_recibe_lo_suyo():
     del_admin = eventos.topics_para({"rol": "admin"})
-    assert del_admin == {"uso", "incidencias"}
+    assert del_admin == {"uso", "incidencias", "preguntas"}
 
 
 def test_sin_sesion_no_se_recibe_nada():

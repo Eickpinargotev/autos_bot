@@ -1,6 +1,10 @@
 """Preguntas que el RAG no supo responder, para alimentar la base de conocimiento."""
 
-from src.infrastructure.repositories.postgres_conn import ejecutar
+import json
+
+from src.infrastructure.repositories.postgres_conn import ejecutar, consultar
+from src.infrastructure.repositories import conversation_audit_repository as audit
+from src.infrastructure.logging.trace_sanitizer import MAX_PROVIDER_BYTES, sanitize
 from src.application.project_context import proyecto_actual
 
 # Cuánto sobrevive una pregunta ya marcada como entendida, desde que se marcó.
@@ -13,14 +17,34 @@ PREGUNTAS_RETENCION_HORAS = 24
 
 class UnansweredQuestionRepository:
     @staticmethod
-    def create(question: str) -> bool:
+    def create(question: str, *, client_id: str = "", canal: str = "",
+               current_message: str = "", fallback_message: str = "") -> bool:
         proyecto_id = proyecto_actual()
         if not proyecto_id or not (question or "").strip():
             return False
         try:
+            correlation = audit.context().get("correlation_id") or ""
+            eventos = []
+            if correlation and client_id and canal:
+                eventos = consultar(
+                    "SELECT * FROM conversation_messages WHERE proyecto_id = %s "
+                    "AND client_id = %s AND canal = %s AND correlation_id = %s ORDER BY id",
+                    (proyecto_id, client_id, canal, correlation),
+                )
+            # Congelar las evidencias: editar chunks o purgar el chat después
+            # no debe cambiar lo que vio el agente cuando falló esta consulta.
+            diagnostico = {
+                "consulta_cliente": current_message,
+                "consulta_conocimiento": question,
+                "respuesta_prevista": fallback_message,
+                "eventos": [sanitize(dict(e), 2 * MAX_PROVIDER_BYTES) for e in eventos],
+            }
             ejecutar(
-                "INSERT INTO preguntas_sin_respuesta (proyecto_id, pregunta) VALUES (%s, %s)",
-                (proyecto_id, question),
+                "INSERT INTO preguntas_sin_respuesta "
+                "(proyecto_id, pregunta, client_id, canal, correlation_id, diagnostico) "
+                "VALUES (%s, %s, %s, %s, %s, %s::jsonb)",
+                (proyecto_id, question, client_id, canal, correlation,
+                 json.dumps(diagnostico, ensure_ascii=False, default=str)),
             )
             return True
         except Exception as e:

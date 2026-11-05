@@ -109,6 +109,22 @@ def test_listado_con_fechas_iguales_no_repite_ni_omite_conversaciones(monkeypatc
     ]
 
 
+def test_hora_del_listado_sigue_actividad_visible_y_no_trazas(sesion_cliente):
+    fecha = datetime(2026, 11, 4, 16, 48, tzinfo=timezone.utc)
+    _mensaje("50612345678", "Hola", creado=fecha)
+    _mensaje("50612345678", "Webhook", direction="internal", author="tool",
+             event_type="provider_webhook", creado=fecha + timedelta(hours=4))
+    assert trazabilidad.listar_conversaciones(1)[0]["ultima_actividad"] == fecha
+    _mensaje("50612345678", "", event_type="group_leave", creado=fecha + timedelta(hours=5))
+    assert trazabilidad.listar_conversaciones(1)[0]["ultima_actividad"] == fecha + timedelta(hours=5)
+    _mensaje("50612345678", "", message_type="audio", event_type="audio_bloqueado",
+             creado=fecha + timedelta(hours=6))
+    assert trazabilidad.listar_conversaciones(1)[0]["ultima_actividad"] == fecha + timedelta(hours=6)
+    html = sesion_cliente.get("/conversaciones/whatsapp/50612345678").text
+    assert "Audio recibido" in html and "no se procesó porque la IA estaba pausada" in html
+    assert "Salió o fue retirado del grupo" in html
+
+
 def test_la_conversacion_llega_por_tandas_no_entera():
     """Cargar miles de mensajes de golpe es lo que hacía la página inservible."""
     for i in range(10):

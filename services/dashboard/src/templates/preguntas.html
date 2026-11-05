@@ -7,6 +7,9 @@
 
 {% block contenido %}
 <h1>Preguntas sin respuesta</h1>
+{% if es_admin %}
+<p class="sub">Audite la interacción que originó cada pregunta de {{ proyecto.nombre }}. El reporte JSON está disponible únicamente para administradores.</p>
+{% else %}
 <p class="sub">
   Lo que los clientes preguntaron y el agente no supo contestar: cada una es un
   agujero en tu <a href="/conocimiento">base de conocimiento</a>. Crea un chunk
@@ -14,8 +17,9 @@
   Al marcar una como entendida se pone en verde y <strong>se borra sola en
   {{ retencion_horas }} horas</strong>; lo pendiente no caduca.
 </p>
+{% endif %}
 
-<div data-vivo="preguntas" data-refrescar="/preguntas/lista">
+<div data-vivo="preguntas" data-refrescar="{{ url_lista_preguntas | default('/preguntas/lista') }}">
   {% include "_preguntas_lista.html" %}
 </div>
 {% endblock %}

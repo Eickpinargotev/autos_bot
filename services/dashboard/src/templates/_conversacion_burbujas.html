@@ -74,6 +74,8 @@ salida: {{ m.salida }}</pre>
        texto, para que nadie lo lea como si lo hubiera escrito. #}
     {% if m.event_type == 'audio_transcrito' %}
     <div class="etiqueta-origen">🎤 Audio transcrito</div>
+    {% elif m.event_type == 'audio_bloqueado' %}
+    <div class="etiqueta-origen">🎤 Audio recibido{% if m.text %} durante la pausa de la IA{% else %} · no se procesó porque la IA estaba pausada en esta conversación{% endif %}</div>
     {% elif m.event_type == 'audio_no_transcrito' %}
     <div class="etiqueta-origen">🎤 Audio · no se pudo transcribir</div>
     {% elif m.event_type == 'media_avisada' %}

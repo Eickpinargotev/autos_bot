@@ -134,8 +134,8 @@ class ConversationLogRepository:
                 INSERT INTO conversation_messages (
                     proyecto_id, client_id, canal, direction, author, sender_id, sender_name,
                     message_type, text, event_type, tool_name, status,
-                    quoted_text, entrada, salida, error, duration_ms
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    quoted_text, entrada, salida, error, duration_ms, correlation_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     proyecto_id, str(client_id),
@@ -154,6 +154,7 @@ class ConversationLogRepository:
                     ConversationLogRepository._json_o_nulo(message.get("output")),
                     message.get("error") or "",
                     message.get("duration_ms"),
+                    audit.context().get("correlation_id") or "",
                 ),
             )
             return True

@@ -4,16 +4,19 @@ Todas las rutas de este módulo dependen de `requiere_admin`. Un `cliente` recib
 403 aunque escriba la URL a mano.
 """
 
+import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 
 from src.core import security
 from src.core.config import settings
 from src.core.plantillas import render, render_fragmento
 from src.services import (
     clientes_whatsapp,
+    diagnostico_pregunta,
+    trazabilidad,
     mensajeria,
     usuarios,
 )
@@ -82,6 +85,46 @@ def negocio_detalle(request: Request, negocio_id: int, usuario=Depends(security.
         # Último tramo de la miga: «Clientes › Escuela de manejo», con «Clientes»
         # llevando de vuelta al listado.
         miga_final=negocio["nombre"],
+    )
+
+
+def _preguntas_auditoria(negocio_id: int) -> dict:
+    proyecto = clientes_whatsapp.obtener(negocio_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Ese proyecto no existe")
+    return {
+        "proyecto": proyecto,
+        "preguntas": trazabilidad.listar_preguntas_sin_respuesta(negocio_id),
+        "retencion_horas": trazabilidad.PREGUNTAS_RETENCION_HORAS,
+        "url_lista_preguntas": f"/admin/negocios/{negocio_id}/preguntas/lista",
+    }
+
+
+@router.get("/negocios/{negocio_id}/preguntas")
+def preguntas_auditoria(request: Request, negocio_id: int, usuario=Depends(security.requiere_admin)):
+    return render(request, "preguntas.html", usuario, **_preguntas_auditoria(negocio_id))
+
+
+@router.get("/negocios/{negocio_id}/preguntas/lista")
+def preguntas_auditoria_lista(request: Request, negocio_id: int, usuario=Depends(security.requiere_admin)):
+    return render_fragmento(request, "_preguntas_lista.html", usuario, **_preguntas_auditoria(negocio_id))
+
+
+@router.get("/negocios/{negocio_id}/preguntas/{pregunta_id}/diagnostico.json")
+def descargar_diagnostico_pregunta(
+    request: Request, negocio_id: int, pregunta_id: int, usuario=Depends(security.requiere_admin),
+):
+    proyecto = clientes_whatsapp.obtener(negocio_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Ese proyecto no existe")
+    datos = diagnostico_pregunta.datos(proyecto, pregunta_id)
+    if datos is None:
+        raise HTTPException(status_code=404, detail="Esa pregunta no pertenece a este proyecto")
+    return Response(
+        json.dumps(datos, ensure_ascii=False, indent=2, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="pregunta-{pregunta_id}-diagnostico.json"',
+                 "Cache-Control": "no-store"},
     )
 
 

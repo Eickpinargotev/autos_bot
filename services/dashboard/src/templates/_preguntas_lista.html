@@ -2,18 +2,24 @@
    «preguntas»). La página la incluye y `/preguntas/lista` devuelve esto mismo. #}
 <div class="panel tabla-scroll">
   <table>
-    <thead><tr><th>Fecha</th><th>Pregunta</th><th></th></tr></thead>
+    <thead><tr><th>Fecha</th><th>ID de conversación</th><th>Pregunta</th>{% if es_admin %}<th>Auditoría</th>{% endif %}<th></th></tr></thead>
     <tbody>
       {% for p in preguntas %}
       <tr class="{{ 'fila-atendida' if p.atendida }}">
         <td style="white-space:nowrap">{{ p.creado_en | fecha }}</td>
+        <td><span data-copiar title="Copiar ID de conversación">{{ p.client_id or 'No disponible' }}</span>{% if p.canal %}<div class="sub">{{ p.canal }}</div>{% endif %}</td>
         <td>{{ p.pregunta }}</td>
+        {% if es_admin %}
+        <td><a class="boton mini" href="/admin/negocios/{{ proyecto.id }}/preguntas/{{ p.id }}/diagnostico.json" download>Descargar reporte</a></td>
+        {% endif %}
         <td style="white-space:nowrap">
           {% if p.atendida %}
           <span class="pastilla ok">entendido</span>
           {% if p.caduca_en %}
           <div style="font-size:11px;color:var(--tenue)">se borra el {{ p.caduca_en | fecha }}</div>
           {% endif %}
+          {% elif es_admin %}
+          <span class="pastilla">pendiente</span>
           {% else %}
           <form method="post" action="/preguntas/{{ p.id }}/atendida">
             <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -23,7 +29,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="3" class="vacio">No hay preguntas pendientes.</td></tr>
+      <tr><td colspan="{{ 5 if es_admin else 4 }}" class="vacio">No hay preguntas pendientes.</td></tr>
       {% endfor %}
     </tbody>
   </table>

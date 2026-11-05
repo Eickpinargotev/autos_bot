@@ -26,15 +26,15 @@ TOPICS: dict[str, tuple[str, ...]] = {
     "envios": ("envios_ultimo_lote", "envios_pendientes", "envios_cancelados"),
 }
 
-_TOPICS_ADMIN = frozenset({"uso", "incidencias"})
+_TOPICS_ADMIN = frozenset({"uso", "incidencias", "preguntas"})
 _TOPICS_NEGOCIO = frozenset({"uso", "reportes", "preguntas", "conversaciones", "bloqueos", "envios"})
 
 _SQL_SENALES = """
 SELECT scope, proyecto_id,
        (SELECT max(id) FROM reportes r WHERE scope = 'admin' OR r.proyecto_id = base.proyecto_id) AS reportes_ultimo,
        (SELECT count(*) FROM reportes r WHERE NOT revisado AND (scope = 'admin' OR r.proyecto_id = base.proyecto_id)) AS reportes_pendientes,
-       (SELECT max(id) FROM preguntas_sin_respuesta p WHERE scope <> 'admin' AND p.proyecto_id = base.proyecto_id) AS preguntas_ultima,
-       (SELECT count(*) FROM preguntas_sin_respuesta p WHERE NOT atendida AND scope <> 'admin' AND p.proyecto_id = base.proyecto_id) AS preguntas_pendientes,
+       (SELECT max(id) FROM preguntas_sin_respuesta p WHERE (scope = 'admin' OR p.proyecto_id = base.proyecto_id)) AS preguntas_ultima,
+       (SELECT count(*) FROM preguntas_sin_respuesta p WHERE NOT atendida AND (scope = 'admin' OR p.proyecto_id = base.proyecto_id)) AS preguntas_pendientes,
        (SELECT max(ultimo_mensaje_id) FROM conversation_threads t WHERE scope = 'admin' OR t.proyecto_id = base.proyecto_id) AS conversaciones_ultimo,
        (SELECT count(*) FROM conversation_threads t WHERE scope = 'admin' OR t.proyecto_id = base.proyecto_id) AS conversaciones_total,
        (SELECT max(id) FROM uso_eventos u WHERE scope = 'admin' OR u.proyecto_id = base.proyecto_id) AS uso_ultimo,

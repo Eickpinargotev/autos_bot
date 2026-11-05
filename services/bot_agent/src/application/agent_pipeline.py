@@ -442,7 +442,7 @@ class AgentPipeline:
             turn.replies.append(answer.answer)
             turn.history_messages.append(answer.answer)
             return
-        self._create_unanswered_question(user_id, channel_value, question)
+        self._create_unanswered_question(user_id, channel_value, question, current_message)
         turn.replies.append(self.RAG_FALLBACK_MESSAGE)
         turn.history_messages.append(self.RAG_FALLBACK_MESSAGE)
         turn.rag_missed = True
@@ -482,7 +482,7 @@ class AgentPipeline:
             call=call,
         )
 
-    def _create_unanswered_question(self, user_id: str, channel_value: str, question: str):
+    def _create_unanswered_question(self, user_id: str, channel_value: str, question: str, current_message: str = ""):
         if not user_id or not channel_value:
             UnansweredQuestionRepository.create(question)
             return
@@ -493,7 +493,10 @@ class AgentPipeline:
             input_data={"question": question},
             output_mapper=lambda result: {"created": bool(result)},
             text_mapper=lambda result: f"Pregunta sin respuesta registrada: {bool(result)}",
-            call=lambda: UnansweredQuestionRepository.create(question),
+            call=lambda: UnansweredQuestionRepository.create(
+                question, client_id=user_id, canal=channel_value,
+                current_message=current_message, fallback_message=self.RAG_FALLBACK_MESSAGE,
+            ),
         )
 
     @staticmethod

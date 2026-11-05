@@ -40,7 +40,7 @@ class ConversationToolLoggingTests(unittest.TestCase):
         (
             proyecto_id, client_id, canal, direction, author, _sender_id, _sender_name,
             message_type, _text, event_type, tool_name, status,
-            _quoted_text, entrada, salida, _error, duration_ms,
+            _quoted_text, entrada, salida, _error, duration_ms, _correlation_id,
         ) = params
 
         self.assertEqual(proyecto_id, 1)
