@@ -432,6 +432,42 @@ class AgentRagTests(unittest.TestCase):
         h.unanswered_mock.assert_called_once()
         self.assertIsNone(result.reminder)
 
+    def test_respuesta_parcial_registra_solo_la_parte_faltante_y_no_empuja_proceso(self):
+        from src.application.rag_service import RagAnswer
+        decision = AgentDecision(action="reply", messages=["[[rag]]", "¿Reservamos?"],
+                                 rag_query="Total cita y dictamen", rag_queries=["Costo dictamen", "Costo cita A2"],
+                                 pending="Confirmar reserva")
+        parcial = RagAnswer(has_answer=True, answer="El dictamen cuesta 22800; falta confirmar la gestión de la cita.",
+                            unanswered_queries=["Costo gestión cita A2", "Costo gestión cita A2"])
+        with PipelineHarness(ConversationState(), supervisor=decision, rag_answer=parcial) as h:
+            result = h.run(text="¿Cuánto sale con cita y dictamen?")
+        self.assertEqual(result.replies, [parcial.answer])
+        self.assertIsNone(result.reminder)
+        h.unanswered_mock.assert_called_once_with(
+            "Costo gestión cita A2", client_id="506", canal="whatsapp",
+            current_message="¿Cuánto sale con cita y dictamen?", fallback_message=parcial.answer,
+        )
+        self.assertEqual(h.rag_mock.call_args.kwargs["search_queries"], ["Costo dictamen", "Costo cita A2"])
+
+    def test_respuesta_completa_no_crea_preguntas_pendientes(self):
+        from src.application.rag_service import RagAnswer
+        decision = AgentDecision(action="reply", messages=["[[rag]]"], rag_query="Costo dictamen")
+        with PipelineHarness(ConversationState(), supervisor=decision,
+                             rag_answer=RagAnswer(has_answer=True, answer="22800")) as h:
+            result = h.run(text="¿Cuánto cuesta?")
+        self.assertEqual(result.replies, ["22800"])
+        h.unanswered_mock.assert_not_called()
+
+    def test_varias_etiquetas_rag_no_duplican_busquedas_ni_llamadas(self):
+        from src.application.rag_service import RagAnswer
+        decision = AgentDecision(action="reply", messages=["[[rag]]", "[[rag]]"],
+                                 rag_query="Costos", rag_queries=["Costo dictamen", "Costo cita"])
+        with PipelineHarness(ConversationState(), supervisor=decision,
+                             rag_answer=RagAnswer(has_answer=True, answer="Respuesta")) as h:
+            result = h.run(text="Costos")
+        self.assertEqual(result.replies, ["Respuesta"])
+        h.rag_mock.assert_called_once()
+
 
 class AgentHandoffTests(unittest.TestCase):
     def test_handoff_reports_blocks_and_sends_human_message(self):

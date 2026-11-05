@@ -41,6 +41,7 @@ from src.application.unified_agent import (
     SupervisorAgent,
 )
 from src.core.config import settings
+from src.core.consultas_rag import normalizar_consultas
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from src.infrastructure.repositories.conversation_state_repo import ConversationState, ConversationStateRepo
@@ -71,6 +72,7 @@ class _ExpandedTurn:
     history_messages: list[str] = field(default_factory=list)
     fragment_report: str = ""
     rag_missed: bool = False
+    rag_processed: bool = False
 
 
 class AgentGraphState(TypedDict, total=False):
@@ -307,6 +309,9 @@ class AgentPipeline:
                 # más pasos del proceso mientras su duda sigue abierta.
                 break
             if RAG_TOKEN in message:
+                if turn.rag_processed:
+                    continue
+                turn.rag_processed = True
                 self._expand_rag(
                     message, decision, stored, user_id, channel_value, turn,
                     current_message=current_message,
@@ -437,10 +442,20 @@ class AgentPipeline:
         answer = self._answer_rag(
             user_id, channel_value, question, stored,
             current_message=current_message,
+            search_queries=decision.rag_queries,
         )
         if answer.has_answer:
             turn.replies.append(answer.answer)
             turn.history_messages.append(answer.answer)
+            pendientes = normalizar_consultas(getattr(answer, "unanswered_queries", []))
+            for pendiente in pendientes:
+                self._create_unanswered_question(
+                    user_id, channel_value, pendiente, current_message,
+                    response_message=answer.answer,
+                )
+            # No continuar con reservas ni recordatorios si sigue faltando una
+            # parte de lo que pidió el cliente, aunque sí recibió datos útiles.
+            turn.rag_missed = bool(pendientes)
             return
         self._create_unanswered_question(user_id, channel_value, question, current_message)
         turn.replies.append(self.RAG_FALLBACK_MESSAGE)
@@ -450,7 +465,10 @@ class AgentPipeline:
     def _answer_rag(
         self, user_id: str, channel_value: str, question: str,
         stored: ConversationState, current_message: str = "",
+        search_queries: list[str] | None = None,
     ):
+        consultas = normalizar_consultas(search_queries)
+        extra = {"search_queries": consultas} if consultas else {}
         call = lambda: self.rag.answer_question(
             question,
             context=f"{AGENT_FLOW}",
@@ -459,6 +477,7 @@ class AgentPipeline:
             client_id=user_id,
             canal=channel_value,
             current_message=current_message,
+            **extra,
         )
         if not user_id or not channel_value:
             return call()
@@ -472,17 +491,20 @@ class AgentPipeline:
                 "last_question": stored.last_question,
                 "history_turns": len(stored.conversation_history),
                 "current_message": current_message,
+                "search_queries": consultas,
             },
             output_mapper=lambda answer: {
                 "has_answer": bool(answer.has_answer),
                 "answer": answer.answer,
                 "sources": answer.sources,
+                "unanswered_queries": normalizar_consultas(getattr(answer, "unanswered_queries", [])),
             },
             text_mapper=lambda answer: f"RAG respondió: {bool(answer.has_answer)}",
             call=call,
         )
 
-    def _create_unanswered_question(self, user_id: str, channel_value: str, question: str, current_message: str = ""):
+    def _create_unanswered_question(self, user_id: str, channel_value: str, question: str,
+                                    current_message: str = "", response_message: str | None = None):
         if not user_id or not channel_value:
             UnansweredQuestionRepository.create(question)
             return
@@ -495,7 +517,8 @@ class AgentPipeline:
             text_mapper=lambda result: f"Pregunta sin respuesta registrada: {bool(result)}",
             call=lambda: UnansweredQuestionRepository.create(
                 question, client_id=user_id, canal=channel_value,
-                current_message=current_message, fallback_message=self.RAG_FALLBACK_MESSAGE,
+                current_message=current_message,
+                fallback_message=self.RAG_FALLBACK_MESSAGE if response_message is None else response_message,
             ),
         )
 

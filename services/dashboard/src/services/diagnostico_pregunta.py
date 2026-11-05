@@ -49,6 +49,7 @@ def datos(proyecto: dict, pregunta_id: int) -> dict | None:
                      "correlation_id": pregunta["correlation_id"]},
         "client_query": guardado.get("consulta_cliente", ""),
         "knowledge_query": guardado.get("consulta_conocimiento", pregunta["pregunta"]),
+        "planned_response": guardado.get("respuesta_prevista", ""),
         "planned_fallback": guardado.get("respuesta_prevista", ""),
         "events": [sanitizar(eventos[k]) for k in sorted(eventos)],
         "limitations": limitaciones,

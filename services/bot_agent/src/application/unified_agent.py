@@ -19,7 +19,8 @@ from openai import OpenAI
 from src.application import seguimiento_service
 from src.application.fragment_catalog import SPECIALIST_AREAS, catalog_for_prompt
 from src.core.config import settings
-from src.core.modelos import kwargs_de_auxiliar, kwargs_de_decision
+from src.core.consultas_rag import MAX_CONSULTAS_RAG, MAX_LARGO_CONSULTA, normalizar_consultas
+from src.core.modelos import configuracion_recordatorios, kwargs_de_decision
 from src.core.prompts import (
     AGENT_COMMON_CONTRACT,
     AREA_PROMPT_BODIES,
@@ -101,6 +102,8 @@ def _decision_response_format(valid_actions: set[str]) -> dict:
                     "action": {"type": "string", "enum": sorted(valid_actions)},
                     "messages": {"type": "array", "items": {"type": "string"}},
                     "rag_query": {"type": "string"},
+                    "rag_queries": {"type": "array", "maxItems": MAX_CONSULTAS_RAG,
+                                    "items": {"type": "string", "maxLength": MAX_LARGO_CONSULTA}},
                     "pending": {"type": "string"},
                     "report": {"type": "string"},
                     "city": {"type": "string"},
@@ -108,7 +111,7 @@ def _decision_response_format(valid_actions: set[str]) -> dict:
                     "confidence": {"type": "number"},
                 },
                 "required": [
-                    "action", "messages", "rag_query", "pending",
+                    "action", "messages", "rag_query", "rag_queries", "pending",
                     "report", "city", "target", "confidence",
                 ],
             },
@@ -144,6 +147,7 @@ class AgentDecision:
     action: str
     messages: list[str] = field(default_factory=list)
     rag_query: str = ""
+    rag_queries: list[str] = field(default_factory=list)
     pending: str = ""
     report: str = ""
     city: str = ""
@@ -298,7 +302,10 @@ class _DecisionAgent:
         messages = [str(m).strip() for m in raw_messages if str(m or "").strip()]
         messages = messages[:MAX_MESSAGES_PER_TURN]
 
+        rag_queries = normalizar_consultas(data.get("rag_queries"))
         rag_query = str(data.get("rag_query") or "").strip()
+        if rag_queries and not rag_query:
+            rag_query = " / ".join(rag_queries)
         pending = str(data.get("pending") or "").strip()
         report = str(data.get("report") or "").strip()
         city = str(data.get("city") or "").strip()
@@ -338,6 +345,7 @@ class _DecisionAgent:
             action=action,
             messages=messages,
             rag_query=rag_query,
+            rag_queries=rag_queries,
             pending=pending,
             report=report,
             city=city,
@@ -380,6 +388,7 @@ class _DecisionAgent:
             "action": decision.action,
             "messages": decision.messages,
             "rag_query": decision.rag_query,
+            "rag_queries": decision.rag_queries,
             "pending": decision.pending,
             "report": decision.report,
             "city": decision.city,
@@ -426,10 +435,8 @@ class FollowupAgent:
             "recordatorios_enviados": state.reminder_level,
         }
         started = time.monotonic()
-        # Decisión chica y muy acotada (¿retomo o no, y con qué frase?): va al
-        # modelo auxiliar, que cuesta una fracción del que enruta.
-        modelo = settings.OPENAI_MODEL_AUXILIAR
-        model_kwargs = kwargs_de_auxiliar(modelo)
+        # El recordatorio usa su modelo y esfuerzo, sin depender del RAG.
+        modelo, model_kwargs = configuracion_recordatorios()
         input_data = {
             "pending": state.last_question,
             "model": modelo,

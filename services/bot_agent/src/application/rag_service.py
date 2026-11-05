@@ -8,7 +8,8 @@ from openai import OpenAI
 
 from src.application import seguimiento_service
 from src.core.config import settings
-from src.core.modelos import kwargs_de_auxiliar
+from src.core.consultas_rag import MAX_CONSULTAS_RAG, MAX_LARGO_CONSULTA, normalizar_consultas
+from src.core.modelos import configuracion_rag
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from src.infrastructure.repositories.postgres_conn import consultar, consultar_uno
@@ -29,8 +30,10 @@ ANSWER_RESPONSE_FORMAT = {
             "properties": {
                 "has_answer": {"type": "boolean"},
                 "answer": {"type": "string"},
+                "unanswered_queries": {"type": "array", "maxItems": MAX_CONSULTAS_RAG,
+                                       "items": {"type": "string", "maxLength": MAX_LARGO_CONSULTA}},
             },
-            "required": ["has_answer", "answer"],
+            "required": ["has_answer", "answer", "unanswered_queries"],
         },
     },
 }
@@ -41,6 +44,7 @@ class RagAnswer:
     has_answer: bool
     answer: str = ""
     sources: list[dict[str, Any]] = field(default_factory=list)
+    unanswered_queries: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,37 +97,60 @@ class RagService:
         client_id: str = "",
         canal: Channel | str = "",
         current_message: str = "",
+        search_queries: list[str] | None = None,
     ) -> RagAnswer:
         if not self.client or not self.openai:
             return RagAnswer(has_answer=False)
 
         if client_id and canal:
             ToolCallLogger.record(
-                client_id=client_id,
-                canal=canal,
-                tool_name="rag.sync_if_needed",
+                client_id=client_id, canal=canal, tool_name="rag.sync_if_needed",
                 input_data={"collection": self.collection_name},
                 output_mapper=lambda result: {"completed": True},
                 text_mapper=lambda result: "Sincronización lazy RAG revisada",
                 call=self.sync_if_needed,
             )
-            chunks = ToolCallLogger.record(
-                client_id=client_id,
-                canal=canal,
-                tool_name="rag.search",
-                input_data={"question": question, "limit": 3, "score_threshold": self.score_threshold},
-                output_mapper=self._search_log_output,
-                text_mapper=lambda result: f"RAG encontró chunks: {len(result)}",
-                call=lambda: self.search(question),
-            )
         else:
             self.sync_if_needed()
-            chunks = self.search(question)
+        consultas = normalizar_consultas(search_queries) or [question]
+        encontrados = {}
+        for consulta in consultas:
+            if client_id and canal:
+                recuperados = ToolCallLogger.record(
+                    client_id=client_id, canal=canal, tool_name="rag.search",
+                    input_data={"question": consulta, "limit": 3, "score_threshold": self.score_threshold},
+                    output_mapper=self._search_log_output,
+                    text_mapper=lambda result: f"RAG encontró chunks: {len(result)}",
+                    call=lambda: self.search(consulta),
+                )
+            else:
+                recuperados = self.search(consulta)
+            # Cada búsqueda conserva sus tres resultados. No dejar que los
+            # chunks de un servicio desplacen todos los del otro.
+            for chunk in recuperados:
+                clave = chunk.get("external_id") or chunk.get("text") or json.dumps(chunk, sort_keys=True, default=str)
+                if clave not in encontrados:
+                    encontrados[clave] = {**chunk, "retrieval_queries": [consulta]}
+                else:
+                    previo = encontrados[clave]
+                    origenes = previo["retrieval_queries"] + [consulta]
+                    if float(chunk.get("score") or 0) > float(previo.get("score") or 0):
+                        encontrados[clave] = {**chunk, "retrieval_queries": origenes}
+                    else:
+                        previo["retrieval_queries"] = origenes
+        chunks = list(encontrados.values())
         if not chunks:
             return RagAnswer(has_answer=False)
 
+        pregunta_generacion = question
+        if len(consultas) > 1:
+            # Incluye también las consultas sin resultados como datos: de otro
+            # modo el redactor solo vería el servicio que sí devolvió chunks.
+            pregunta_generacion = json.dumps({
+                "consulta_general": question, "consultas_especificas": consultas,
+            }, ensure_ascii=False)
         prompt = self._answer_prompt(
-            question, context, last_question, conversation_history or [], chunks,
+            pregunta_generacion, context, last_question, conversation_history or [], chunks,
             current_message=current_message,
         )
         messages = [
@@ -133,10 +160,9 @@ class RagService:
         model_recorded = False
         try:
             started = time.monotonic()
-            # Redactar con el contexto ya recuperado no exige el modelo caro: lo
-            # difícil (encontrar los fragmentos) ya lo hizo la búsqueda vectorial.
-            modelo = settings.OPENAI_MODEL_AUXILIAR
-            model_kwargs = kwargs_de_auxiliar(modelo)
+            # La redacción tiene modelo y esfuerzo propios; la búsqueda de
+            # chunks y los embeddings conservan su configuración independiente.
+            modelo, model_kwargs = configuracion_rag()
             completion = self.openai.chat.completions.create(
                 model=modelo,
                 response_format=ANSWER_RESPONSE_FORMAT,
@@ -172,6 +198,7 @@ class RagService:
                 has_answer=True,
                 answer=answer,
                 sources=self._source_summaries(chunks),
+                unanswered_queries=normalizar_consultas(data.get("unanswered_queries")),
             )
             self._log_answer_generation(
                 client_id,
@@ -574,6 +601,7 @@ Devuelve JSON estricto:
                 "has_answer": result.has_answer,
                 "answer": result.answer,
                 "sources": result.sources,
+                "unanswered_queries": result.unanswered_queries,
             }
             has_answer = result.has_answer
         else:

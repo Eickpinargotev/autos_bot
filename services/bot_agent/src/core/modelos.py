@@ -62,10 +62,28 @@ def kwargs_de_decision(modelo: str, *, reasoning_effort: str | None = None) -> d
 
 
 def kwargs_de_auxiliar(modelo: str) -> dict:
-    """RAG, recordatorios y extracción publicitaria comparten los parámetros.
-
-    Su esfuerzo es independiente del supervisor y de los especialistas.
-    """
+    """Extracción publicitaria y respaldo de la configuración anterior."""
     return kwargs_de_decision(
         modelo, reasoning_effort=settings.OPENAI_REASONING_EFFORT_AUXILIAR,
+    )
+
+
+def _configuracion_independiente(modelo: str, esfuerzo: str) -> tuple[str, dict]:
+    elegido = modelo.strip() or settings.OPENAI_MODEL_AUXILIAR
+    if not esfuerzo.strip():
+        # Una tarea configurada explícitamente no hereda el esfuerzo de otra.
+        # Si no se configuró, se mantiene exactamente el auxiliar anterior.
+        esfuerzo = "none" if modelo.strip() else settings.OPENAI_REASONING_EFFORT_AUXILIAR
+    return elegido, kwargs_de_decision(elegido, reasoning_effort=esfuerzo.strip())
+
+
+def configuracion_rag() -> tuple[str, dict]:
+    return _configuracion_independiente(
+        settings.OPENAI_MODEL_RAG, settings.OPENAI_REASONING_EFFORT_RAG,
+    )
+
+
+def configuracion_recordatorios() -> tuple[str, dict]:
+    return _configuracion_independiente(
+        settings.OPENAI_MODEL_RECORDATORIOS, settings.OPENAI_REASONING_EFFORT_RECORDATORIOS,
     )

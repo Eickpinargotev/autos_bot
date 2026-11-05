@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     #   llamada que más se beneficia del prompt caching y la que más daño hace
     #   si se equivoca. GPT-6.1 Sol usa razonamiento low para esta tarea.
     # - ESPECIALISTA: ya sabe de qué área habla; el trabajo es más acotado.
-    # - AUXILIAR: decisiones chicas (recordatorio) y redacción del RAG.
+    # - RAG / RECORDATORIOS: modelos y esfuerzo independientes por tarea.
+    # - AUXILIAR: extracción publicitaria y respaldo de instalaciones anteriores.
     #
     # OJO con `temperature`: Sol con razonamiento y gpt-5.6 la RECHAZAN, mientras
     # que gpt-5.4-mini/nano la aceptan. Por eso el determinismo se pide por
@@ -22,9 +23,13 @@ class Settings(BaseSettings):
     OPENAI_REASONING_EFFORT_SUPERVISOR: str = "low"
     OPENAI_MODEL_ESPECIALISTA: str = "gpt-5.4-mini"
     OPENAI_MODEL_AUXILIAR: str = "gpt-5.4-nano"
-    # Independiente de las decisiones del supervisor/especialistas. Se envía
-    # también al redactar con el RAG y extraer datos de publicidad.
     OPENAI_REASONING_EFFORT_AUXILIAR: str = "none"
+    # Vacío conserva la configuración auxiliar anterior. Al elegir un modelo
+    # propio, el esfuerzo predeterminado es none (Sol lo normaliza a low).
+    OPENAI_MODEL_RAG: str = ""
+    OPENAI_REASONING_EFFORT_RAG: str = ""
+    OPENAI_MODEL_RECORDATORIOS: str = ""
+    OPENAI_REASONING_EFFORT_RECORDATORIOS: str = ""
     # Transcripción de notas de voz. Se cobra por MINUTO de audio, no por token.
     OPENAI_MODEL_TRANSCRIPCION: str = "gpt-4o-transcribe"
     # Más holgado que el de decisión: aquí hay que descifrar la media, bajarla y

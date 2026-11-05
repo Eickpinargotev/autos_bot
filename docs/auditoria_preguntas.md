@@ -44,3 +44,14 @@ no se rellenan automáticamente.
 
 Arrancar primero el dashboard para aplicar las migraciones 037–039 y después
 actualizar bot, webhook y workers. No se agregan dependencias de producción.
+
+## Consultas múltiples y respuestas parciales
+
+Cada búsqueda `rag.search` registra su consulta y sus fuentes; la generación
+registra los chunks combinados, sin duplicados, y `unanswered_queries`. Cuando
+hay respuesta parcial se registra una pregunta por cada parte sin respaldo,
+conservando la consulta original y la respuesta parcial prevista en su copia de
+evidencias. No se registra como desconocida la parte que sí se respondió.
+El JSON incluye `planned_response`; `planned_fallback` se conserva como alias por
+compatibilidad con las descargas anteriores. Ninguno confirma por sí mismo que
+el proveedor haya entregado la respuesta; eso se revisa en las trazas de envío.

@@ -22,7 +22,7 @@ Un rollback siempre crea otra versión; nunca reescribe el historial.
 | `AREA_PROMPT_BODIES[área]` + `SPECIALIST_OUTPUT_SCHEMA` | Playbook de cada especialista (GENERAL, CURSO_TEORICO, ALQUILER, CLASES, DICTAMEN, TRAMITES) | JSON validado por `_DecisionAgent._validated_decision` |
 | `FOLLOWUP_AGENT_PROMPT` | Recordatorio inteligente (decide si retomar y redacta UN mensaje) | JSON `{send, message}` |
 | `EXTRACT_AD_INFO_PROMPT` | Extracción de datos de anuncios | JSON `{dia, valor, hora}` |
-| Prompt del RAG (en `rag_service._answer_prompt`) | Generación con evidencia | JSON `{has_answer, answer}` |
+| Prompt del RAG (en `rag_service._answer_prompt`) | Generación con evidencia | JSON `{has_answer, answer, unanswered_queries}` |
 
 ---
 
@@ -138,3 +138,15 @@ Además de todo lo anterior:
   RAG.
 - **Subir la temperatura** para "variar" una decisión: la variación de estilo es
   legítima solo en generación, nunca en clasificación/ruteo.
+
+## Contratos técnicos de consultas RAG
+
+La salida estructurada de supervisor/especialistas admite `rag_queries` (máximo
+tres consultas) además de `rag_query`. Los validadores aceptan respuestas
+anteriores sin esa lista. El RAG devuelve `unanswered_queries` para identificar
+las partes sin respaldo de una respuesta parcial, sin inferir intenciones por
+coincidencias literales. La selección de consultas y la decisión semántica de
+responder siguen siendo responsabilidad del modelo y de sus instrucciones.
+
+Estos cambios de código no reemplazan los prompts activos. La propuesta pendiente
+de aplicación por el usuario está en `docs/ajustes_prompt_consultas_rag.md`.

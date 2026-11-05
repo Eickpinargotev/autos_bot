@@ -77,22 +77,53 @@ razonamiento `none` ni `minimal`, y se omite `temperature` al llamarlo.
 Los especialistas siguen con `gpt-5.4-mini` y el auxiliar con `gpt-5.4-nano`.
 Cambiar únicamente `OPENAI_MODEL` no cambia estos modelos por tarea.
 
-Para usar GPT-6.1 Terra como auxiliar (RAG, recordatorios y extracción de datos
-publicitarios), configura en `.env` o en el entorno del despliegue:
+Cada tarea puede tener su propio modelo. Por ejemplo:
 
 ```env
+# Respuestas con la información recuperada del conocimiento
+OPENAI_MODEL_RAG=gpt-6.1-sol
+OPENAI_REASONING_EFFORT_RAG=low
+
+# Recordatorios inteligentes
+OPENAI_MODEL_RECORDATORIOS=gpt-6.1-terra
+OPENAI_REASONING_EFFORT_RECORDATORIOS=none
+
+# Extracción de datos publicitarios y compatibilidad anterior
 OPENAI_MODEL_AUXILIAR=gpt-6.1-terra
 OPENAI_REASONING_EFFORT_AUXILIAR=none
 ```
 
-El esfuerzo auxiliar ya es `none` por defecto: basta cambiar la primera variable.
-Ambos compose pasan estas opciones a todos los procesos del bot. Con Terra se
-manda `reasoning_effort=none` explícitamente; si se configura razonamiento, se
-omite `temperature`. Las trazas guardan los parámetros usados. No cambia el
-supervisor, los especialistas, los embeddings ni la selección de chunks.
-Primero inicia el dashboard para registrar el precio con la migración 040;
-después recrea bot, webhook y workers para que reciban el entorno actualizado.
-Sin esta variable se mantiene `gpt-5.4-nano` como auxiliar.
+Ambos compose pasan estas opciones a los servicios del bot. Se registran el
+modelo, los parámetros y el uso de tokens de cada llamada en las trazas.
+Sol requiere al menos `low`; Terra acepta `none`. Con Terra se omite
+`temperature` si se activa razonamiento.
+
+Si `OPENAI_MODEL_RAG` o `OPENAI_MODEL_RECORDATORIOS` están vacíos, esa tarea
+conserva el modelo auxiliar anterior. Si tampoco se define su esfuerzo, hereda
+el esfuerzo auxiliar. Al elegir un modelo propio sin especificar esfuerzo,
+se usa `none` (o `low` para Sol), independientemente del auxiliar. Esto permite
+seguir usando solo `OPENAI_MODEL_AUXILIAR` sin cambiar instalaciones existentes.
+
+Estos ajustes no cambian los prompts, el supervisor, los especialistas, los
+embeddings ni la cantidad de chunks. Recrea bot, webhook y workers después de
+modificar las variables. Antes, actualiza el dashboard para aplicar las
+migraciones de precios de Sol (034) y Terra (040), si aún están pendientes.
+
+El contrato técnico admite `rag_queries` (hasta tres búsquedas concretas por
+turno); si falta o está vacío, sigue funcionando `rag_query`. Cada búsqueda
+recupera hasta tres chunks, se unen los resultados y se eliminan duplicados
+antes de redactar una sola respuesta. El máximo es nueve chunks distintos.
+
+El RAG puede devolver `has_answer=true` con una respuesta parcial y
+`unanswered_queries` con las partes faltantes. Solo esas partes se registran
+como preguntas sin respuesta. No se agenda un recordatorio ni se continúa con
+los pasos adicionales del turno mientras siga una duda abierta. Una respuesta
+completa usa `unanswered_queries=[]`; una consulta sin respaldo conserva el
+mensaje de respaldo anterior. Estos campos quedan en las trazas.
+
+Los prompts de ejecución no se modificaron. Las instrucciones propuestas,
+ubicaciones exactas y reemplazos están en
+[la guía de ajustes de prompts](docs/ajustes_prompt_consultas_rag.md).
 
 > Las credenciales de WhatsApp **no** van en el `.env`: son de cada negocio y se
 > administran desde el panel, en el perfil del cliente. El `.env` solo lleva lo que
