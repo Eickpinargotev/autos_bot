@@ -121,10 +121,6 @@ los pasos adicionales del turno mientras siga una duda abierta. Una respuesta
 completa usa `unanswered_queries=[]`; una consulta sin respaldo conserva el
 mensaje de respaldo anterior. Estos campos quedan en las trazas.
 
-Los prompts de ejecución no se modificaron. Las instrucciones propuestas,
-ubicaciones exactas y reemplazos están en
-[la guía de ajustes de prompts](docs/ajustes_prompt_consultas_rag.md).
-
 > Las credenciales de WhatsApp **no** van en el `.env`: son de cada negocio y se
 > administran desde el panel, en el perfil del cliente. El `.env` solo lleva lo que
 > es del despliegue entero.

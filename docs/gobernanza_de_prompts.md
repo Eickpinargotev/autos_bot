@@ -147,6 +147,3 @@ anteriores sin esa lista. El RAG devuelve `unanswered_queries` para identificar
 las partes sin respaldo de una respuesta parcial, sin inferir intenciones por
 coincidencias literales. La selección de consultas y la decisión semántica de
 responder siguen siendo responsabilidad del modelo y de sus instrucciones.
-
-Estos cambios de código no reemplazan los prompts activos. La propuesta pendiente
-de aplicación por el usuario está en `docs/ajustes_prompt_consultas_rag.md`.
