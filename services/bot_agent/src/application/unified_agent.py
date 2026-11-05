@@ -19,7 +19,7 @@ from openai import OpenAI
 from src.application import seguimiento_service
 from src.application.fragment_catalog import SPECIALIST_AREAS, catalog_for_prompt
 from src.core.config import settings
-from src.core.modelos import kwargs_de_decision
+from src.core.modelos import kwargs_de_auxiliar, kwargs_de_decision
 from src.core.prompts import (
     AGENT_COMMON_CONTRACT,
     AREA_PROMPT_BODIES,
@@ -429,6 +429,7 @@ class FollowupAgent:
         # Decisión chica y muy acotada (¿retomo o no, y con qué frase?): va al
         # modelo auxiliar, que cuesta una fracción del que enruta.
         modelo = settings.OPENAI_MODEL_AUXILIAR
+        model_kwargs = kwargs_de_auxiliar(modelo)
         input_data = {
             "pending": state.last_question,
             "model": modelo,
@@ -448,7 +449,7 @@ class FollowupAgent:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
                 ],
-                **kwargs_de_decision(modelo),
+                **model_kwargs,
             )
             seguimiento_service.registrar_uso_llm(
                 client_id,
@@ -468,6 +469,7 @@ class FollowupAgent:
                         {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
                     ],
                     "response_format": FOLLOWUP_RESPONSE_FORMAT,
+                    **model_kwargs,
                 },
                 response=data, usage=getattr(completion, "usage", None),
                 duration_ms=ToolCallLogger._duration_ms(started),
@@ -486,7 +488,7 @@ class FollowupAgent:
         except Exception as exc:
             _record_model_trace(
                 client_id=client_id, canal=canal, agent="FOLLOWUP", model=modelo,
-                request={"turn": turn_data}, status="error", error=exc,
+                request={"turn": turn_data, **model_kwargs}, status="error", error=exc,
                 duration_ms=ToolCallLogger._duration_ms(started),
             )
             if client_id and canal:

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     OPENAI_REASONING_EFFORT_SUPERVISOR: str = "low"
     OPENAI_MODEL_ESPECIALISTA: str = "gpt-5.4-mini"
     OPENAI_MODEL_AUXILIAR: str = "gpt-5.4-nano"
+    # Independiente de las decisiones del supervisor/especialistas. Se envía
+    # también al redactar con el RAG y extraer datos de publicidad.
+    OPENAI_REASONING_EFFORT_AUXILIAR: str = "none"
     # Transcripción de notas de voz. Se cobra por MINUTO de audio, no por token.
     OPENAI_MODEL_TRANSCRIPCION: str = "gpt-4o-transcribe"
     # Más holgado que el de decisión: aquí hay que descifrar la media, bajarla y

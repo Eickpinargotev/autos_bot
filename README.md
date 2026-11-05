@@ -76,8 +76,23 @@ ambos compose pasan estas opciones a los servicios del bot. Sol no admite
 razonamiento `none` ni `minimal`, y se omite `temperature` al llamarlo.
 Los especialistas siguen con `gpt-5.4-mini` y el auxiliar con `gpt-5.4-nano`.
 Cambiar únicamente `OPENAI_MODEL` no cambia estos modelos por tarea.
-Después de modificar la configuración, recrea los servicios del bot; el
-dashboard aplica al arrancar la migración que registra el precio de Sol.
+
+Para usar GPT-6.1 Terra como auxiliar (RAG, recordatorios y extracción de datos
+publicitarios), configura en `.env` o en el entorno del despliegue:
+
+```env
+OPENAI_MODEL_AUXILIAR=gpt-6.1-terra
+OPENAI_REASONING_EFFORT_AUXILIAR=none
+```
+
+El esfuerzo auxiliar ya es `none` por defecto: basta cambiar la primera variable.
+Ambos compose pasan estas opciones a todos los procesos del bot. Con Terra se
+manda `reasoning_effort=none` explícitamente; si se configura razonamiento, se
+omite `temperature`. Las trazas guardan los parámetros usados. No cambia el
+supervisor, los especialistas, los embeddings ni la selección de chunks.
+Primero inicia el dashboard para registrar el precio con la migración 040;
+después recrea bot, webhook y workers para que reciban el entorno actualizado.
+Sin esta variable se mantiene `gpt-5.4-nano` como auxiliar.
 
 > Las credenciales de WhatsApp **no** van en el `.env`: son de cada negocio y se
 > administran desde el panel, en el perfil del cliente. El `.env` solo lleva lo que

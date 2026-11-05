@@ -24,7 +24,7 @@ from src.core.config import settings
 FAMILIAS_SIN_TEMPERATURE = ("gpt-6.1-sol", "gpt-5.6", "gpt-5.5", "o1", "o3", "o4")
 
 # Modelos que aceptan `reasoning_effort`. Enviarlo a un gpt-4o lo hace fallar.
-FAMILIAS_CON_RAZONAMIENTO = ("gpt-6.1-sol", "gpt-5")
+FAMILIAS_CON_RAZONAMIENTO = ("gpt-6.1-sol", "gpt-6.1-terra", "gpt-5")
 
 
 def acepta_temperature(modelo: str) -> bool:
@@ -44,9 +44,14 @@ def kwargs_de_decision(modelo: str, *, reasoning_effort: str | None = None) -> d
     que fija la FORMA de la respuesta aunque no la elección.
     """
     extra: dict = {}
-    if acepta_temperature(modelo):
-        extra["temperature"] = 0
     esfuerzo = settings.OPENAI_REASONING_EFFORT if reasoning_effort is None else reasoning_effort
+    es_terra = str(modelo or "").startswith("gpt-6.1-terra")
+    # Terra usa medium por defecto si se omite el parámetro. El esfuerzo vacío
+    # conserva nuestro modo sin razonamiento; temperature solo se admite con none.
+    if es_terra and esfuerzo == "":
+        esfuerzo = "none"
+    if acepta_temperature(modelo) and (not es_terra or esfuerzo == "none"):
+        extra["temperature"] = 0
     # Sol no admite none ni minimal. Incluso con la configuración histórica,
     # usamos low explícitamente para evitar errores y el default medium.
     if str(modelo or "").startswith("gpt-6.1-sol") and esfuerzo in ("", "none", "minimal"):
@@ -54,3 +59,13 @@ def kwargs_de_decision(modelo: str, *, reasoning_effort: str | None = None) -> d
     if esfuerzo and acepta_razonamiento(modelo):
         extra["reasoning_effort"] = esfuerzo
     return extra
+
+
+def kwargs_de_auxiliar(modelo: str) -> dict:
+    """RAG, recordatorios y extracción publicitaria comparten los parámetros.
+
+    Su esfuerzo es independiente del supervisor y de los especialistas.
+    """
+    return kwargs_de_decision(
+        modelo, reasoning_effort=settings.OPENAI_REASONING_EFFORT_AUXILIAR,
+    )

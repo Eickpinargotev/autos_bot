@@ -8,6 +8,7 @@ from openai import OpenAI
 
 from src.application import seguimiento_service
 from src.core.config import settings
+from src.core.modelos import kwargs_de_auxiliar
 from src.domain.entities import Channel
 from src.infrastructure.logging.tool_call_logger import ToolCallLogger
 from src.infrastructure.repositories.postgres_conn import consultar, consultar_uno
@@ -135,10 +136,12 @@ class RagService:
             # Redactar con el contexto ya recuperado no exige el modelo caro: lo
             # difícil (encontrar los fragmentos) ya lo hizo la búsqueda vectorial.
             modelo = settings.OPENAI_MODEL_AUXILIAR
+            model_kwargs = kwargs_de_auxiliar(modelo)
             completion = self.openai.chat.completions.create(
                 model=modelo,
                 response_format=ANSWER_RESPONSE_FORMAT,
                 messages=messages,
+                **model_kwargs,
             )
             seguimiento_service.registrar_uso_llm(
                 client_id, canal, getattr(completion, "usage", None), origen="rag", modelo=modelo
@@ -147,7 +150,7 @@ class RagService:
             from src.application.unified_agent import _record_model_trace
             _record_model_trace(
                 client_id=client_id, canal=canal, agent="RAG", model=modelo,
-                request={"messages": messages, "response_format": ANSWER_RESPONSE_FORMAT},
+                request={"messages": messages, "response_format": ANSWER_RESPONSE_FORMAT, **model_kwargs},
                 response=data, usage=getattr(completion, "usage", None),
                 duration_ms=ToolCallLogger._duration_ms(started),
             )
@@ -185,7 +188,7 @@ class RagService:
                 from src.application.unified_agent import _record_model_trace
                 _record_model_trace(
                     client_id=client_id, canal=canal, agent="RAG", model=modelo,
-                    request={"messages": messages, "response_format": ANSWER_RESPONSE_FORMAT},
+                    request={"messages": messages, "response_format": ANSWER_RESPONSE_FORMAT, **model_kwargs},
                     status="error", error=e, duration_ms=ToolCallLogger._duration_ms(started),
                 )
             if client_id and canal:

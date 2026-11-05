@@ -15,6 +15,7 @@ import re
 import time
 import unicodedata
 from src.core.config import settings
+from src.core.modelos import kwargs_de_auxiliar
 from src.core.prompts import EXTRACT_AD_INFO_PROMPT
 from src.domain.entities import Channel
 from src.application.runtime_context import clear_user_runtime_context, register_ad_context
@@ -112,6 +113,7 @@ class PublicidadService:
             # Extraer día/valor/hora de un texto ya conocido es la tarea más
             # mecánica del sistema: va al modelo auxiliar.
             modelo = settings.OPENAI_MODEL_AUXILIAR
+            model_kwargs = kwargs_de_auxiliar(modelo)
             messages = [
                 {"role": "system", "content": EXTRACT_AD_INFO_PROMPT},
                 {"role": "user", "content": json.dumps({"mensaje": primer_mensaje}, ensure_ascii=False)},
@@ -120,6 +122,7 @@ class PublicidadService:
                 model=modelo,
                 response_format={ "type": "json_object" },
                 messages=messages,
+                **model_kwargs,
             )
             from src.application import seguimiento_service
 
@@ -131,7 +134,7 @@ class PublicidadService:
             from src.application.unified_agent import _record_model_trace
             _record_model_trace(
                 client_id=user_id, canal=channel_value, agent="PUBLICIDAD", model=modelo,
-                request={"messages": messages, "response_format": {"type": "json_object"}},
+                request={"messages": messages, "response_format": {"type": "json_object"}, **model_kwargs},
                 response=extracted, usage=getattr(completion, "usage", None),
                 duration_ms=ToolCallLogger._duration_ms(started),
             )
@@ -173,7 +176,7 @@ class PublicidadService:
                 _record_model_trace(
                     client_id=user_id, canal=channel_value, agent="PUBLICIDAD",
                     model=locals().get("modelo", settings.OPENAI_MODEL_AUXILIAR),
-                    request={"messages": locals().get("messages", [])}, status="error", error=e,
+                    request={"messages": locals().get("messages", []), **locals().get("model_kwargs", {})}, status="error", error=e,
                     duration_ms=ToolCallLogger._duration_ms(started),
                 )
             ToolCallLogger.error(
