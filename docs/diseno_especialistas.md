@@ -1,3 +1,9 @@
+> Actualización: las decisiones ahora usan herramientas estrictas definidas en
+> `application/agent_tools.py`. El catálogo activo es común a todos los agentes;
+> las particiones de fragmentos descritas abajo son históricas y no restringen
+> envíos. `derivar_agente` adapta a route/defer internos; `handoff_asesor` es para
+> atención humana. Ver [gobernanza vigente](gobernanza_de_prompts.md).
+
 # Diseño v3 — Supervisor + 6 especialistas
 
 Diseño del agente conversacional sobre la arquitectura ya construida en la rama

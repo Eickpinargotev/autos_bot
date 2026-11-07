@@ -11,15 +11,15 @@ Los prompts vigentes y su rol (arquitectura supervisor/workers, ver
 La pantalla **Prompts** versiona de forma independiente el playbook editable de
 cada agente (`supervisor`, `general`, `curso_teorico`, `alquiler`, `clases`,
 `dictamen`, `tramites` y `recordatorio`). El playbook guardado reemplaza únicamente
-el cuerpo de ese rol. El contrato transversal, los esquemas JSON y el catálogo
+el cuerpo de ese rol. El contrato transversal, las herramientas estrictas y el catálogo
 dinámico se ensamblan después desde código y no son editables desde el dashboard.
 Un rollback siempre crea otra versión; nunca reescribe el historial.
 
 | Prompt | Rol | Contrato de salida |
 | ------ | --- | ------------------ |
 | `AGENT_COMMON_CONTRACT` | Reglas transversales de TODOS los agentes (fragmentos literales, anti-invención, queja/pago→humano, estilo) | — (se ensambla con el resto) |
-| `SUPERVISOR_PROMPT_BODY` + `SUPERVISOR_OUTPUT_SCHEMA` | Coordinador: saludo, ambiguo, queja, WIN, dudas sueltas y enrutamiento | JSON validado por `_DecisionAgent._validated_decision` |
-| `AREA_PROMPT_BODIES[área]` + `SPECIALIST_OUTPUT_SCHEMA` | Playbook de cada especialista (GENERAL, CURSO_TEORICO, ALQUILER, CLASES, DICTAMEN, TRAMITES) | JSON validado por `_DecisionAgent._validated_decision` |
+| `SUPERVISOR_PROMPT_BODY` + `SUPERVISOR_OUTPUT_SCHEMA` | Coordinador: saludo, ambiguo, queja, WIN, dudas sueltas y enrutamiento | Herramienta estricta → adaptador `tool_decision` → `_validated_decision` |
+| `AREA_PROMPT_BODIES[área]` + `SPECIALIST_OUTPUT_SCHEMA` | Playbook de cada especialista (GENERAL, CURSO_TEORICO, ALQUILER, CLASES, DICTAMEN, TRAMITES) | Herramienta estricta → adaptador `tool_decision` → `_validated_decision` |
 | `FOLLOWUP_AGENT_PROMPT` | Recordatorio inteligente (decide si retomar y redacta UN mensaje) | JSON `{send, message}` |
 | `EXTRACT_AD_INFO_PROMPT` | Extracción de datos de anuncios | JSON `{dia, valor, hora}` |
 | Prompt del RAG (en `rag_service._answer_prompt`) | Generación con evidencia | JSON `{has_answer, answer, unanswered_queries}` |
@@ -37,7 +37,7 @@ preservarlos:
    bug se arregló agregando la frase literal del cliente al prompt, el arreglo está
    mal: generaliza la instrucción.
 2. **Un prompt = una responsabilidad.** El supervisor coordina y enruta; cada
-   especialista ejecuta SOLO su playbook con SU catálogo; el followup decide el
+   especialista ejecuta SOLO su playbook con el catálogo común del proyecto; el followup decide el
    recordatorio; el RAG genera con evidencia. No mezclar responsabilidades ni
    duplicar reglas entre prompts (dos fuentes de verdad divergen): lo transversal
    vive UNA vez en `AGENT_COMMON_CONTRACT`.
@@ -47,24 +47,21 @@ preservarlos:
    suelta al final.
 4. **El dato y la instrucción viajan separados.** El mensaje del cliente entra como
    JSON en el turno de usuario; el system prompt no interpola texto del cliente.
-5. **Salida = JSON con esquema forzado + validador en código (dos capas).**
-   Todas las llamadas usan **Structured Outputs** de OpenAI (`json_schema` con
-   `strict: true`): el proveedor garantiza campos, tipos y enums exactos
-   (`_decision_response_format`, `FOLLOWUP_RESPONSE_FORMAT`,
-   `ANSWER_RESPONSE_FORMAT`). Aun así, la coherencia SEMÁNTICA la valida el
-   código (`_validated_decision`): etiqueta RAG + consulta juntas, defer nunca
-   hacia sí mismo, mensajes vacíos → aclaración segura. Si cambias el esquema,
-   cambia en el mismo commit el json_schema, el validador y sus tests.
+5. **Decisiones por herramientas estrictas + validación local.** Supervisor y
+   especialistas usan `tools`, `tool_choice="required"` y
+   `parallel_tool_calls=False`. Cada definición lleva `strict=True` y no admite
+   campos extra. `agent_tools.tool_decision` valida campos y nombres y adapta la
+   operación a `AgentDecision`; `_validated_decision` conserva la coherencia del
+   pipeline. Una llamada incompleta, desconocida o inválida usa aclaración segura.
+   El RAG y los recordatorios mantienen sus esquemas JSON y su ejecución actual.
 6. **Genéricos respecto al catálogo.** Los prompts no copian contenido de los
    fragmentos (precios, "casco", "programar cita"…); solo usan su referencia. Lo vigila
    `tests/unit/test_prompt_contracts.py`. El conocimiento de negocio vive en el RAG
    y en el catálogo de fragmentos, no en los prompts.
-7. **Estados imposibles se bloquean en código, no solo en el prompt.** Ejemplos
-   vigentes: un especialista no puede enviar fragmentos ajenos (partición en
-   `agent_pipeline`), `route`/`defer` con target inválido se descartan
-   (`_validated_decision`), el defer solo puede ocurrir una vez por turno. Si
-   detectas una combinación inválida nueva, agrega la normalización en código además
-   de la instrucción.
+7. **Validaciones en código.** Todos los agentes acceden al catálogo activo
+   del proyecto, sin asignaciones por área. Nombres inexistentes/inactivos,
+   destinos desconocidos y derivaciones hacia sí mismo no se ejecutan. Se
+   mantienen el límite de áreas por turno y el control anti ping-pong.
 8. **Decisiones con `temperature=0`.** Supervisor, especialistas y followup son
    deterministas. Solo la generación libre (RAG, publicidad) puede usar otra
    temperatura.
@@ -81,7 +78,7 @@ Checklist a seguir **en orden**; si un paso falla, no se avanza:
    instrucción general y no una regla por frase.
 2. **¿Es de verdad el prompt?** Antes de editar, confirma que el problema no es de:
    - texto literal del bot → «Agente IA → Fragmentos»
-   - permisos de fragmentos por agente → asignaciones del catálogo
+   - disponibilidad del fragmento → catálogo activo del proyecto
    - cableado del grafo / guardrails (anti-bucle, defer, reporte) → `agent_pipeline.py`
    - normalización de salida → `_validated_decision` (`unified_agent.py`)
    La mayoría de los "bugs de prompt" son de otra capa.
@@ -141,9 +138,31 @@ Además de todo lo anterior:
 
 ## Contratos técnicos de consultas RAG
 
-La salida estructurada de supervisor/especialistas admite `rag_queries` (máximo
-tres consultas) además de `rag_query`. Los validadores aceptan respuestas
-anteriores sin esa lista. El RAG devuelve `unanswered_queries` para identificar
+La herramienta `consultar_conocimiento` recibe `pregunta` y `consultas` (máximo
+tres). El adaptador conserva `rag_query` y `rag_queries` del pipeline existente. El RAG devuelve `unanswered_queries` para identificar
 las partes sin respaldo de una respuesta parcial, sin inferir intenciones por
 coincidencias literales. La selección de consultas y la decisión semántica de
 responder siguen siendo responsabilidad del modelo y de sus instrucciones.
+
+## Prompts en lenguaje natural y herramientas
+
+Ejemplos de instrucciones comerciales válidas:
+
+- «Cuando corresponda preguntar por la cita, envía GENERAL.G3».
+- «Si ya tiene cita, deriva a ALQUILER con los datos conocidos».
+- «Si necesita revisión de un pago, pasa el caso a un asesor humano».
+- «Consulta conocimiento para responder dudas informativas».
+
+No hace falta escribir JSON ni corchetes. Los nombres son literales y sensibles
+a mayúsculas/minúsculas. Las herramientas son `enviar_fragmento`,
+`responder_cliente`, `derivar_agente`, `handoff_asesor`,
+`consultar_conocimiento`, `cerrar_conversacion` e `invitacion_ciudad`.
+Los playbooks guardados con `action`, `target` o `[[frag:ID]]` siguen siendo
+referencias semánticas mediante el contrato de compatibilidad; no se sobrescriben
+sus versiones. Las etiquetas solo continúan en el adaptador y el historial.
+
+`handoff_asesor` crea el reporte, pausa temporalmente el bot y limpia el contexto
+como antes. No asigna una persona específica ni garantiza una respuesta humana.
+`consultar_conocimiento` utiliza el mismo `RagService` (consultas múltiples,
+respuestas parciales, registro de dudas sin respaldo y suspensión de pasos
+posteriores si falta evidencia), sin una segunda generación que lo parafrasee.

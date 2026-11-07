@@ -1,13 +1,8 @@
-"""Agentes de conversación (arquitectura supervisor / workers).
+"""Agentes supervisor/especialistas con herramientas estrictas de OpenAI.
 
-Cada agente comparte el CONTRATO COMÚN y aporta su playbook y su catálogo:
-- SupervisorAgent: recepción/coordinación (saludo, ambiguo, queja, WIN, cierre,
-  dudas sueltas) y enrutamiento a los especialistas (action="route").
-- SpecialistAgent(area): ejecuta el proceso de SU área (GENERAL, ALQUILER,
-  CLASES, DICTAMEN) y devuelve el turno con action="defer" si el tema no es suyo.
-
-El código NUNCA confía en que el modelo cumpla el esquema: toda salida pasa por
-`_validated_decision`, y cualquier error degrada a un fallback seguro.
+Cada decisión exige una herramienta. Su adaptador produce AgentDecision para
+conservar el grafo, el RAG y los efectos existentes. El código valida también
+los argumentos; fallos de API o llamadas inválidas usan aclaración segura.
 """
 
 import json
@@ -16,6 +11,7 @@ from dataclasses import dataclass, field
 
 from openai import OpenAI
 
+from src.application.agent_tools import TOOL_CONTRACT, decision_tools, tool_decision
 from src.application import seguimiento_service
 from src.application.fragment_catalog import SPECIALIST_AREAS, catalog_for_prompt
 from src.core.config import settings
@@ -26,8 +22,6 @@ from src.core.prompts import (
     AREA_PROMPT_BODIES,
     FOLLOWUP_AGENT_BODY,
     FOLLOWUP_TECHNICAL_CONTRACT,
-    SPECIALIST_OUTPUT_SCHEMA,
-    SUPERVISOR_OUTPUT_SCHEMA,
     SUPERVISOR_PROMPT_BODY,
 )
 from src.domain.entities import Channel
@@ -78,45 +72,6 @@ SAFE_CLARIFY_MESSAGE = (
     "Con gusto le ayudo. ¿Busca ayuda con su licencia, alquiler de vehículo "
     "para la prueba, clases de manejo o dictamen médico?"
 )
-
-
-def _decision_response_format(valid_actions: set[str]) -> dict:
-    """Structured Outputs de OpenAI (json_schema con strict=True).
-
-    El proveedor garantiza que la salida cumple el esquema al pie de la letra:
-    campos exactos, tipos exactos y acciones/targets dentro del enum. Es el
-    método más fuerte que ofrece la API (más que el JSON mode `json_object`).
-    `_validated_decision` sigue siendo la autoridad para la coherencia
-    SEMÁNTICA (etiqueta RAG + consulta, defer hacia sí mismo, mensajes vacíos):
-    el esquema garantiza la forma, no el sentido.
-    """
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "agent_decision",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "action": {"type": "string", "enum": sorted(valid_actions)},
-                    "messages": {"type": "array", "items": {"type": "string"}},
-                    "rag_query": {"type": "string"},
-                    "rag_queries": {"type": "array", "maxItems": MAX_CONSULTAS_RAG,
-                                    "items": {"type": "string", "maxLength": MAX_LARGO_CONSULTA}},
-                    "pending": {"type": "string"},
-                    "report": {"type": "string"},
-                    "city": {"type": "string"},
-                    "target": {"type": "string", "enum": ["", *SPECIALIST_AREAS]},
-                    "confidence": {"type": "number"},
-                },
-                "required": [
-                    "action", "messages", "rag_query", "rag_queries", "pending",
-                    "report", "city", "target", "confidence",
-                ],
-            },
-        },
-    }
 
 
 FOLLOWUP_RESPONSE_FORMAT = {
@@ -170,15 +125,13 @@ def _system_prompt_for(role: str) -> str:
     tipo = role.lower()
     if role == "SUPERVISOR":
         body_base = SUPERVISOR_PROMPT_BODY
-        schema = SUPERVISOR_OUTPUT_SCHEMA
     else:
         body_base = AREA_PROMPT_BODIES[role]
-        schema = SPECIALIST_OUTPUT_SCHEMA
     # Se consulta en cada uso para que una versión recién guardada tenga efecto
     # inmediato. Solo la parte estable y protegida queda cacheada por rol.
     body = instrucciones_repository.activas(tipo) or body_base
     if role not in _system_prompt_cache:
-        _system_prompt_cache[role] = f"{AGENT_COMMON_CONTRACT}\n{schema}"
+        _system_prompt_cache[role] = f"{AGENT_COMMON_CONTRACT}\n{TOOL_CONTRACT}"
     catalog = catalog_for_prompt(role=role)
     return (
         f"{_system_prompt_cache[role]}"
@@ -240,10 +193,12 @@ class _DecisionAgent:
                 {"role": "system", "content": _system_prompt_for(self.role)},
                 {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
             ]
-            response_format = _decision_response_format(self._valid_actions())
+            tools = decision_tools(self.role)
             completion = client.chat.completions.create(
                 model=self.modelo,
-                response_format=response_format,
+                tools=tools,
+                tool_choice="required",
+                parallel_tool_calls=False,
                 messages=messages,
                 **kwargs_de_decision(
                     self.modelo,
@@ -260,12 +215,18 @@ class _DecisionAgent:
                 origen="agente",
                 modelo=self.modelo,
             )
-            data = json.loads(completion.choices[0].message.content or "{}")
+            choice = completion.choices[0]
+            calls = choice.message.tool_calls or []
+            if choice.finish_reason != "tool_calls" or len(calls) != 1:
+                raise ValueError("Se esperaba exactamente una llamada completa a herramienta")
+            call = calls[0]
+            arguments = json.loads(call.function.arguments)
+            data = tool_decision(call.function.name, arguments, tools, self.role)
             decision = self._validated_decision(data, text)
             _record_model_trace(
                 client_id=client_id, canal=canal, agent=self.role, model=self.modelo,
-                request={"messages": messages, "response_format": response_format},
-                response=data, usage=getattr(completion, "usage", None),
+                request={"messages": messages, "tools": tools, "tool_choice": "required", "parallel_tool_calls": False},
+                response={"tool": call.function.name, "arguments": arguments, "decision": data}, usage=getattr(completion, "usage", None),
                 duration_ms=ToolCallLogger._duration_ms(started),
             )
             self._log_decision(client_id, canal, input_data, decision, started, "success")

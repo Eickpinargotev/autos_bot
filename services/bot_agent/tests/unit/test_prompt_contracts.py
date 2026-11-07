@@ -33,13 +33,13 @@ class CommonContractTests(unittest.TestCase):
         self.assertIn("[[frag:ID]]", AGENT_COMMON_CONTRACT)
         self.assertIn("[[rag]]", AGENT_COMMON_CONTRACT)
         self.assertIn("Nunca reescribas, resumas ni parafrasees un fragmento", AGENT_COMMON_CONTRACT)
-        self.assertIn("Solo puedes usar fragmentos de TU catálogo", AGENT_COMMON_CONTRACT)
+        self.assertIn("Todos los agentes pueden usar cualquier fragmento activo del proyecto", AGENT_COMMON_CONTRACT)
 
     def test_contract_keeps_transversal_escalation(self):
         self.assertIn("QUEJA FUERTE O INSATISFACCIÓN", AGENT_COMMON_CONTRACT)
         self.assertIn("CASO PARA HUMANO", AGENT_COMMON_CONTRACT)
         self.assertIn("REPORTE PENDIENTE", AGENT_COMMON_CONTRACT)
-        self.assertIn("agente especializado", AGENT_COMMON_CONTRACT)
+        self.assertIn("asesor especializado", AGENT_COMMON_CONTRACT)
         self.assertIn("Pregúntate qué diría un empleado real", AGENT_COMMON_CONTRACT)
         # Una corrección del pedido no se deriva (bug del transcript real).
         self.assertIn("NO te quita la conversación", AGENT_COMMON_CONTRACT)

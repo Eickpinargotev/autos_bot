@@ -58,11 +58,10 @@ def _codigo(valor: str, etiqueta: str) -> str:
 
 def _agentes_validos(agentes: list[str] | tuple[str, ...]) -> list[str]:
     salida = list(dict.fromkeys(str(a or "").strip().upper() for a in agentes))
-    if not salida:
-        raise ValueError("El fragmento debe estar asignado al menos a un agente.")
     if any(a not in AGENTES for a in salida):
         raise ValueError("Se indicó un agente desconocido.")
-    return salida
+    # Compatibilidad con formularios antiguos: no hay permisos por agente.
+    return list(AGENTES)
 
 
 def _mensajes_validos(mensajes: list[str] | tuple[str, ...]) -> list[str]:
@@ -109,7 +108,7 @@ def listar(proyecto_id: int, incluir_archivados: bool = True) -> list[dict[str, 
             continue
         fila["fragment_id"] = f"{fila['categoria_codigo']}.{fila['codigo']}"
         fila["mensajes"] = list(fila.get("mensajes") or [])
-        fila["agentes"] = list(fila.get("agentes") or [])
+        fila["agentes"] = list(AGENTES) if not fila.get("variante_de_id") else []
         categoria["fragmentos"].append(fila)
     return list(categorias.values())
 
@@ -131,11 +130,7 @@ def obtener(proyecto_id: int, fragmento_id: int) -> dict[str, Any] | None:
         return None
     fila["fragment_id"] = f"{fila['categoria_codigo']}.{fila['codigo']}"
     fila["mensajes"] = list(fila.get("mensajes") or [])
-    fila["agentes"] = [r["agente"] for r in pool.consultar(
-        "SELECT agente FROM agente_fragmento_asignaciones "
-        "WHERE proyecto_id = %s AND fragmento_id = %s ORDER BY agente",
-        (int(proyecto_id), int(fragmento_id)),
-    )]
+    fila["agentes"] = list(AGENTES) if not fila.get("variante_de_id") else []
     return fila
 
 
@@ -250,12 +245,6 @@ def guardar_fragmento(proyecto_id: int, fragmento_id: int, mensajes: list[str], 
     mensajes = _mensajes_validos(mensajes)
     es_variante = bool(actual.get("variante_de_id"))
     agentes = [] if es_variante else _agentes_validos(agentes)
-    retirados = set(actual["agentes"]) - set(agentes)
-    referencias = referencias_activas(proyecto_id, actual["fragment_id"])
-    conflicto = sorted(retirados & set(referencias))
-    if conflicto:
-        nombres = ", ".join(NOMBRES_AGENTES.get(a, a) for a in conflicto)
-        raise ValueError(f"Primero quite {actual['fragment_id']} de los prompts activos: {nombres}.")
     with pool.conexion(autocommit=False) as conn:
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -301,13 +290,13 @@ def restaurar(proyecto_id: int, fragmento_id: int, version: int, usuario: str) -
 
 
 def referencias_activas(proyecto_id: int, fragment_id: str) -> list[str]:
-    referencia = f"[[frag:{fragment_id}]]"
+    referencia = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(fragment_id) + r"(?![A-Za-z0-9_])")
     roles = []
     for fila in pool.consultar(
         "SELECT tipo, contenido FROM proyecto_instrucciones WHERE proyecto_id = %s AND activa",
         (int(proyecto_id),),
     ):
-        if referencia in str(fila.get("contenido") or ""):
+        if referencia.search(str(fila.get("contenido") or "")):
             roles.append(str(fila["tipo"]).upper())
     return roles
 
@@ -386,14 +375,12 @@ def validar_referencias_prompt(proyecto_id: int, tipo: str, contenido: str) -> N
         return
     filas = pool.consultar(
         """
-        SELECT c.codigo || '.' || f.codigo AS fragment_id, c.activa, f.activo,
-               EXISTS (SELECT 1 FROM agente_fragmento_asignaciones a
-                       WHERE a.proyecto_id = f.proyecto_id AND a.fragmento_id = f.id AND a.agente = %s) AS permitido
+        SELECT c.codigo || '.' || f.codigo AS fragment_id, c.activa, f.activo
         FROM agente_fragmentos f
         JOIN fragmento_categorias c ON c.id = f.categoria_id AND c.proyecto_id = f.proyecto_id
         WHERE f.proyecto_id = %s AND (c.codigo || '.' || f.codigo) = ANY(%s)
         """,
-        (agente, int(proyecto_id), referencias),
+        (int(proyecto_id), referencias),
     )
     por_id = {fila["fragment_id"]: fila for fila in filas}
     errores = []
@@ -403,8 +390,6 @@ def validar_referencias_prompt(proyecto_id: int, tipo: str, contenido: str) -> N
             errores.append(f"{ref} no existe")
         elif not fila["activa"] or not fila["activo"]:
             errores.append(f"{ref} está archivado")
-        elif not fila["permitido"]:
-            errores.append(f"{ref} no está asignado a {NOMBRES_AGENTES[agente]}")
     if errores:
         raise ValueError("Referencias de fragmentos inválidas: " + "; ".join(errores) + ".")
 

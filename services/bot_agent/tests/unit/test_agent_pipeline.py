@@ -180,6 +180,7 @@ class RoutingTests(unittest.TestCase):
 
         h.supervisor_mock.assert_not_called()
         self.assertEqual(h.specialist_mock.call_count, 2)
+        self.assertEqual(h.specialist_mock.call_args.kwargs["internal_note"], defer.report)
         self.assertEqual(result.replies, get_fragment("GENERAL.G35").messages)
         self.assertEqual(h.saved_state.active_agent, "ALQUILER")
 
@@ -258,8 +259,8 @@ class RoutingTests(unittest.TestCase):
 
 
 class FragmentGuardrailTests(unittest.TestCase):
-    def test_specialist_cannot_send_foreign_fragments(self):
-        # CLASES intenta enviar el fragmento del dictamen: se descarta.
+    def test_specialist_can_send_any_active_fragment(self):
+        # CLASES puede enviar el dictamen sin asignaciones manuales.
         decision = AgentDecision(
             action="reply",
             messages=["[[frag:DICTAMEN.D1]]", "¿Ocupa las clases en Liberia?"],
@@ -268,11 +269,10 @@ class FragmentGuardrailTests(unittest.TestCase):
         with PipelineHarness(ConversationState(active_agent="CLASES"), specialist=decision) as h:
             result = h.run(text="quiero clases")
 
-        self.assertEqual(result.replies, ["¿Ocupa las clases en Liberia?"])
+        self.assertEqual(result.replies, [*get_fragment("DICTAMEN.D1").messages, "¿Ocupa las clases en Liberia?"])
 
-    def test_tramites_has_no_fragments_and_foreign_tags_are_dropped(self):
-        # TRAMITES es 100 % RAG: cualquier etiqueta de fragmento que alucine
-        # (p. ej. un paquete de alquiler) se descarta por partición de catálogo.
+    def test_tramites_can_send_any_active_fragment(self):
+        # TRAMITES comparte el catálogo aunque su playbook se centre en RAG.
         decision = AgentDecision(
             action="reply",
             messages=["[[frag:GENERAL.G25]]", "Le explico los requisitos del trámite."],
@@ -281,7 +281,7 @@ class FragmentGuardrailTests(unittest.TestCase):
         with PipelineHarness(ConversationState(active_agent="TRAMITES"), specialist=decision) as h:
             result = h.run(text="quiero renovar la licencia")
 
-        self.assertEqual(result.replies, ["Le explico los requisitos del trámite."])
+        self.assertEqual(result.replies, [*get_fragment("GENERAL.G25").messages, "Le explico los requisitos del trámite."])
 
     def test_fragment_tag_expands_to_literal_messages(self):
         decision = AgentDecision(
@@ -600,43 +600,30 @@ class DecisionValidationTests(unittest.TestCase):
         decision = agent._validated_decision({"action": "handoff", "messages": ["ok"]}, "quiero un humano")
         self.assertTrue(decision.report)
 
-    def test_decide_sends_strict_json_schema_to_openai(self):
-        # Structured Outputs: la llamada lleva json_schema con strict=True
-        # (el proveedor fuerza campos/tipos/enums exactos), no solo JSON mode.
-        agent = SupervisorAgent()
-        fake = MagicMock()
-        fake.choices[0].message.content = (
-            '{"action": "reply", "messages": ["hola"], "rag_query": "", "pending": "",'
-            ' "report": "", "city": "", "target": "", "confidence": 1.0}'
-        )
+    def test_decide_requires_one_strict_tool_call(self):
+        from types import SimpleNamespace
+        import json
+
+        fake = SimpleNamespace(usage=None, choices=[SimpleNamespace(
+            finish_reason="tool_calls", message=SimpleNamespace(content=None, tool_calls=[
+                SimpleNamespace(function=SimpleNamespace(name="responder_cliente", arguments=json.dumps({
+                    "mensajes": ["hola"], "pendiente": "",
+                })))
+            ]))])
         with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "sk-test"), patch(
             "src.application.unified_agent.client.chat.completions.create", return_value=fake
         ) as create_mock:
-            decision = agent.decide("hola", ConversationState())
-
-        self.assertEqual(decision.action, "reply")
-        self.assertEqual(create_mock.call_args.kwargs["model"], "gpt-6.1-sol")
-        self.assertEqual(create_mock.call_args.kwargs["reasoning_effort"], "low")
-        self.assertNotIn("temperature", create_mock.call_args.kwargs)
-        fmt = create_mock.call_args.kwargs["response_format"]
-        self.assertEqual(fmt["type"], "json_schema")
-        self.assertTrue(fmt["json_schema"]["strict"])
-        schema = fmt["json_schema"]["schema"]
-        self.assertFalse(schema["additionalProperties"])
-        # Enum de acciones por rol y de targets por área (imposible inventar).
-        self.assertIn("route", schema["properties"]["action"]["enum"])
-        self.assertNotIn("defer", schema["properties"]["action"]["enum"])
-        self.assertIn("TRAMITES", schema["properties"]["target"]["enum"])
-        self.assertEqual(set(schema["required"]), set(schema["properties"]))
-
-        from src.application.fragment_catalog import SPECIALIST_AREAS
-
-        specialist_fmt = __import__(
-            "src.application.unified_agent", fromlist=["_decision_response_format"]
-        )._decision_response_format(SpecialistAgent("TRAMITES")._valid_actions())
-        actions = specialist_fmt["json_schema"]["schema"]["properties"]["action"]["enum"]
-        self.assertIn("defer", actions)
-        self.assertNotIn("route", actions)
+            decision = SupervisorAgent().decide("hola", ConversationState())
+        self.assertEqual(decision.messages, ["hola"])
+        kwargs = create_mock.call_args.kwargs
+        self.assertEqual(kwargs["tool_choice"], "required")
+        self.assertFalse(kwargs["parallel_tool_calls"])
+        self.assertNotIn("response_format", kwargs)
+        for tool in kwargs["tools"]:
+            self.assertTrue(tool["function"]["strict"])
+            schema = tool["function"]["parameters"]
+            self.assertFalse(schema["additionalProperties"])
+            self.assertEqual(set(schema["required"]), set(schema["properties"]))
 
     def test_followup_and_rag_use_strict_json_schema(self):
         from src.application.rag_service import ANSWER_RESPONSE_FORMAT
@@ -728,3 +715,117 @@ class DecisionValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToolExecutionTests(unittest.TestCase):
+    """La API está simulada; las herramientas atraviesan el pipeline real."""
+
+    def decision(self, name, arguments, role="GENERAL"):
+        from types import SimpleNamespace
+        import json
+
+        completion = SimpleNamespace(usage=None, choices=[SimpleNamespace(
+            finish_reason="tool_calls", message=SimpleNamespace(content=None, tool_calls=[
+                SimpleNamespace(function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
+            ]))])
+        agent = SupervisorAgent() if role == "SUPERVISOR" else SpecialistAgent(role)
+        with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "test"), patch(
+            "src.application.unified_agent.client.chat.completions.create", return_value=completion
+        ):
+            return agent.decide("mensaje del cliente", ConversationState())
+
+    def test_fragment_name_sends_literal_content_from_any_agent(self):
+        decision = self.decision("enviar_fragmento", {
+            "nombre": "GENERAL.G3", "mensaje_previo": "", "pendiente": "Si tiene cita",
+        }, role="TRAMITES")
+        self.assertEqual(decision.messages, ["[[frag:GENERAL.G3]]"])
+        with PipelineHarness(ConversationState(active_agent="TRAMITES"), specialist=decision) as h:
+            result = h.run()
+        self.assertEqual(result.replies, get_fragment("GENERAL.G3").messages)
+
+    def test_derivation_transfers_report_without_reply_or_supervisor(self):
+        decision = self.decision("derivar_agente", {
+            "destino": "ALQUILER", "reporte": "Teórico aprobado; tiene cita y quiere moto en Liberia.",
+        })
+        self.assertEqual(decision.action, "defer")
+        self.assertEqual(decision.messages, [])
+        reply = AgentDecision(action="reply", messages=["Continuamos."])
+        with PipelineHarness(ConversationState(active_agent="GENERAL"), specialist=[decision, reply]) as h:
+            h.run()
+        h.supervisor_mock.assert_not_called()
+        self.assertEqual(h.specialist_mock.call_args.kwargs["internal_note"], decision.report)
+
+    def test_supervisor_uses_same_derivation_tool(self):
+        decision = self.decision("derivar_agente", {"destino": "GENERAL", "reporte": "Iniciar licencia."}, "SUPERVISOR")
+        self.assertEqual((decision.action, decision.target), ("route", "GENERAL"))
+
+    def test_knowledge_uses_existing_rag_and_partial_answer_path(self):
+        decision = self.decision("consultar_conocimiento", {
+            "pregunta": "Precio y requisitos", "consultas": ["Precio", "Requisitos"],
+            "mensajes_despues": [], "fragmentos_despues": ["GENERAL.G3"], "pendiente": "Si tiene cita", "cerrar": False,
+        })
+        answer = MagicMock(has_answer=True, answer="Respuesta respaldada", sources=[], unanswered_queries=[])
+        with PipelineHarness(ConversationState(active_agent="GENERAL"), specialist=decision, rag_answer=answer) as h:
+            result = h.run("precio y requisitos")
+        h.rag_mock.assert_called_once()
+        self.assertEqual(result.replies, ["Respuesta respaldada", *get_fragment("GENERAL.G3").messages])
+        self.assertEqual(decision.rag_queries, ["Precio", "Requisitos"])
+
+    def test_knowledge_miss_does_not_send_following_fragment(self):
+        decision = self.decision("consultar_conocimiento", {
+            "pregunta": "Duda sin respaldo", "consultas": [], "mensajes_despues": [],
+            "fragmentos_despues": ["GENERAL.G3"], "pendiente": "", "cerrar": False,
+        })
+        with PipelineHarness(ConversationState(active_agent="GENERAL"), specialist=decision) as h:
+            result = h.run()
+        self.assertNotIn(get_fragment("GENERAL.G3").messages[0], result.replies)
+        self.assertIsNone(result.reminder)
+
+    def test_human_handoff_creates_report_and_pauses_bot(self):
+        decision = self.decision("handoff_asesor", {
+            "reporte": "Cliente envió comprobante; requiere revisión humana.", "mensajes": [],
+        })
+        with PipelineHarness(ConversationState(active_agent="GENERAL"), specialist=decision) as h:
+            result = h.run()
+        h.report_mock.assert_called_once()
+        h.block_repo.block_user.assert_called_once()
+        self.assertEqual(result.replies, [AgentPipeline.HANDOFF_DEFAULT_MESSAGE])
+        h.supervisor_mock.assert_not_called()
+
+    def test_bad_arguments_never_execute_an_operation(self):
+        for name, arguments in (
+            ("enviar_fragmento", {"nombre": "GENERAL.NO_EXISTE", "mensaje_previo": "", "pendiente": ""}),
+            ("derivar_agente", {"destino": "GENERAL", "reporte": "No debe derivarse a sí mismo"}),
+            ("derivar_agente", {"destino": "MARTE", "reporte": "Destino inventado"}),
+            ("handoff_asesor", {"mensajes": []}),
+            ("responder_cliente", {"mensajes": ["[[frag:GENERAL.G3]]"], "pendiente": ""}),
+            ("responder_cliente", {"mensajes": ["Hola"], "pendiente": "", "extra": True}),
+            ("herramienta_inventada", {}),
+        ):
+            with self.subTest(name=name, arguments=arguments):
+                decision = self.decision(name, arguments)
+                self.assertEqual(decision.source, "fallback_after_error")
+                self.assertEqual(decision.messages, [SAFE_CLARIFY_MESSAGE])
+
+    def test_missing_multiple_or_truncated_calls_fail_safely(self):
+        from types import SimpleNamespace
+        for finish, calls in (("stop", []), ("length", []), ("tool_calls", [object(), object()])):
+            with self.subTest(finish=finish):
+                completion = SimpleNamespace(usage=None, choices=[SimpleNamespace(
+                    finish_reason=finish, message=SimpleNamespace(content="Texto fuera de herramienta", tool_calls=calls),
+                )])
+                with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "test"), patch(
+                    "src.application.unified_agent.client.chat.completions.create", return_value=completion
+                ):
+                    decision = SpecialistAgent("GENERAL").decide("hola", ConversationState())
+                self.assertEqual(decision.source, "fallback_after_error")
+                self.assertEqual(decision.messages, [SAFE_CLARIFY_MESSAGE])
+
+    def test_empty_project_catalog_does_not_offer_invented_names(self):
+        from src.application.agent_tools import decision_tools
+        with patch("src.infrastructure.repositories.fragmentos_repository.disponibles", return_value=[]):
+            tools = decision_tools("GENERAL")
+        names = [t["function"]["name"] for t in tools]
+        self.assertNotIn("enviar_fragmento", names)
+        rag = next(t["function"] for t in tools if t["function"]["name"] == "consultar_conocimiento")
+        self.assertNotIn("fragmentos_despues", rag["parameters"]["properties"])

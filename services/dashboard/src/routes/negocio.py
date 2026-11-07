@@ -111,7 +111,7 @@ def editar_categoria_fragmento(request: Request, categoria_id: int, nombre: str 
 @router.post("/agente/fragmentos/categorias/{categoria_id}/fragmentos")
 def crear_fragmento(request: Request, categoria_id: int, codigo: str = Form(""),
                     mensajes: list[str] = Form(...), reporte: str = Form(""),
-                    agentes: list[str] = Form(...), csrf: str = Form(""),
+                    agentes: list[str] = Form(default=[]), csrf: str = Form(""),
                     usuario=Depends(security.requiere_negocio)):
     security.verificar_csrf(request, csrf)
     proyecto = _proyecto_del_usuario(usuario)

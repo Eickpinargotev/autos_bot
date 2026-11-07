@@ -1,12 +1,8 @@
-"""Catálogo de fragmentos literales del negocio.
+"""Catálogo literal compartido por todos los agentes del proyecto.
 
-Los textos curados (precios, formularios, guiones con su estilo y emojis)
-viven en `mensajes.json` y se envían al cliente SIN reescribir. El agente
-único no redacta esa información: la referencia con etiquetas
-`[[frag:FLUJO.NODO]]` y este módulo las expande al texto literal.
-
-`mensajes.json` sigue siendo la única fuente de verdad: editar un texto ahí
-cambia lo que recibe el cliente sin tocar código ni prompts.
+Postgres es la fuente vigente; mensajes.json es semilla y respaldo. La
+herramienta recibe el nombre literal; el adaptador mantiene [[frag:ID]] como
+representación interna para preservar envío, variantes, historial y reportes.
 """
 
 from dataclasses import dataclass, field
@@ -30,38 +26,17 @@ _KEYWORD_VARIANTS = {
 }
 _VARIANT_IDS = set(_KEYWORD_VARIANTS.values())
 
-# Partición del catálogo por agente (arquitectura supervisor/workers): cada
-# agente solo VE y solo PUEDE ENVIAR los fragmentos de su área. El pipeline
-# rechaza etiquetas fuera del set del agente activo (guardrail determinista
-# contra alucinación cruzada). Las variantes _1 se resuelven por código, así
-# que no se listan.
-AREA_FRAGMENTS: dict[str, tuple[str, ...]] = {
-    "SUPERVISOR": ("QUEJA.Q1", "WIN.W1"),
-    "GENERAL": ("GENERAL.G1", "GENERAL.G3", "GENERAL.G7"),
-    "CURSO_TEORICO": ("GENERAL.G4",),
-    "ALQUILER": (
-        "Alquiler.A1", "GENERAL.G7", "GENERAL.G35", "GENERAL.G11",
-        "GENERAL.G13", "GENERAL.G16", "GENERAL.G19", "GENERAL.G20",
-        "GENERAL.G21", "GENERAL.G22", "GENERAL.G25", "GENERAL.G28",
-        "GENERAL.G29", "GENERAL.G30", "GENERAL.G31", "GENERAL.G32",
-    ),
-    "CLASES": ("CLASES.C1", "CLASES.C2", "CLASES.C5"),
-    "DICTAMEN": ("DICTAMEN.D1",),
-    # TRAMITES informa 100 % vía RAG: no tiene textos curados propios.
-    "TRAMITES": (),
-}
-
 SPECIALIST_AREAS = ("GENERAL", "CURSO_TEORICO", "ALQUILER", "CLASES", "DICTAMEN", "TRAMITES")
 
 
 def allowed_fragments(role: str) -> set[str]:
-    """Fragmentos que el agente `role` (SUPERVISOR o área) puede enviar."""
+    """Catálogo común; role se conserva por compatibilidad, sin permisos por área."""
     from src.infrastructure.repositories import fragmentos_repository
 
-    desde_panel = fragmentos_repository.permitidos(role)
+    desde_panel = fragmentos_repository.disponibles()
     if desde_panel is not None:
         return set(desde_panel)
-    return set(AREA_FRAGMENTS.get(role, ()))
+    return set(visible_fragment_ids())
 
 
 @dataclass

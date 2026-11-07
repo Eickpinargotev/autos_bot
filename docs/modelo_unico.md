@@ -24,7 +24,7 @@ Reparto de responsabilidades:
   **enrutamiento** al especialista del área (`action="route"`).
 - **Especialistas** (GENERAL/intake de licencia, CURSO_TEORICO, ALQUILER, CLASES,
   DICTAMEN, TRAMITES — mapa completo en `docs/diseno_especialistas.md`): ejecutan su
-  proceso con SU playbook y SU catálogo particionado; si el tema no es suyo,
+  proceso con su playbook y el catálogo común del proyecto; si el tema no es suyo,
   devuelven el turno (`action="defer"`).
 - Cada agente = CONTRATO COMÚN (reglas transversales: queja→humano,
   pago→humano, reporte pendiente, correcciones, estilo) + su playbook + su
@@ -59,22 +59,21 @@ Los flujos NO se perdieron; cambiaron de forma:
 
 1. `application/unified_agent.py` — `SupervisorAgent` y `SpecialistAgent(area)`
    (base común `_DecisionAgent`): system prompt = contrato común + playbook del
-   rol + catálogo del área (cacheable); los datos del turno (mensaje,
+   rol + herramientas estrictas y catálogo común (cacheable); los datos del turno (mensaje,
    historial, pendiente, reporte_pendiente, recordatorios, nota_interna)
    viajan como JSON en el mensaje del usuario. Salida validada por código
    (acciones por rol: el supervisor puede `route`, el especialista `defer`).
 2. `application/agent_pipeline.py` — `AgentPipeline.run()`: grafo LangGraph que
    ejecuta la decisión con guardrails deterministas en sus nodos:
    - Expande `[[frag:ID]]` al texto literal (resuelve variantes `_1` por
-     registro de keyword, como hacía el router). **Un agente solo puede enviar
-     fragmentos de su propio catálogo** (`AREA_FRAGMENTS`): etiquetas ajenas se
-     descartan (guardrail contra alucinación cruzada).
+     registro de keyword, como hacía el router). Todos los agentes pueden enviar
+     cualquier fragmento activo de su proyecto; no hay permisos por área.
    - Expande `[[rag]]` con `RagService`; si el RAG no tiene respaldo, envía el
      fallback, registra la pregunta sin respuesta y NO empuja el flujo.
    - **Anti-bucle**: si el turno repite exactamente lo que el bot ya dijo en
      los últimos 2 turnos → handoff automático. También se deduplican mensajes
      idénticos dentro del mismo turno.
-   - `handoff` → mensaje humano + reporte en NocoDB + bloqueo 12 días +
+   - `handoff` → mensaje humano + reporte en Postgres + bloqueo 12 días +
      limpieza de contexto (idéntico al comportamiento anterior).
    - `close` → despedida y limpieza de estado.
    - `city_invitation` → delega en `PublicidadService`, que manda el mensaje del
@@ -83,9 +82,15 @@ Los flujos NO se perdieron; cambiaron de forma:
    texto completo: el prompt y Redis se mantienen livianos y el modelo sabe
    exactamente qué recibió el cliente.
 
-Acciones del modelo: `reply | handoff | close | city_invitation`. El código
-nunca confía en el JSON del modelo (`_validated_decision` + fallback seguro que
-pregunta con las opciones de servicio si el LLM falla).
+El modelo ejecuta una herramienta estricta (`agent_tools.py`) por decisión:
+`enviar_fragmento`, `responder_cliente`, `derivar_agente`, `handoff_asesor`,
+`consultar_conocimiento`, `cerrar_conversacion` o `invitacion_ciudad`.
+El adaptador conserva las acciones internas del grafo, sin texto libre fuera de
+herramientas. Valida los argumentos también en código y usa aclaración segura
+si falla. `derivar_agente` entrega el resumen como nota interna al destino;
+`consultar_conocimiento` reutiliza el mismo RAG sin modificar su funcionamiento.
+Los prompts editables pueden nombrar mensajes sin corchetes («envía GENERAL.G3»).
+Las versiones anteriores conservan compatibilidad sin sobrescribirlas.
 
 ## Recordatorios inteligentes
 

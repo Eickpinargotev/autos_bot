@@ -161,7 +161,7 @@ def _aisla_servicios(monkeypatch):
     fragmentos_repo = importlib.import_module(
         "src.infrastructure.repositories.fragmentos_repository"
     )
-    monkeypatch.setattr(fragmentos_repo, "permitidos", MagicMock(return_value=None))
+    monkeypatch.setattr(fragmentos_repo, "disponibles", MagicMock(return_value=None))
     monkeypatch.setattr(fragmentos_repo, "obtener", MagicMock(return_value=False))
     monkeypatch.setattr(fragmentos_repo, "variante_de", MagicMock(return_value=None))
 

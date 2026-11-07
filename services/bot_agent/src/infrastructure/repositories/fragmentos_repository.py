@@ -4,8 +4,8 @@ from src.application.project_context import proyecto_actual
 from src.infrastructure.repositories.postgres_conn import consultar, consultar_uno
 
 
-def permitidos(agente: str) -> list[str] | None:
-    """Ids autorizados; None significa que no pudo consultarse la fuente."""
+def disponibles() -> list[str] | None:
+    """Catálogo activo del proyecto, compartido por todos los agentes."""
     proyecto_id = proyecto_actual()
     if not proyecto_id:
         return None
@@ -15,17 +15,15 @@ def permitidos(agente: str) -> list[str] | None:
             SELECT c.codigo || '.' || f.codigo AS fragment_id
             FROM agente_fragmentos f
             JOIN fragmento_categorias c ON c.id = f.categoria_id AND c.proyecto_id = f.proyecto_id
-            JOIN agente_fragmento_asignaciones a
-              ON a.fragmento_id = f.id AND a.proyecto_id = f.proyecto_id
             WHERE f.proyecto_id = %s AND c.activa AND f.activo
-              AND f.variante_de_id IS NULL AND a.agente = %s
+              AND f.variante_de_id IS NULL
             ORDER BY c.codigo, f.codigo
             """,
-            (proyecto_id, str(agente or "").upper()),
+            (proyecto_id,),
         )
         return [str(f["fragment_id"]) for f in filas]
     except Exception as exc:
-        print(f"Error leyendo permisos de fragmentos: {exc}")
+        print(f"Error leyendo catálogo de fragmentos: {exc}")
         return None
 
 

@@ -98,13 +98,13 @@ diseño de áreas en `docs/diseno_especialistas.md`):
    WIN, cierre, dudas sueltas, y enruta con `route`) y `SpecialistAgent(area)` (GENERAL,
    CURSO_TEORICO, ALQUILER, CLASES, DICTAMEN, TRAMITES; devuelve el turno con `defer`).
    `gpt-5.4-mini` sin razonamiento, `temperature=0`; prompts = contrato común + playbook +
-   catálogo del área. También `FollowupAgent` (recordatorios).
+   catálogo común del proyecto y herramientas estrictas. También `FollowupAgent` (recordatorios).
 2. `application/agent_pipeline.py` — StateGraph de **LangGraph** con routing pegajoso
    (`ConversationState.active_agent`) y guardrails **deterministas** en sus nodos:
-   expansión de fragmentos literales y RAG, fragmentos ajenos rechazados por área,
+   expansión de fragmentos literales y RAG, nombres inexistentes/inactivos rechazados,
    anti-bucle y anti ping-pong (defer), reporte + bloqueo en handoff, estado e historial.
 3. `application/fragment_catalog.py` — fragmentos literales por proyecto leídos de Postgres,
-   con permisos por agente y variantes; `mensajes.json` es el respaldo si la base falla.
+   compartidos por todos los agentes y con variantes; `mensajes.json` es el respaldo si la base falla.
 
 Reglas para cambios:
 - Para cambiar **el comportamiento del agente** (qué intención hace qué, playbooks), edita el
@@ -303,7 +303,7 @@ El reto del sistema es mezclar **mensajes curados del negocio** (plantillas lite
 
 - **Separación de capas:**
   - *Textos curados (deterministas):* viven en el catálogo de fragmentos de Postgres y se envían LITERALES vía
-    `[[frag:ID]]` (`fragment_catalog.py` los expande; el LLM NO los reinventa ni parafrasea).
+    `enviar_fragmento(nombre=ID)` (`fragment_catalog.py` conserva la expansión interna; el LLM NO los reinventa ni parafrasea).
     Todo dato variable (precios, links, requisitos) sale de un fragmento o del RAG.
   - *Capa conversacional (razonada con contexto):* el agente decide con el historial y el
     **paso pendiente como dato** (qué espera el bot) qué sigue: responder la duda, avanzar

@@ -3,7 +3,7 @@
 Un turno = una decisión LLM del agente que corresponde + guardrails
 deterministas en los nodos. El SUPERVISOR coordina (saludo, ambiguo, queja,
 WIN, cierre, dudas sueltas) y enruta; cada ESPECIALISTA ejecuta su área con
-su propio playbook y su propio catálogo de fragmentos.
+su propio playbook y el catálogo común del proyecto.
 
 Grafo por turno (routing pegajoso: con especialista activo se entra directo):
 
@@ -92,7 +92,7 @@ class AgentGraphState(TypedDict, total=False):
 
 
 class AgentPipeline:
-    HANDOFF_DEFAULT_MESSAGE = "En un momento le escribirá un agente especializado para atender su caso."
+    HANDOFF_DEFAULT_MESSAGE = "En un momento le escribirá un asesor especializado para atender su caso."
     CLOSE_DEFAULT_MESSAGE = "Con gusto, quedo atento si necesita algo más."
     RAG_FALLBACK_MESSAGE = (
         "Por ahora no tengo esa información disponible. "
@@ -236,6 +236,7 @@ class AgentPipeline:
         update: AgentGraphState = {"decision": decision, "decider": SUPERVISOR_ROLE}
         if decision.action == "route":
             update["area"] = decision.target
+            update["internal_note"] = decision.report
         return update
 
     def _specialist(self, state: AgentGraphState) -> AgentGraphState:
@@ -245,6 +246,7 @@ class AgentPipeline:
             state["stored"],
             client_id=state["user_id"],
             canal=state["channel"],
+            internal_note=state.get("internal_note", ""),
         )
         tried = [*state.get("tried_areas", []), area]
         update: AgentGraphState = {
@@ -259,6 +261,7 @@ class AgentPipeline:
                 decision.target = ""
             if decision.target:
                 update["area"] = decision.target
+                update["internal_note"] = decision.report
             else:
                 update["internal_note"] = (
                     f"El especialista de {area} devolvió el turno: {decision.report} "
@@ -407,8 +410,8 @@ class AgentPipeline:
                 turn.replies.append(prefix)
                 turn.history_messages.append(prefix)
             base_id = match.group(1)
-            # Guardrail: un agente solo puede enviar fragmentos de SU catálogo.
-            # Una etiqueta ajena o inexistente se descarta (alucinación).
+            # El catálogo es común a todos los agentes del proyecto.
+            # Los nombres inexistentes o inactivos se descartan.
             if base_id in allowed:
                 fragment_id = resolve_variant(base_id, user_id, channel_value)
                 fragment = get_fragment(fragment_id)
