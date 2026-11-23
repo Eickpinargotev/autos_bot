@@ -613,7 +613,7 @@ class DecisionValidationTests(unittest.TestCase):
         with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "sk-test"), patch(
             "src.application.unified_agent.client.chat.completions.create", return_value=fake
         ) as create_mock:
-            decision = SupervisorAgent().decide("hola", ConversationState())
+            decision = SpecialistAgent("GENERAL").decide("hola", ConversationState())
         self.assertEqual(decision.messages, ["hola"])
         kwargs = create_mock.call_args.kwargs
         self.assertEqual(kwargs["tool_choice"], "required")
@@ -684,9 +684,12 @@ class DecisionValidationTests(unittest.TestCase):
             "src.application.unified_agent.settings.OPENAI_REASONING_EFFORT_SUPERVISOR", "high"
         ), patch(
             "src.application.unified_agent.client.chat.completions.create", return_value=fake
-        ) as create_mock:
+        ) as create_mock, patch(
+            "src.application.unified_agent.client.responses.create", return_value=fake
+        ) as responses_mock, patch.object(SupervisorAgent, "modelo", "gpt-6.1-sol"):
             SupervisorAgent().decide("hola", ConversationState())
-            self.assertEqual(create_mock.call_args.kwargs["reasoning_effort"], "high")
+            self.assertEqual(responses_mock.call_args.kwargs["reasoning"], {"effort": "high"})
+            create_mock.assert_not_called()
             SpecialistAgent("ALQUILER").decide("hola", ConversationState())
             self.assertEqual(create_mock.call_args.kwargs["model"], "gpt-5.4-mini")
             self.assertEqual(create_mock.call_args.kwargs["reasoning_effort"], "none")
@@ -728,7 +731,7 @@ class ToolExecutionTests(unittest.TestCase):
             finish_reason="tool_calls", message=SimpleNamespace(content=None, tool_calls=[
                 SimpleNamespace(function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
             ]))])
-        agent = SupervisorAgent() if role == "SUPERVISOR" else SpecialistAgent(role)
+        agent = SpecialistAgent(role)
         with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "test"), patch(
             "src.application.unified_agent.client.chat.completions.create", return_value=completion
         ):
@@ -756,8 +759,28 @@ class ToolExecutionTests(unittest.TestCase):
         self.assertEqual(h.specialist_mock.call_args.kwargs["internal_note"], decision.report)
 
     def test_supervisor_uses_same_derivation_tool(self):
-        decision = self.decision("derivar_agente", {"destino": "GENERAL", "reporte": "Iniciar licencia."}, "SUPERVISOR")
-        self.assertEqual((decision.action, decision.target), ("route", "GENERAL"))
+        from types import SimpleNamespace
+
+        response = SimpleNamespace(status="completed", usage=None, output=[
+            SimpleNamespace(type="reasoning"),
+            SimpleNamespace(
+                type="function_call",
+                name="derivar_agente",
+                arguments='{"destino":"CURSO_TEORICO","reporte":"Pidió información sobre el curso."}',
+            ),
+        ])
+        with patch("src.application.unified_agent.settings.OPENAI_API_KEY", "test"), patch(
+            "src.application.unified_agent.client.responses.create", return_value=response
+        ) as create, patch.object(SupervisorAgent, "modelo", "gpt-6.1-sol"):
+            decision = SupervisorAgent().decide("Sobre el curso teórico", ConversationState())
+
+        self.assertEqual((decision.action, decision.target), ("route", "CURSO_TEORICO"))
+        params = create.call_args.kwargs
+        self.assertEqual(params["tool_choice"], "required")
+        self.assertFalse(params["parallel_tool_calls"])
+        self.assertFalse(params["store"])
+        self.assertIn("Sobre el curso teórico", params["input"][1]["content"])
+        self.assertTrue(all(tool["strict"] and tool["type"] == "function" for tool in params["tools"]))
 
     def test_knowledge_uses_existing_rag_and_partial_answer_path(self):
         decision = self.decision("consultar_conocimiento", {

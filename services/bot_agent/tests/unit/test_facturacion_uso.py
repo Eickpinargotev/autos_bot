@@ -155,6 +155,20 @@ class IntegracionConSeguimientoTests(unittest.TestCase):
         # 1000 * 0.20/1M + 100 * 1.25/1M = 325 micro-USD
         self.assertEqual(costo_auxiliar, 325)
 
+    def test_uso_de_responses_registra_entrada_cacheada_y_salida(self):
+        uso = SimpleNamespace(
+            input_tokens=1000, input_tokens_details=SimpleNamespace(cached_tokens=200),
+            output_tokens=300,
+        )
+        with patch.object(svc.redis_client, "pipeline", return_value=MagicMock()), patch.object(
+            svc.billing_repository, "registrar_evento_llm"
+        ) as evento:
+            svc.registrar_uso_llm("5061", Channel.WHATSAPP, uso, modelo="gpt-6.1-sol")
+
+        self.assertEqual(evento.call_args.kwargs["tokens_entrada"], 1000)
+        self.assertEqual(evento.call_args.kwargs["tokens_cacheados"], 200)
+        self.assertEqual(evento.call_args.kwargs["tokens_salida"], 300)
+
     def test_el_modelo_que_atendio_llega_al_libro_mayor(self):
         """Sin esto, el desglose por modelo del panel sería inventado."""
         with patch.object(svc.redis_client, "pipeline", return_value=MagicMock()), patch.object(

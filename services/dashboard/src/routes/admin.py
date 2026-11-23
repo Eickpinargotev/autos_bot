@@ -16,6 +16,7 @@ from src.core.plantillas import render, render_fragmento
 from src.services import (
     clientes_whatsapp,
     diagnostico_pregunta,
+    instrucciones,
     trazabilidad,
     mensajeria,
     usuarios,
@@ -85,6 +86,35 @@ def negocio_detalle(request: Request, negocio_id: int, usuario=Depends(security.
         # Último tramo de la miga: «Clientes › Escuela de manejo», con «Clientes»
         # llevando de vuelta al listado.
         miga_final=negocio["nombre"],
+    )
+
+
+@router.get("/negocios/{negocio_id}/prompts.json")
+def descargar_prompts(negocio_id: int, usuario=Depends(security.requiere_admin)):
+    proyecto = clientes_whatsapp.obtener(negocio_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Ese proyecto no existe")
+
+    activas = instrucciones.activas_para_panel(negocio_id)
+    datos = {
+        "proyecto": {"id": negocio_id, "nombre": proyecto["nombre"]},
+        "prompts": {
+            tipo: {
+                "agente": instrucciones.METADATOS[tipo]["codigo"],
+                "version": fila["version"] or None,
+                "actualizado_en": fila["creado_en"].isoformat() if fila.get("creado_en") else None,
+                "contenido": fila["contenido"] if fila["version"] else None,
+            }
+            for tipo, fila in activas.items()
+        },
+    }
+    return Response(
+        json.dumps(datos, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="proyecto-{negocio_id}-prompts.json"',
+            "Cache-Control": "no-store",
+        },
     )
 
 

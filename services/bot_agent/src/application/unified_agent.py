@@ -188,45 +188,57 @@ class _DecisionAgent:
             self._log_decision(client_id, canal, input_data, decision, started, "fallback")
             return decision
 
+        request = {}
+        usage = None
         try:
             messages = [
                 {"role": "system", "content": _system_prompt_for(self.role)},
                 {"role": "user", "content": json.dumps(turn_data, ensure_ascii=False)},
             ]
             tools = decision_tools(self.role)
-            completion = client.chat.completions.create(
-                model=self.modelo,
-                tools=tools,
-                tool_choice="required",
-                parallel_tool_calls=False,
-                messages=messages,
-                **kwargs_de_decision(
-                    self.modelo,
-                    reasoning_effort=(
-                        settings.OPENAI_REASONING_EFFORT_SUPERVISOR
-                        if self.role == "SUPERVISOR" else None
-                    ),
+            model_kwargs = kwargs_de_decision(
+                self.modelo,
+                reasoning_effort=(
+                    settings.OPENAI_REASONING_EFFORT_SUPERVISOR
+                    if self.role == "SUPERVISOR" else None
                 ),
             )
+            request = {"tool_choice": "required", "parallel_tool_calls": False}
+            # GPT-6.1 Sol combina razonamiento y funciones en Responses.
+            uses_responses = self.modelo.startswith("gpt-6.1-sol")
+            if uses_responses:
+                request.update(
+                    input=messages,
+                    tools=[{"type": tool["type"], **tool["function"]} for tool in tools],
+                    reasoning={"effort": model_kwargs["reasoning_effort"]},
+                    store=False,
+                )
+                response = client.responses.create(model=self.modelo, **request)
+            else:
+                request.update(messages=messages, tools=tools, **model_kwargs)
+                response = client.chat.completions.create(model=self.modelo, **request)
+
+            usage = response.usage
             seguimiento_service.registrar_uso_llm(
-                client_id,
-                canal,
-                getattr(completion, "usage", None),
-                origen="agente",
-                modelo=self.modelo,
+                client_id, canal, usage, origen="agente", modelo=self.modelo,
             )
-            choice = completion.choices[0]
-            calls = choice.message.tool_calls or []
-            if choice.finish_reason != "tool_calls" or len(calls) != 1:
+            if uses_responses:
+                complete = response.status == "completed"
+                calls = [item for item in response.output if item.type == "function_call"]
+            else:
+                choice = response.choices[0]
+                complete = choice.finish_reason == "tool_calls"
+                calls = [call.function for call in (choice.message.tool_calls or [])]
+            if not complete or len(calls) != 1:
                 raise ValueError("Se esperaba exactamente una llamada completa a herramienta")
             call = calls[0]
-            arguments = json.loads(call.function.arguments)
-            data = tool_decision(call.function.name, arguments, tools, self.role)
+            arguments = json.loads(call.arguments)
+            data = tool_decision(call.name, arguments, tools, self.role)
             decision = self._validated_decision(data, text)
             _record_model_trace(
                 client_id=client_id, canal=canal, agent=self.role, model=self.modelo,
-                request={"messages": messages, "tools": tools, "tool_choice": "required", "parallel_tool_calls": False},
-                response={"tool": call.function.name, "arguments": arguments, "decision": data}, usage=getattr(completion, "usage", None),
+                request=request, response={"tool": call.name, "arguments": arguments, "decision": data},
+                usage=usage,
                 duration_ms=ToolCallLogger._duration_ms(started),
             )
             self._log_decision(client_id, canal, input_data, decision, started, "success")
@@ -236,7 +248,7 @@ class _DecisionAgent:
             decision.source = "fallback_after_error"
             _record_model_trace(
                 client_id=client_id, canal=canal, agent=self.role, model=self.modelo,
-                request={"turn": turn_data}, status="error", error=exc,
+                request=request or {"turn": turn_data}, usage=usage, status="error", error=exc,
                 duration_ms=ToolCallLogger._duration_ms(started),
             )
             if client_id and canal:

@@ -116,9 +116,9 @@ class ConversationToolLoggingTests(unittest.TestCase):
             "src.application.unified_agent.settings.OPENAI_API_KEY",
             "test-key",
         ), patch(
-            "src.application.unified_agent.client.chat.completions.create",
+            "src.application.unified_agent.client.responses.create",
             side_effect=RuntimeError("openai failed"),
-        ):
+        ), patch.object(SupervisorAgent, "modelo", "gpt-6.1-sol"):
             decision = SupervisorAgent().decide(
                 "Hola, quiero información",
                 ConversationState(),

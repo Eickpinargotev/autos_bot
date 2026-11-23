@@ -2,8 +2,39 @@
 
 import pytest
 
-from src.services import instrucciones
+from src.services import clientes_whatsapp, instrucciones
 from tests.conftest import token_csrf
+
+
+def test_admin_descarga_prompts_vigentes_del_proyecto(sesion_admin):
+    otro = clientes_whatsapp.crear("Otro proyecto")
+    instrucciones.guardar(otro["id"], "Configuración del otro proyecto.", "admin", "supervisor")
+    anterior = instrucciones.activa(1, "supervisor")
+    vigente = instrucciones.guardar(1, "Atienda consultas sobre matrícula.\nUse «usted».", "admin", "supervisor")
+    url = "/admin/negocios/1/prompts.json"
+
+    assert f'href="{url}" download' in sesion_admin.get("/admin/negocios/1").text
+    assert sesion_admin.get("/admin/negocios/9999/prompts.json").status_code == 404
+
+    respuesta = sesion_admin.get(url)
+    assert respuesta.status_code == 200
+    assert respuesta.headers["content-disposition"] == 'attachment; filename="proyecto-1-prompts.json"'
+    assert respuesta.headers["cache-control"] == "no-store"
+    datos = respuesta.json()
+    assert datos["proyecto"]["id"] == 1
+    assert set(datos["prompts"]) == set(instrucciones.TIPOS_EDITABLES)
+    assert datos["prompts"]["supervisor"] == {
+        "agente": "supervisor_agent",
+        "version": vigente["version"],
+        "actualizado_en": vigente["creado_en"].isoformat(),
+        "contenido": vigente["contenido"],
+    }
+    assert anterior["contenido"] not in respuesta.text
+    assert "Configuración del otro proyecto." not in respuesta.text
+
+
+def test_negocio_no_puede_usar_descarga_administrativa(sesion_cliente):
+    assert sesion_cliente.get("/admin/negocios/1/prompts.json").status_code == 403
 
 
 def test_un_proyecto_nace_con_todos_los_playbooks_y_una_hora():

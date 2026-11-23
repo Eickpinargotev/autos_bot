@@ -117,9 +117,9 @@ def registrar_uso_llm(
             return
         # Solo enteros de verdad: un mock u objeto raro (p. ej. MagicMock, cuyo
         # int() devuelve 1) no debe contaminar los contadores.
-        prompt = _entero_estricto(getattr(usage, "prompt_tokens", 0))
-        completion = _entero_estricto(getattr(usage, "completion_tokens", 0))
-        detalles = getattr(usage, "prompt_tokens_details", None)
+        prompt = _entero_estricto(getattr(usage, "prompt_tokens", getattr(usage, "input_tokens", 0)))
+        completion = _entero_estricto(getattr(usage, "completion_tokens", getattr(usage, "output_tokens", 0)))
+        detalles = getattr(usage, "prompt_tokens_details", getattr(usage, "input_tokens_details", None))
         cached = _entero_estricto(getattr(detalles, "cached_tokens", 0))
         if not prompt and not completion:
             return
