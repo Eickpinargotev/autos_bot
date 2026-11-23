@@ -11,8 +11,8 @@ solo llega a ellas entrando a la cuenta del negocio, con la suplantación audita
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from src.services import conversation_audit
 from src.core import security
@@ -216,6 +216,43 @@ def instrucciones_del_agente(request: Request, usuario=Depends(security.requiere
         config_recordatorios=config_recordatorios,
         limite=instrucciones.LIMITE,
     )
+
+
+@router.get("/agente/prompts.json")
+def descargar_prompts(usuario=Depends(security.requiere_negocio)):
+    proyecto = _proyecto_del_usuario(usuario)
+    return Response(
+        instrucciones.exportar(proyecto),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="proyecto-{proyecto["id"]}-prompts.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/agente/prompts/importar")
+def importar_prompts(
+    request: Request,
+    archivo: UploadFile = File(...),
+    csrf: str = Form(""),
+    usuario=Depends(security.requiere_negocio),
+):
+    security.verificar_csrf(request, csrf)
+    proyecto = _proyecto_del_usuario(usuario)
+    try:
+        cambios = instrucciones.importar(
+            proyecto["id"], archivo.file.read(instrucciones.LIMITE_ARCHIVO + 1), usuario["usuario"],
+        )
+    except ValueError as exc:
+        return RedirectResponse(f"/agente/instrucciones?error={quote(str(exc))}", status_code=303)
+    if cambios == 1:
+        aviso = "Se activó una nueva versión de un prompt."
+    elif cambios:
+        aviso = f"Se activaron nuevas versiones de {cambios} prompts."
+    else:
+        aviso = "Los prompts vigentes ya coinciden con el archivo."
+    return RedirectResponse(f"/agente/instrucciones?aviso={quote(aviso)}", status_code=303)
 
 
 @router.get("/agente/prompts/{tipo}/historial")

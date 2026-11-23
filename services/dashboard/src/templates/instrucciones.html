@@ -4,11 +4,34 @@
 {% block contenido %}
 <section class="cabecera-prompts">
   <div class="acento-prompts" aria-hidden="true"></div>
-  <div>
-    <h1>Ajustar agentes IA</h1>
-    <p class="sub">Configura y ajusta el comportamiento de cada agente de forma independiente.</p>
+  <div class="titulo-con-acciones titulo-prompts">
+    <div>
+      <h1>Ajustar agentes IA</h1>
+      <p class="sub">Configura y ajusta el comportamiento de cada agente de forma independiente.</p>
+    </div>
+    <div class="acciones-cabecera">
+      <a class="boton mini" href="/agente/prompts.json" download>Descargar prompts</a>
+      <button type="button" class="mini" data-abre="importar-prompts">Cargar prompts</button>
+    </div>
   </div>
 </section>
+
+<dialog class="flotante" id="importar-prompts">
+  <div class="cabecera">
+    <h2>Cargar prompts</h2>
+    <button class="cerrar" type="button" data-cierra aria-label="Cerrar">×</button>
+  </div>
+  <form class="cuerpo" method="post" enctype="multipart/form-data" action="/agente/prompts/importar">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p>Selecciona un JSON descargado de este proyecto. Los textos que cambien se activarán como nuevas versiones y podrás restaurar las anteriores desde Historial.</p>
+    <label for="archivo-prompts">Archivo JSON</label>
+    <input id="archivo-prompts" type="file" name="archivo" accept=".json,application/json" required>
+    <footer class="pie-dialogo-prompt">
+      <button type="button" class="mini" data-cierra>Cancelar</button>
+      <button type="submit" class="primario">Importar y activar</button>
+    </footer>
+  </form>
+</dialog>
 
 <section class="panel panel-prompts">
   <div class="rejilla-agentes">

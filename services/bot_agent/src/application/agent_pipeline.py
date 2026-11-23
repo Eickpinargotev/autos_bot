@@ -32,7 +32,7 @@ from src.application.fragment_catalog import (
     get_fragment,
     resolve_variant,
 )
-from src.application.rag_service import RagService
+from src.application.rag_service import RagAnswer, RagService
 from src.application.unified_agent import (
     RAG_TOKEN,
     SAFE_CLARIFY_MESSAGE,
@@ -73,6 +73,7 @@ class _ExpandedTurn:
     fragment_report: str = ""
     rag_missed: bool = False
     rag_processed: bool = False
+    rag_mismatch: bool = False
 
 
 class AgentGraphState(TypedDict, total=False):
@@ -98,6 +99,7 @@ class AgentPipeline:
         "Por ahora no tengo esa información disponible. "
         "Si gusta, puedo contactar a un asesor especializado para que le ayude con esa duda."
     )
+    RAG_CLARIFY_MESSAGE = "¿Con qué parte necesita ayuda ahora?"
     LOOP_REPORT = (
         "Anti-bucle: el agente iba a repetir la misma respuesta que ya envió; "
         "se deriva para atención manual."
@@ -288,7 +290,10 @@ class AgentPipeline:
         # Anti-bucle determinista: si el turno reproduce exactamente lo que el
         # bot ya dijo en un turno reciente, no lo repetimos una tercera vez;
         # lo atiende una persona.
-        if decision.action == "reply" and self._is_repeating(turn.history_messages, state["stored"]):
+        if (
+            decision.action == "reply" and not turn.rag_mismatch
+            and self._is_repeating(turn.history_messages, state["stored"])
+        ):
             decision = AgentDecision(action="handoff", messages=[], report=self.LOOP_REPORT)
             turn = _ExpandedTurn(
                 replies=[self.HANDOFF_DEFAULT_MESSAGE],
@@ -447,6 +452,15 @@ class AgentPipeline:
             current_message=current_message,
             search_queries=decision.rag_queries,
         )
+        matches = getattr(answer, "query_matches_message", True)
+        if matches is False:
+            reply = self.CLOSE_DEFAULT_MESSAGE if decision.action == "close" else self.RAG_CLARIFY_MESSAGE
+            turn.replies = [reply]
+            turn.history_messages = [reply]
+            turn.fragment_report = ""
+            turn.rag_missed = True
+            turn.rag_mismatch = True
+            return
         if answer.has_answer:
             turn.replies.append(answer.answer)
             turn.history_messages.append(answer.answer)
@@ -460,7 +474,9 @@ class AgentPipeline:
             # parte de lo que pidió el cliente, aunque sí recibió datos útiles.
             turn.rag_missed = bool(pendientes)
             return
-        self._create_unanswered_question(user_id, channel_value, question, current_message)
+        if matches is not None:
+            for pendiente in normalizar_consultas(getattr(answer, "unanswered_queries", [])) or [question]:
+                self._create_unanswered_question(user_id, channel_value, pendiente, current_message)
         turn.replies.append(self.RAG_FALLBACK_MESSAGE)
         turn.history_messages.append(self.RAG_FALLBACK_MESSAGE)
         turn.rag_missed = True
@@ -497,6 +513,9 @@ class AgentPipeline:
                 "search_queries": consultas,
             },
             output_mapper=lambda answer: {
+                "query_matches_message": (
+                    answer.query_matches_message if isinstance(answer, RagAnswer) else True
+                ),
                 "has_answer": bool(answer.has_answer),
                 "answer": answer.answer,
                 "sources": answer.sources,
@@ -552,7 +571,11 @@ class AgentPipeline:
         # El reporte del fragmento recién enviado manda; si no hubo, se
         # conserva el que ya estaba pendiente (una duda lateral no lo borra).
         pending_report = turn.fragment_report or stored.pending_report
-        pending = decision.pending if not turn.rag_missed else (decision.pending or stored.last_question)
+        pending = decision.pending
+        if turn.rag_mismatch:
+            pending = ""
+        elif turn.rag_missed:
+            pending = pending or stored.last_question
 
         user_name = state.get("user_name") or "Desconocido"
         new_state = ConversationState(

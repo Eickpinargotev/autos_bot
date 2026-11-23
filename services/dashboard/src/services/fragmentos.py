@@ -366,22 +366,25 @@ def reactivar_categoria(proyecto_id: int, categoria_id: int) -> None:
             raise
 
 
-def validar_referencias_prompt(proyecto_id: int, tipo: str, contenido: str) -> None:
+def validar_referencias_prompt(proyecto_id: int, tipo: str, contenido: str, *, cursor=None) -> None:
     agente = str(tipo or "").upper()
     if agente not in AGENTES:
         return
     referencias = list(dict.fromkeys(_FRAG_RE.findall(str(contenido or ""))))
     if not referencias:
         return
-    filas = pool.consultar(
-        """
+    sql = """
         SELECT c.codigo || '.' || f.codigo AS fragment_id, c.activa, f.activo
         FROM agente_fragmentos f
         JOIN fragmento_categorias c ON c.id = f.categoria_id AND c.proyecto_id = f.proyecto_id
         WHERE f.proyecto_id = %s AND (c.codigo || '.' || f.codigo) = ANY(%s)
-        """,
-        (int(proyecto_id), referencias),
-    )
+        """
+    params = (int(proyecto_id), referencias)
+    if cursor is None:
+        filas = pool.consultar(sql, params)
+    else:
+        cursor.execute(sql, params)
+        filas = cursor.fetchall()
     por_id = {fila["fragment_id"]: fila for fila in filas}
     errores = []
     for ref in referencias:

@@ -41,6 +41,12 @@ Reglas:
   los solicite explícitamente.
 - Mantén el trato de usted."""
 
+RAG_CONTRATO = """Devuelve JSON estricto. Aplica estas reglas antes de las instrucciones comerciales.
+- Si hay mensaje actual, comprueba si la consulta que formuló el agente corresponde a una duda informativa de ese mensaje. Usa el historial para resolver referencias; una duda antigua solo cuenta si el cliente vuelve a plantearla o la retoma de forma implícita.
+- Si la consulta no corresponde al mensaje actual, o el mensaje solo saluda, agradece o informa el estado de un trámite, devuelve query_matches_message=false, has_answer=false, answer="" y unanswered_queries=[].
+- Cuando hay varias dudas, evalúa por separado cuáles siguen vigentes. Responde las que tengan respaldo y lista en unanswered_queries únicamente las dudas vigentes que quedaron sin respaldo.
+- has_answer=true exige que answer incluya una respuesta de fondo a por lo menos una duda informativa y que la base de conocimiento respalde esa respuesta. Un saludo, una despedida o una pregunta aclaratoria no cuentan. Si ninguna duda tiene respaldo, devuelve has_answer=false y answer=""."""
+
 
 # Structured Outputs (json_schema estricto): OpenAI garantiza la forma exacta
 # de la salida. La validación semántica (respuesta vacía = sin respaldo) sigue
@@ -54,12 +60,13 @@ ANSWER_RESPONSE_FORMAT = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
+                "query_matches_message": {"type": "boolean"},
                 "has_answer": {"type": "boolean"},
                 "answer": {"type": "string"},
                 "unanswered_queries": {"type": "array", "maxItems": MAX_CONSULTAS_RAG,
                                        "items": {"type": "string", "maxLength": MAX_LARGO_CONSULTA}},
             },
-            "required": ["has_answer", "answer", "unanswered_queries"],
+            "required": ["query_matches_message", "has_answer", "answer", "unanswered_queries"],
         },
     },
 }
@@ -71,6 +78,7 @@ class RagAnswer:
     answer: str = ""
     sources: list[dict[str, Any]] = field(default_factory=list)
     unanswered_queries: list[str] = field(default_factory=list)
+    query_matches_message: bool | None = True
 
 
 @dataclass
@@ -126,7 +134,7 @@ class RagService:
         search_queries: list[str] | None = None,
     ) -> RagAnswer:
         if not self.client or not self.openai:
-            return RagAnswer(has_answer=False)
+            return RagAnswer(has_answer=False, query_matches_message=None)
 
         if client_id and canal:
             ToolCallLogger.record(
@@ -165,7 +173,9 @@ class RagService:
                     else:
                         previo["retrieval_queries"] = origenes
         chunks = list(encontrados.values())
-        if not chunks:
+        # En conversaciones, incluso sin resultados verificamos si corresponde
+        # registrar una pregunta sobre el mensaje actual.
+        if not chunks and not current_message.strip():
             return RagAnswer(has_answer=False)
 
         pregunta_generacion = question
@@ -180,7 +190,7 @@ class RagService:
             current_message=current_message,
         )
         messages = [
-            {"role": "system", "content": "Devuelve JSON estricto. Responde solo con información respaldada por el contexto."},
+            {"role": "system", "content": RAG_CONTRATO},
             {"role": "user", "content": prompt},
         ]
         model_recorded = False
@@ -207,24 +217,15 @@ class RagService:
                 duration_ms=ToolCallLogger._duration_ms(started),
             )
             model_recorded = True
-            has_answer = bool(data.get("has_answer"))
+            matches = not current_message.strip() or data.get("query_matches_message") is not False
             answer = str(data.get("answer") or "").strip()
-            if not has_answer or not answer:
-                self._log_answer_generation(
-                    client_id,
-                    canal,
-                    question,
-                    context,
-                    chunks,
-                    {"has_answer": False},
-                    started,
-                )
-                return RagAnswer(has_answer=False)
+            has_answer = matches and bool(chunks and answer and data.get("has_answer"))
             result = RagAnswer(
-                has_answer=True,
-                answer=answer,
-                sources=self._source_summaries(chunks),
-                unanswered_queries=normalizar_consultas(data.get("unanswered_queries")),
+                has_answer=has_answer,
+                answer=answer if has_answer else "",
+                sources=self._source_summaries(chunks) if has_answer else [],
+                unanswered_queries=normalizar_consultas(data.get("unanswered_queries")) if matches else [],
+                query_matches_message=matches,
             )
             self._log_answer_generation(
                 client_id,
@@ -257,7 +258,7 @@ class RagService:
                     error=e,
                 )
             print(f"Error generando respuesta RAG: {e}")
-            return RagAnswer(has_answer=False)
+            return RagAnswer(has_answer=False, query_matches_message=None)
 
     def sync_if_needed(self):
         proyecto_id = proyecto_actual()
@@ -557,8 +558,10 @@ Consulta informativa formulada para buscar la respuesta:
 
 Devuelve JSON estricto:
 {{
+  "query_matches_message": true|false,
   "has_answer": true|false,
-  "answer": "el mensaje que se enviará literal al cliente"
+  "answer": "el mensaje que se enviará literal al cliente",
+  "unanswered_queries": []
 }}
 """
 
@@ -596,22 +599,11 @@ Devuelve JSON estricto:
         question: str,
         context: str,
         chunks: list[dict[str, Any]],
-        result: RagAnswer | dict[str, Any],
+        result: RagAnswer,
         started: float,
     ):
         if not client_id or not canal:
             return
-        if isinstance(result, RagAnswer):
-            output_data = {
-                "has_answer": result.has_answer,
-                "answer": result.answer,
-                "sources": result.sources,
-                "unanswered_queries": result.unanswered_queries,
-            }
-            has_answer = result.has_answer
-        else:
-            output_data = result
-            has_answer = bool(result.get("has_answer"))
         ToolCallLogger.success(
             client_id=client_id,
             canal=canal,
@@ -622,7 +614,13 @@ Devuelve JSON estricto:
                 "chunk_count": len(chunks),
                 "sources": self._source_summaries(chunks),
             },
-            output_data=output_data,
-            text=f"RAG generó respuesta: {has_answer}",
+            output_data={
+                "query_matches_message": result.query_matches_message,
+                "has_answer": result.has_answer,
+                "answer": result.answer,
+                "sources": result.sources,
+                "unanswered_queries": result.unanswered_queries,
+            },
+            text=f"RAG generó respuesta: {result.has_answer}",
             duration_ms=ToolCallLogger._duration_ms(started),
         )

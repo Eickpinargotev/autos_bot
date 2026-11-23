@@ -843,6 +843,7 @@ form.linea button { flex: 0 0 auto; }
 .reporte-creado a { color: inherit; font-weight: 600; }
 .compositor-chat textarea { width: 100%; min-height: 58px; max-height: 150px; resize: vertical; }
 .cabecera-prompts { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; }
+.cabecera-prompts .titulo-prompts { flex: 1; margin-bottom: 0; }
 .cabecera-prompts h1 { margin: 0 0 6px; }
 .cabecera-prompts p { margin: 0; }
 .acento-prompts { width: 5px; height: 66px; flex: 0 0 5px; border-radius: 999px; background: var(--alerta); }

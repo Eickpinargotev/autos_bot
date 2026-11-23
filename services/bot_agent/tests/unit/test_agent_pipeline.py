@@ -17,6 +17,7 @@ os.environ.setdefault("OPENAI_API_KEY", "")
 
 from src.application.agent_pipeline import AgentPipeline
 from src.application.fragment_catalog import get_fragment
+from src.application.rag_service import RagAnswer
 from src.application.unified_agent import (
     SAFE_CLARIFY_MESSAGE,
     AgentDecision,
@@ -390,6 +391,26 @@ class ReminderSignalTests(unittest.TestCase):
 
 
 class AgentRagTests(unittest.TestCase):
+    def test_consulta_de_otro_turno_no_registra_pregunta_ni_activa_recordatorio(self):
+        decision = AgentDecision(
+            action="reply", messages=["[[rag]]", "[[frag:GENERAL.G3]]"],
+            rag_query="¿Cómo pago el entero?", pending="Confirmar el pago",
+        )
+        stored = ConversationState(
+            active_agent="CURSO_TEORICO", last_question="¿Necesita pagar el entero?",
+            conversation_history=[{"bot": [AgentPipeline.RAG_CLARIFY_MESSAGE]}],
+        )
+        with PipelineHarness(stored, specialist=decision, rag_answer=RagAnswer(
+            has_answer=False, query_matches_message=False,
+        )) as h:
+            result = h.run("Ya tengo la cita y quería el manual para repasar.")
+
+        self.assertEqual(result.replies, [AgentPipeline.RAG_CLARIFY_MESSAGE])
+        self.assertIsNone(result.reminder)
+        self.assertEqual(h.saved_state.last_question, "")
+        h.unanswered_mock.assert_not_called()
+        h.report_mock.assert_not_called()
+
     def test_rag_hit_replaces_token_and_keeps_retake(self):
         decision = AgentDecision(
             action="reply",

@@ -205,6 +205,30 @@ def test_busquedas_sin_resultados_no_inventan_respuesta_ni_llaman_modelo(terra):
     service.openai.chat.completions.create.assert_not_called()
 
 
+@pytest.mark.parametrize("encontrados", [[], [{"text": "Hay un código para moto y otro para carro.", "score": 0.68}]])
+def test_rag_rechaza_consulta_anterior_aunque_haya_resultados(terra, encontrados):
+    service = RagService.__new__(RagService)
+    service.client = object()
+    service.openai = MagicMock()
+    service.sync_if_needed = MagicMock()
+    service.search = MagicMock(return_value=encontrados)
+    service.openai.chat.completions.create.return_value = _completion({
+        "query_matches_message": False, "has_answer": True,
+        "answer": "Gracias por escribir.", "unanswered_queries": ["Código del entero"],
+    })
+    result = service.answer_question(
+        "¿Qué código se usa para pagar el entero?",
+        current_message="Ya tengo cita en San Ramón. ¿Me pasó el manual para estudiar?",
+    )
+    assert result.query_matches_message is False
+    assert not result.has_answer
+    assert result.answer == ""
+    assert result.unanswered_queries == []
+    llamada = service.openai.chat.completions.create.call_args.kwargs
+    assert "una duda antigua" in llamada["messages"][0]["content"]
+    assert "¿Me pasó el manual para estudiar?" in llamada["messages"][1]["content"]
+
+
 def test_limites_de_consultas_estructuradas_y_compatibilidad():
     from src.core.consultas_rag import normalizar_consultas
     assert normalizar_consultas(["  Uno  ", "UNO", None, 42, "Dos", "Tres", "Cuatro"]) == ["Uno", "Dos", "Tres"]

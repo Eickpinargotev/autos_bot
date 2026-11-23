@@ -1,5 +1,7 @@
 """Versionado de playbooks por agente y configuración del recordatorio."""
 
+import json
+
 import pytest
 
 from src.services import clientes_whatsapp, instrucciones
@@ -35,6 +37,42 @@ def test_admin_descarga_prompts_vigentes_del_proyecto(sesion_admin):
 
 def test_negocio_no_puede_usar_descarga_administrativa(sesion_cliente):
     assert sesion_cliente.get("/admin/negocios/1/prompts.json").status_code == 403
+
+
+def test_importar_prompts_del_proyecto_es_atomico_y_conserva_historial(sesion_cliente):
+    html = sesion_cliente.get("/agente/instrucciones").text
+    assert "Descargar prompts" in html and "Cargar prompts" in html
+    csrf = token_csrf(sesion_cliente)
+    copia = sesion_cliente.get("/agente/prompts.json")
+    assert copia.status_code == 200
+    assert copia.headers["content-disposition"] == 'attachment; filename="proyecto-1-prompts.json"'
+    datos = copia.json()
+    curso = instrucciones.activa(1, "curso_teorico")
+    rag = instrucciones.activa(1, "rag")
+    datos["prompts"]["curso_teorico"]["contenido"] = "Atienda la duda del mensaje actual."
+    datos["prompts"]["rag"]["contenido"] = "Confirme lo que el cliente pregunta."
+
+    def subir(token=csrf):
+        return sesion_cliente.post(
+            "/agente/prompts/importar", data={"csrf": token},
+            files={"archivo": ("prompts.json", json.dumps(datos), "application/json")},
+        )
+
+    assert subir("invalido").status_code == 403
+    datos["proyecto"]["id"] = 2
+    assert "pertenece a otro proyecto" in subir().text
+    datos["proyecto"]["id"] = 1
+    datos["prompts"]["supervisor"]["contenido"] = "Use [[frag:GENERAL.NO_EXISTE]]."
+    assert "no existe" in subir().text
+    assert instrucciones.activa(1, "curso_teorico")["version"] == curso["version"]
+    assert instrucciones.activa(1, "rag")["version"] == rag["version"]
+
+    del datos["prompts"]["supervisor"]
+    assert "nuevas versiones de 2 prompts" in subir().text
+    assert instrucciones.activa(1, "curso_teorico")["version"] == curso["version"] + 1
+    assert instrucciones.activa(1, "rag")["contenido"] == datos["prompts"]["rag"]["contenido"]
+    assert instrucciones.historial(1, "curso_teorico")[1]["contenido"] == curso["contenido"]
+    assert "ya coinciden" in subir().text
 
 
 def test_un_proyecto_nace_con_todos_los_playbooks_y_una_hora():

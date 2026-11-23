@@ -1,5 +1,6 @@
 """Capas comerciales editables y configuración de recordatorios por proyecto."""
 
+import json
 from typing import Any
 
 import psycopg2.extras
@@ -7,6 +8,7 @@ import psycopg2.extras
 from src.db import pool
 
 LIMITE = 20000
+LIMITE_ARCHIVO = 2 * 1024 * 1024
 TIPOS_EDITABLES = (
     "supervisor",
     "general",
@@ -159,10 +161,52 @@ def activas_para_panel(proyecto_id: int) -> dict[str, dict[str, Any]]:
     }
 
 
-def guardar(
-    proyecto_id: int, contenido: str, usuario: str, tipo: str = "principal"
-) -> dict[str, Any]:
-    tipo = _tipo_valido(tipo)
+def exportar(proyecto: dict) -> str:
+    activas = activas_para_panel(proyecto["id"])
+    return json.dumps({
+        "proyecto": {"id": proyecto["id"], "nombre": proyecto["nombre"]},
+        "prompts": {
+            tipo: {
+                "agente": METADATOS[tipo]["codigo"],
+                "version": fila["version"] or None,
+                "actualizado_en": fila["creado_en"].isoformat() if fila.get("creado_en") else None,
+                "contenido": fila["contenido"] if fila["version"] else None,
+            }
+            for tipo, fila in activas.items()
+        },
+    }, ensure_ascii=False, indent=2)
+
+
+def importar(proyecto_id: int, archivo: bytes, usuario: str) -> int:
+    if len(archivo) > LIMITE_ARCHIVO:
+        raise ValueError("El archivo supera el límite de 2 MB.")
+    try:
+        datos = json.loads(archivo.decode("utf-8-sig"))
+    except (ValueError, RecursionError) as exc:
+        raise ValueError("El archivo debe ser un JSON válido en UTF-8.") from exc
+    if not isinstance(datos, dict) or not isinstance(datos.get("proyecto"), dict):
+        raise ValueError("Selecciona un archivo descargado desde Prompts.")
+    origen = datos["proyecto"].get("id")
+    if type(origen) is not int or origen != proyecto_id:
+        raise ValueError("El archivo pertenece a otro proyecto.")
+    prompts = datos.get("prompts")
+    if not isinstance(prompts, dict) or not prompts:
+        raise ValueError("El archivo debe incluir al menos un prompt.")
+    contenidos = {}
+    for tipo, fila in prompts.items():
+        if tipo not in TIPOS_EDITABLES or not isinstance(fila, dict) or "contenido" not in fila:
+            raise ValueError("El archivo contiene un prompt con formato o tipo desconocido.")
+        contenido = fila["contenido"]
+        if contenido is None and fila.get("version") is None:
+            continue
+        if not isinstance(contenido, str):
+            raise ValueError(f"El contenido de {METADATOS[tipo]['nombre']} debe ser texto.")
+        contenidos[tipo] = _normalizar(contenido, tipo)
+    guardados = _guardar_versiones(proyecto_id, contenidos, usuario)
+    return sum(not fila.get("sin_cambios") for fila in guardados.values())
+
+
+def _normalizar(contenido: str, tipo: str) -> str:
     contenido = str(contenido or "").strip()
     # Las primeras versiones del recordatorio incluían por delante el contrato
     # JSON hoy protegido. Un rollback histórico recupera solo el playbook, no
@@ -173,24 +217,49 @@ def guardar(
         raise ValueError("El prompt no puede estar vacío.")
     if len(contenido) > LIMITE:
         raise ValueError(f"El prompt no puede superar {LIMITE} caracteres.")
-    # Una etiqueta inválida terminaría descartada por el guardrail del bot y el
-    # cliente recibiría una respuesta vacía. Se detecta mientras se edita.
+    if "\0" in contenido:
+        raise ValueError("El prompt contiene un carácter nulo.")
+    try:
+        contenido.encode("utf-8")
+    except UnicodeError as exc:
+        raise ValueError("El prompt contiene caracteres Unicode inválidos.") from exc
+    return contenido
+
+
+def guardar(
+    proyecto_id: int, contenido: str, usuario: str, tipo: str = "principal"
+) -> dict[str, Any]:
+    tipo = _tipo_valido(tipo)
+    return _guardar_versiones(proyecto_id, {tipo: _normalizar(contenido, tipo)}, usuario)[tipo]
+
+
+def _guardar_versiones(
+    proyecto_id: int, contenidos: dict[str, str], usuario: str,
+) -> dict[str, dict[str, Any]]:
     from src.services import fragmentos
 
-    fragmentos.validar_referencias_prompt(proyecto_id, tipo, contenido)
-    actual = activa(proyecto_id, tipo)
-    if actual.get("version") and str(actual.get("contenido") or "").strip() == contenido:
-        return {**actual, "sin_cambios": True}
-    # El índice parcial exige que apagar la anterior e insertar la nueva sean
-    # una transacción. El candado evita que dos guardados simultáneos calculen
-    # la misma versión.
+    guardados = {}
+    if not contenidos:
+        return guardados
+    orden = sorted(TIPOS)
+    # Un lote toma los mismos candados que el editor, siempre en el mismo orden.
     with pool.conexion(autocommit=False) as conn:
-        try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            for tipo in sorted(contenidos):
                 cur.execute(
                     "SELECT pg_advisory_xact_lock(%s, %s)",
-                    (int(proyecto_id), sorted(TIPOS).index(tipo) + 1),
+                    (int(proyecto_id), orden.index(tipo) + 1),
                 )
+                contenido = contenidos[tipo]
+                cur.execute(
+                    "SELECT * FROM proyecto_instrucciones WHERE proyecto_id = %s AND tipo = %s AND activa",
+                    (int(proyecto_id), tipo),
+                )
+                actual = cur.fetchone()
+                if actual and actual["contenido"].strip() == contenido:
+                    guardados[tipo] = {**actual, "sin_cambios": True}
+                    continue
+                fragmentos.validar_referencias_prompt(proyecto_id, tipo, contenido, cursor=cur)
                 cur.execute(
                     "UPDATE proyecto_instrucciones SET activa = FALSE "
                     "WHERE proyecto_id = %s AND tipo = %s AND activa",
@@ -211,12 +280,8 @@ def guardar(
                         str(usuario)[:120],
                     ),
                 )
-                fila = dict(cur.fetchone())
-            conn.commit()
-            return fila
-        except Exception:
-            conn.rollback()
-            raise
+                guardados[tipo] = dict(cur.fetchone())
+    return guardados
 
 
 def activar(
